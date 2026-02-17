@@ -1,0 +1,96 @@
+:root {
+    font-family: 'Figtree', sans-serif;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 400;
+
+    color: #B3B3B3;
+    background-color: #000;
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+
+    /* Prevent text selection */
+    user-select: none;
+    -webkit-user-select: none;
+
+    /* Disable the context menu on mobile/touch */
+    -webkit-touch-callout: none;
+
+    /*change cursor to custom icon*/
+    cursor: url("/cursors/cursor32x32.png") 7 7, auto;
+}
+
+/*Prevent scrolling on trackpads*/
+html,
+body {
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+/* Re-enable selection for inputs and specifically marked content */
+input,
+textarea,
+[contenteditable="true"],
+.selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: auto;
+}
+
+/* Text selection cursor (I-beam) */
+input,
+textarea,
+[contenteditable="true"],
+.selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: url("/cursors/cursor32x32.png") 7 7, text;
+}
+
+/* Pointer cursor (for links, buttons) */
+a,
+button,
+[role="button"] {
+    cursor: url("/cursors/cursor32x32.png") 7 7, pointer;
+}
+
+/* Grab cursor (for draggable elements) */
+.draggable {
+    cursor: url("/cursors/cursor32x32.png") 7 7, grab;
+}
+
+.draggable:active {
+    cursor: url("/cursors/cursor32x32.png") 7 7, grabbing;
+}
+
+/* Resize cursors */
+.resize-horizontal {
+    cursor: url("/cursors/cursor32x32.png") 7 7, ew-resize;
+}
+
+.resize-vertical {
+    cursor: url("/cursors/cursor32x32.png") 7 7, ns-resize;
+}
+
+.container {
+    margin: 0;
+    padding-top: 10vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+}
+
+a {
+    font-weight: 500;
+    color: #646cff;
+    text-decoration: inherit;
+}
+
+a:hover {
+    color: #535bf2;
+}
