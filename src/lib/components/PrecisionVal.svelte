@@ -20,6 +20,8 @@
         decimalPlaces?: number;
     } = $props();
 
+    const defaultValue = value; // capture default automatically
+
     let isEditing = $state(false);
     let isDragging = $state(false);
     let hasDragged = $state(false);
@@ -29,9 +31,7 @@
 
     function selectValueOnly() {
         inputElement?.focus();
-        const end = unit
-            ? editValue.length - unit.length
-            : editValue.length;
+        const end = unit ? editValue.length - unit.length : editValue.length;
         inputElement?.setSelectionRange(0, Math.max(0, end));
     }
 
@@ -122,18 +122,35 @@
         } else if (e.key === "ArrowDown") {
             e.preventDefault();
             value = clamp(value - keyboardStep);
+        } else if (e.key === "Backspace") {
+            e.preventDefault();
+            value = defaultValue;
         }
     }
 
     let displayValue = $derived(formatValue(value));
 
+    let isHovered = $state(false); // track whether component is hovered
+
+    function handleWindowKeydown(e: KeyboardEvent) {
+        if (isHovered && !isEditing && e.key === "Backspace") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            (document.activeElement as HTMLElement)?.blur();
+            value = defaultValue;
+        }
+    }
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <div
     class="value-input"
     class:editing={isEditing}
     role="textbox"
     tabindex="0"
+    onpointerleave={() => (isHovered = false)}
+    onpointerenter={() => (isHovered = true)}
     onpointerdown={handlePointerDown}
     onpointermove={handlePointerMove}
     onpointerup={handlePointerUp}
@@ -169,9 +186,9 @@
         background: transparent;
         color: #e6e6e6;
 
-        font-family: 'Figtree', sans-serif;
+        font-family: "Figtree", sans-serif;
         font-weight: 600;
-        
+
         transition: background 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
 
