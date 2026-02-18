@@ -1,9 +1,165 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import TitleBar from "$lib/components/TitleBar.svelte";
+    import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
+
+    let exposure = $state(0);
+    let contrast = $state(0);
+    let clarity = $state(0);
+    let temperature = $state(5600);
+    let tint = $state(0);
+    let saturation = $state(0);
+    let vibrance = $state(0);
+
+
 </script>
 
-
 <TitleBar></TitleBar>
+<div class="container">
+    <div class="toolbar"></div>
+    <div class="image-panel"></div>
+    <div class="side-section">
+        <div class="side-panel">
+            <div class="slider-section">
+                <span class="slider-section-title">Light</span>
+                <SingleValSliderGroup 
+                    bind:value={exposure}
+                    name="Exposure"
+                    unit="EV"
+                    min={-10}
+                    max={10}
+                    sliderStep={0.1}
+                    keyboardStep={0.01}
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={contrast}
+                    name="Contrast"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={clarity}
+                    name="Clarity"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    ></SingleValSliderGroup>
+            </div>
+            <div class="slider-section">
+                <span class="slider-section-title">Colour</span>
+                <SingleValSliderGroup 
+                    bind:value={temperature}
+                    name="Temperature"
+                    unit="K"
+                    min={1200}
+                    max={10000}
+                    decimalPlaces={0}
+                    sliderStep={100}
+                    keyboardStep={10}
+                    gradientStartColor= "#FD8B00"
+                    gradientEndColor= "#3EAFFF"
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={tint}
+                    name="Tint"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    gradientStartColor= "#64FF76"
+                    gradientEndColor= "#FF66F7"
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={saturation}
+                    name="Saturation"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    gradientEndColor= "#FF0509"
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={vibrance}
+                    name="Vibrance"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    gradientEndColor= "#FF0509"
+                    ></SingleValSliderGroup>
+            </div>
+        </div>
+        <div class="side-panel-footer"></div>
+    </div>
+</div>
 
+<style>
+    .container {
+        display: flex;
+        flex-direction: row;
+        gap: 12px;
+        position: absolute;
+        top: 48px;
+        bottom: 12px;
+        left: 12px;
+        right: 12px;
+    }
 
+    .toolbar {
+        min-width: 36px;
+    }
+
+    .image-panel {
+        background: #262626;
+        flex: 1;
+        border-radius: 6px;
+    }
+
+    .side-section {
+        display: flex;
+        flex-direction: column;
+        width: 25%;
+        gap: 12px;
+        width: 300px;
+    }
+
+    .side-panel {
+        background: #1f1f1f;
+        flex: 1;
+        border-radius: 6px;
+    }
+
+    .slider-section {
+        display: flex;
+        flex-direction: column;
+        margin-top: 16px;
+        margin-left: 16px;
+        margin-right: 16px;
+    }
+
+    .slider-section-title {
+        font-family: "Figtree", sans-serif;
+        font-size: 20px;
+        font-weight: 700;
+        color: #fff;
+    }
+
+    .side-panel-footer {
+        background: #1f1f1f;
+        height: 48px;
+        border-radius: 6px;
+    }
+</style>

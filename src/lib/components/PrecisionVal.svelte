@@ -8,7 +8,7 @@
         max = Infinity,
         step = 1,
         keyboardStep = step * 10,
-        decimal_places = 2,
+        decimalPlaces = 2,
     }: {
         value: number;
         unit?: string;
@@ -16,7 +16,7 @@
         max?: number;
         step?: number;
         keyboardStep?: number;
-        decimal_places?: number;
+        decimalPlaces?: number;
     } = $props();
 
     let isEditing = $state(false);
@@ -39,7 +39,7 @@
     }
 
     function formatValue(val: number) {
-        return val.toFixed(decimal_places) + (unit ? " " + unit : "");
+        return val.toFixed(decimalPlaces) + (unit ? " " + unit : "");
     }
 
     async function enterEditMode() {
