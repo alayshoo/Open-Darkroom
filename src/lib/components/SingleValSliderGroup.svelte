@@ -30,7 +30,7 @@
 
 </script>
 
-<div class="slider-container">
+<div class="container">
     <div class="slider-text-container">
         <span class="slider-name">{name}</span>
         <PrecisionVal 
@@ -54,7 +54,7 @@
 </div>
 
 <style>
-    .slider-container{
+    .container{
         display: flex;
         flex-direction: column;
     }

@@ -21,7 +21,7 @@
     <div class="side-section">
         <div class="side-panel">
             <div class="slider-section">
-                <span class="slider-section-title">Light</span>
+                <span class="section-title">Light</span>
                 <SingleValSliderGroup 
                     bind:value={exposure}
                     name="Exposure"
@@ -53,7 +53,7 @@
                     ></SingleValSliderGroup>
             </div>
             <div class="slider-section">
-                <span class="slider-section-title">Colour</span>
+                <span class="section-title">Colour</span>
                 <SingleValSliderGroup 
                     bind:value={temperature}
                     name="Temperature"
@@ -62,6 +62,7 @@
                     max={10000}
                     decimalPlaces={0}
                     sliderStep={100}
+                    dragStep={1}
                     keyboardStep={10}
                     gradientStartColor= "#FD8B00"
                     gradientEndColor= "#3EAFFF"
@@ -140,7 +141,11 @@
         background: #1f1f1f;
         flex: 1;
         border-radius: 6px;
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-width: none;
     }
+    .side-panel::-webkit-scrollbar {display: none;} /* Chrome/Safari/Edge */
 
     .slider-section {
         display: flex;
@@ -150,11 +155,11 @@
         margin-right: 16px;
     }
 
-    .slider-section-title {
+    .section-title {
         font-family: "Figtree", sans-serif;
         font-size: 20px;
         font-weight: 700;
-        color: #fff;
+        color: #f0f0f0;
     }
 
     .side-panel-footer {

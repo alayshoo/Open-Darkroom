@@ -29,7 +29,7 @@
     function selectValueOnly() {
         inputElement?.focus();
         const end = unit
-            ? editValue.length - unit.length - 1
+            ? editValue.length - unit.length
             : editValue.length;
         inputElement?.setSelectionRange(0, Math.max(0, end));
     }
@@ -39,7 +39,7 @@
     }
 
     function formatValue(val: number) {
-        return val.toFixed(decimalPlaces) + (unit ? " " + unit : "");
+        return val.toFixed(decimalPlaces) + (unit ? unit : "");
     }
 
     async function enterEditMode() {

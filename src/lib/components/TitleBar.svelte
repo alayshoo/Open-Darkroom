@@ -79,7 +79,7 @@
         transition: background 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), border-radius 0.2s cubic-bezier(0.2, 0.0, 0, 1.0)
     }
     .menu-buttons button:hover {
-        background: #1f1f1f;
+        background: #262626;
         border-radius: 8px;
     }
     
