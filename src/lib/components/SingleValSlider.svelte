@@ -1,3 +1,4 @@
+<!-- lib/components/SingleValSlider.svelte -->
 <script lang="ts">
     
     let {
@@ -118,7 +119,7 @@
         <div class="left-bar" style="width: calc({bar_percentage}% - 12px);"></div>
         <div class="right-bar" style="left: calc({bar_percentage}% + 12px);"></div>
     </div>
-    <div class="pointer" class:dragging={isDragging} style= "left: {bar_percentage}%"></div>
+    <div class="pointer" class:dragging={isDragging} style="left: calc({bar_percentage / 100} * (100% - 4px) + 2px)"></div>
     
 </div>
 

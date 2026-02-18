@@ -1,7 +1,9 @@
+<!-- routes/+page.svelte -->
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import TitleBar from "$lib/components/TitleBar.svelte";
     import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
+    import { page } from "$app/state";
 
     let exposure = $state(0);
     let contrast = $state(0);
@@ -120,7 +122,7 @@
     }
 
     .toolbar {
-        min-width: 36px;
+        min-width: 28px;
     }
 
     .image-panel {
@@ -152,7 +154,7 @@
         flex-direction: column;
         margin-top: 16px;
         margin-left: 16px;
-        margin-right: 16px;
+        margin-right: 12px;
     }
 
     .section-title {

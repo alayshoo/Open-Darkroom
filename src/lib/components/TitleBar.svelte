@@ -1,3 +1,4 @@
+<!-- lib/components/TitleBar.svelte -->
 <script lang="ts">
 
     import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -69,7 +70,7 @@
     .titlebar > .menu-buttons{
         position: fixed;
         top: 10px;
-        left: 10px;
+        left: 58px;
         display: flex;
         gap: 16px;
     }

@@ -1,3 +1,4 @@
+<!-- lib/components/PrecisionVal.svelte -->
 <script lang="ts">
     import { tick } from "svelte";
 

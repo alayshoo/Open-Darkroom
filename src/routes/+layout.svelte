@@ -1,3 +1,4 @@
+<!-- routes/+layout.svelte -->
 <script lang="ts">
   import "$lib/styles/global.css";
 

@@ -1,3 +1,4 @@
+<!-- lib/components/SingleValSliderGroup.svelte -->
 <script lang="ts">
     import SingleValSlider from "./SingleValSlider.svelte";
     import PrecisionVal from "./PrecisionVal.svelte";
@@ -31,8 +32,8 @@
 </script>
 
 <div class="container">
-    <div class="slider-text-container">
-        <span class="slider-name">{name}</span>
+    <div class="text-container">
+        <span class="name">{name}</span>
         <PrecisionVal 
             bind:value= {value}
             min= {min}
@@ -43,14 +44,16 @@
             decimalPlaces= {decimalPlaces}
             ></PrecisionVal>
     </div>
-    <SingleValSlider 
-        bind:value= {value}
-        min= {min}
-        max= {max}
-        step= {sliderStep}
-        gradientStartColor= {gradientStartColor}
-        gradientEndColor= {gradientEndColor}
-        ></SingleValSlider>
+    <div class="slider-container">
+        <SingleValSlider 
+            bind:value= {value}
+            min= {min}
+            max= {max}
+            step= {sliderStep}
+            gradientStartColor= {gradientStartColor}
+            gradientEndColor= {gradientEndColor}
+            ></SingleValSlider>
+    </div>
 </div>
 
 <style>
@@ -59,7 +62,7 @@
         flex-direction: column;
     }
 
-    .slider-text-container{
+    .text-container{
         display: flex;
         flex-direction: row;
         align-items: baseline;
@@ -68,9 +71,13 @@
         margin-bottom: -4px;
     }
 
-    .slider-name{
+    .name{
         font-family: 'Figtree', sans-serif;
         font-size: 12px;
         font-weight: 400;
+    }
+
+    .slider-container{
+        padding-right: 6px;        
     }
 </style>
