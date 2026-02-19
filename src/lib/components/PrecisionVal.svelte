@@ -184,7 +184,7 @@
         user-select: none;
 
         background: transparent;
-        color: #e6e6e6;
+        color: var(--color1);
 
         font-family: "Figtree", sans-serif;
         font-weight: 600;
@@ -193,18 +193,18 @@
     }
 
     .value-input:hover {
-        background: #101010;
+        background: var(--bg2);
     }
     .value-input.editing {
-        background: #101010;
+        background: var(--bg2);
     }
     .value-input::selection {
         background: #333333; /* your custom highlight color */
-        color: #e6e6e6; /* text color when highlighted */
+        color: var(--color1); /* text color when highlighted */
     }
 
     .value-input-box {
-        background: #101010;
+        background: var(--bg2);
     }
 
     .value,
@@ -217,7 +217,7 @@
         outline: none;
         background: transparent;
         font: inherit;
-        color: #e6e6e6;
+        color: var(--color1);
         padding: 0;
         min-width: 0;
     }

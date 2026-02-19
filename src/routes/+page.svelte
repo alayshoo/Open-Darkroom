@@ -126,7 +126,7 @@
     }
 
     .image-panel {
-        background: #262626;
+        background: var(--bg5);
         flex: 1;
         border-radius: 6px;
     }
@@ -140,7 +140,7 @@
     }
 
     .side-panel {
-        background: #1f1f1f;
+        background: var(--bg4);
         flex: 1;
         border-radius: 6px;
         min-height: 0;
@@ -161,11 +161,11 @@
         font-family: "Figtree", sans-serif;
         font-size: 20px;
         font-weight: 700;
-        color: #f0f0f0;
+        color: var(--color1);
     }
 
     .side-panel-footer {
-        background: #1f1f1f;
+        background: var(--bg4);
         height: 48px;
         border-radius: 6px;
     }

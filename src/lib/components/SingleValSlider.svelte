@@ -7,7 +7,7 @@
         max = 100,
         step = 1,
         gradientStartColor = "#4d4d4d",
-        gradientEndColor = "#ffffff"
+        gradientEndColor = "#e6e6e6"
     }: {
         value?: number;
         min?: number;
@@ -16,6 +16,8 @@
         gradientStartColor?: string;
         gradientEndColor?: string;
     } = $props();
+
+    const defaultValue = value; // capture default automatically
 
     let bar_percentage = $derived(((value - min) / (max - min)) * 100);
 
@@ -102,6 +104,10 @@
 
     const midColor = $derived(interpolateColor(gradientStartColor, gradientEndColor, bar_percentage/100))
 
+    function handleDoubleClick(){
+        value = defaultValue;
+    }
+
 </script>
 
 <div 
@@ -114,6 +120,7 @@
     tabindex="0"
     onpointerdown={handlePointerDown}
     onkeydown={handleKeyDown}
+    ondblclick={handleDoubleClick}
 >
     <div class="slider" style= " --color-start: {gradientStartColor}; --color-mid: {midColor}; --color-end: {gradientEndColor};">
         <div class="left-bar" style="width: calc({bar_percentage}% - 12px);"></div>
@@ -167,7 +174,7 @@
         top: 50%;
         width: 4px;
         height: 16px;
-        background: white;
+        background: var(--color1);
         border-radius: 5px;
         transform: translate(-50%, -50%);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);

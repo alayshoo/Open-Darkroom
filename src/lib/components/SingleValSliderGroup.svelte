@@ -73,6 +73,7 @@
 
     .name{
         font-family: 'Figtree', sans-serif;
+        color: var(--color2);
         font-size: 12px;
         font-weight: 400;
     }
