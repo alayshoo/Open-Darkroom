@@ -7,7 +7,7 @@
 
     let exposure = $state(0);
     let contrast = $state(0);
-    let clarity = $state(0);
+    let brightness = $state(0);
     let temperature = $state(5600);
     let tint = $state(0);
     let saturation = $state(0);
@@ -23,39 +23,7 @@
     <div class="side-section">
         <div class="side-panel">
             <div class="slider-section">
-                <span class="section-title">Light</span>
-                <SingleValSliderGroup 
-                    bind:value={exposure}
-                    name="Exposure"
-                    unit="EV"
-                    min={-10}
-                    max={10}
-                    sliderStep={0.1}
-                    keyboardStep={0.01}
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
-                    bind:value={contrast}
-                    name="Contrast"
-                    unit="%"
-                    min={-100}
-                    max={100}
-                    decimalPlaces={1}
-                    sliderStep={1}
-                    keyboardStep={0.1}
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
-                    bind:value={clarity}
-                    name="Clarity"
-                    unit="%"
-                    min={-100}
-                    max={100}
-                    decimalPlaces={1}
-                    sliderStep={1}
-                    keyboardStep={0.1}
-                    ></SingleValSliderGroup>
-            </div>
-            <div class="slider-section">
-                <span class="section-title">Colour</span>
+                <span class="section-title">White Balance</span>
                 <SingleValSliderGroup 
                     bind:value={temperature}
                     name="Temperature"
@@ -81,9 +49,41 @@
                     gradientStartColor= "#64FF76"
                     gradientEndColor= "#FF66F7"
                     ></SingleValSliderGroup>
+            </div>
+            <div class="slider-section">
+                <span class="section-title">Light & Colour</span>
                 <SingleValSliderGroup 
-                    bind:value={saturation}
-                    name="Saturation"
+                    bind:value={exposure}
+                    name="Exposure"
+                    unit="EV"
+                    min={-5}
+                    max={5}
+                    sliderStep={0.1}
+                    keyboardStep={0.01}
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={contrast}
+                    name="Contrast"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={brightness}
+                    name="Brightness"
+                    unit="%"
+                    min={-100}
+                    max={100}
+                    decimalPlaces={1}
+                    sliderStep={1}
+                    keyboardStep={0.1}
+                    ></SingleValSliderGroup>
+                <SingleValSliderGroup 
+                    bind:value={vibrance}
+                    name="Vibrance"
                     unit="%"
                     min={-100}
                     max={100}
@@ -93,8 +93,8 @@
                     gradientEndColor= "#FF0509"
                     ></SingleValSliderGroup>
                 <SingleValSliderGroup 
-                    bind:value={vibrance}
-                    name="Vibrance"
+                    bind:value={saturation}
+                    name="Saturation"
                     unit="%"
                     min={-100}
                     max={100}
