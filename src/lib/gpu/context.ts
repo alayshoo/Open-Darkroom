@@ -30,8 +30,7 @@ export async function initGPU(
     // The "format" is the pixel format the display expects —
     // typically "bgra8unorm" on most systems.
     const context = canvas.getContext("webgpu")!;
-    const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
-    const format = preferredFormat + '-srgb' as GPUTextureFormat;
+    const format = navigator.gpu.getPreferredCanvasFormat();
 
     context.configure({
         device,

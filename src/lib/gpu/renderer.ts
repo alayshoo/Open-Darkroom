@@ -104,7 +104,7 @@ export function createRenderer(gpu: GPUContext): Renderer {
     }
 
     // Initialize exposure to 0 (no change)
-    setAdjustments({ wb_temp: 0, wb_tint: 0, exposure: 0, contrast: 0, brightness: 0, vibrance: 0, saturation:0 });
+    setAdjustments({ wbTemp: 0, wbTint: 0, exposure: 0, contrast: 0, brightness: 0, vibrance: 0, saturation:0 });
 
     return { loadImage, setAdjustments, render, destroy };
 }

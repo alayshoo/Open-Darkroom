@@ -3,28 +3,41 @@
     import { invoke } from "@tauri-apps/api/core";
     import TitleBar from "$lib/components/TitleBar.svelte";
     import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
-    import { page } from "$app/state";
+    import PreviewImageCanvas from "$lib/components/PreviewImageCanvas.svelte";
+  import { mapSlidersToAdjustments } from "$lib/types/adjustments";
 
+    let temperature = $state(5600);
+    let tint = $state(0);
     let exposure = $state(0);
     let contrast = $state(0);
     let brightness = $state(0);
-    let temperature = $state(5600);
-    let tint = $state(0);
     let saturation = $state(0);
     let vibrance = $state(0);
 
-
+    let adjustments = $derived(
+        mapSlidersToAdjustments({
+            temperature,
+            tint,
+            exposure,
+            contrast,
+            brightness,
+            saturation,
+            vibrance,
+        }),
+    );
 </script>
 
 <TitleBar></TitleBar>
 <div class="container">
     <div class="toolbar"></div>
-    <div class="image-panel"></div>
+    <div class="image-panel">
+        <PreviewImageCanvas {adjustments} imageSrc="/test.jpg" />
+    </div>
     <div class="side-section">
         <div class="side-panel">
             <div class="slider-section">
                 <span class="section-title">White Balance</span>
-                <SingleValSliderGroup 
+                <SingleValSliderGroup
                     bind:value={temperature}
                     name="Temperature"
                     unit="K"
@@ -34,10 +47,10 @@
                     sliderStep={100}
                     dragStep={1}
                     keyboardStep={10}
-                    gradientStartColor= "#FD8B00"
-                    gradientEndColor= "#3EAFFF"
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
+                    gradientStartColor="#FD8B00"
+                    gradientEndColor="#3EAFFF"
+                ></SingleValSliderGroup>
+                <SingleValSliderGroup
                     bind:value={tint}
                     name="Tint"
                     unit="%"
@@ -46,13 +59,13 @@
                     decimalPlaces={1}
                     sliderStep={1}
                     keyboardStep={0.1}
-                    gradientStartColor= "#64FF76"
-                    gradientEndColor= "#FF66F7"
-                    ></SingleValSliderGroup>
+                    gradientStartColor="#64FF76"
+                    gradientEndColor="#FF66F7"
+                ></SingleValSliderGroup>
             </div>
             <div class="slider-section">
                 <span class="section-title">Light & Colour</span>
-                <SingleValSliderGroup 
+                <SingleValSliderGroup
                     bind:value={exposure}
                     name="Exposure"
                     unit="EV"
@@ -60,8 +73,8 @@
                     max={5}
                     sliderStep={0.1}
                     keyboardStep={0.01}
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
+                ></SingleValSliderGroup>
+                <SingleValSliderGroup
                     bind:value={contrast}
                     name="Contrast"
                     unit="%"
@@ -70,8 +83,8 @@
                     decimalPlaces={1}
                     sliderStep={1}
                     keyboardStep={0.1}
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
+                ></SingleValSliderGroup>
+                <SingleValSliderGroup
                     bind:value={brightness}
                     name="Brightness"
                     unit="%"
@@ -80,8 +93,8 @@
                     decimalPlaces={1}
                     sliderStep={1}
                     keyboardStep={0.1}
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
+                ></SingleValSliderGroup>
+                <SingleValSliderGroup
                     bind:value={vibrance}
                     name="Vibrance"
                     unit="%"
@@ -90,9 +103,9 @@
                     decimalPlaces={1}
                     sliderStep={1}
                     keyboardStep={0.1}
-                    gradientEndColor= "#FF0509"
-                    ></SingleValSliderGroup>
-                <SingleValSliderGroup 
+                    gradientEndColor="#FF0509"
+                ></SingleValSliderGroup>
+                <SingleValSliderGroup
                     bind:value={saturation}
                     name="Saturation"
                     unit="%"
@@ -101,8 +114,8 @@
                     decimalPlaces={1}
                     sliderStep={1}
                     keyboardStep={0.1}
-                    gradientEndColor= "#FF0509"
-                    ></SingleValSliderGroup>
+                    gradientEndColor="#FF0509"
+                ></SingleValSliderGroup>
             </div>
         </div>
         <div class="side-panel-footer"></div>
@@ -128,15 +141,19 @@
     .image-panel {
         background: var(--bg5);
         flex: 1;
+        max-width: 600px;
         border-radius: 6px;
     }
 
-    .side-section {
+    .image-panel {
+        background: var(--bg5);
+        flex: 1;
+        border-radius: 6px;
+        overflow: hidden;
         display: flex;
-        flex-direction: column;
-        width: 25%;
-        gap: 12px;
-        width: 300px;
+        align-items: center;
+        justify-content: center;
+        min-width: 0; /* prevents flex blowout */
     }
 
     .side-panel {
@@ -147,7 +164,9 @@
         overflow-y: auto;
         scrollbar-width: none;
     }
-    .side-panel::-webkit-scrollbar {display: none;} /* Chrome/Safari/Edge */
+    .side-panel::-webkit-scrollbar {
+        display: none;
+    } /* Chrome/Safari/Edge */
 
     .slider-section {
         display: flex;

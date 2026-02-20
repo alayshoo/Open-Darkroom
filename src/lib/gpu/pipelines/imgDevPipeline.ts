@@ -92,8 +92,8 @@ function paramsToArray(a: Adjustments): Float32Array<ArrayBuffer> {
     const buf = new ArrayBuffer(PARAMS_BUFFER_SIZE);
     const view = new Float32Array(buf);
     view.set([
-        a.wb_temp,
-        a.wb_tint,
+        a.wbTemp,
+        a.wbTint,
         a.exposure,
         a.contrast,
         a.brightness,

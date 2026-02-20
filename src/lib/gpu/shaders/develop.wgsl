@@ -70,6 +70,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let color = textureSample(inputTexture, texSampler, input.uv);
   var rgb = color.rgb;
 
+  // sRGB → linear (only needed if input texture isn't rgba8unorm-srgb)
+  let lo_in = rgb / 12.92;
+  let hi_in = pow((rgb + vec3f(0.055)) / 1.055, vec3f(2.4));
+  rgb = select(hi_in, lo_in, rgb <= vec3f(0.04045));
+
   // 1. White Balance
   //    Temperature: shift along blue ↔ yellow axis
   //    Tint: shift along green ↔ magenta axis
