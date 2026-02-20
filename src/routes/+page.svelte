@@ -31,9 +31,11 @@
 <div class="container">
     <div class="toolbar"></div>
     <div class="image-panel">
-        <PreviewImageCanvas {adjustments} imageSrc="/test.jpg" />
+        <div class="preview-container">
+            <PreviewImageCanvas {adjustments} imageSrc="/test.jpg"/>
+        </div>
     </div>
-    <div class="side-section">
+    <div class="side-bar">
         <div class="side-panel">
             <div class="slider-section">
                 <span class="section-title">White Balance</span>
@@ -141,19 +143,25 @@
     .image-panel {
         background: var(--bg5);
         flex: 1;
-        max-width: 600px;
-        border-radius: 6px;
-    }
-
-    .image-panel {
-        background: var(--bg5);
-        flex: 1;
         border-radius: 6px;
         overflow: hidden;
         display: flex;
         align-items: center;
         justify-content: center;
         min-width: 0; /* prevents flex blowout */
+    }
+
+    .preview-container {
+        margin: 36px;               /**Change later when there is zoom support*/
+        border-radius: 6px;
+    }
+
+    .side-bar {
+        display: flex;
+        flex-direction: column;
+        width: 25%;
+        gap: 12px;
+        width: 300px;
     }
 
     .side-panel {
