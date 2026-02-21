@@ -2,12 +2,39 @@
 <script lang="ts">
 
     import { getCurrentWindow } from '@tauri-apps/api/window';
+    import { onMount, onDestroy } from 'svelte';
     const appWindow = getCurrentWindow();
 
     let {
         title = $bindable("Open Darkroom"),
         editable = false
     } = $props()
+
+    let isMaximized = $state(false);
+    let unlisten: (() => void) | undefined;
+
+    async function checkMaximized() {
+        // Small delay to let the window manager settle
+        await new Promise(r => setTimeout(r, 50));
+        isMaximized = await appWindow.isMaximized();
+    }
+
+    async function handleToggleMaximize() {
+        await appWindow.toggleMaximize();
+        await checkMaximized();
+    }
+
+    onMount(async () => {
+        isMaximized = await appWindow.isMaximized();
+
+        unlisten = await appWindow.onResized(async () => {
+            await checkMaximized();
+        });
+    });
+
+    onDestroy(() => {
+        unlisten?.();
+    });
 
 </script>
 
@@ -24,10 +51,18 @@
                 <path d="M1 2C0.447715 2 0 1.55228 0 1C0 0.447715 0.447715 0 1 0H11C11.5523 0 12 0.447715 12 1C12 1.55228 11.5523 2 11 2H1Z" fill="var(--color2)"/>
             </svg>
         </button>
-        <button onclick={() => appWindow.toggleMaximize()} title="Maximize">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M5.9 19.5197C5.405 19.5197 4.98125 19.3465 4.62875 19C4.27625 18.6535 4.1 18.237 4.1 17.7505V9.78923C4.1 9.30271 4.27625 8.88621 4.62875 8.53975C4.98125 8.19329 5.405 8.02005 5.9 8.02005H7.7V6.2692C7.7 5.78268 7.87625 5.36618 8.22875 5.01971C8.58125 4.67325 9.005 4.50002 9.5 4.50002L19.2 4.50001C19.695 4.50001 20.1188 4.67325 20.4713 5.01971C20.8238 5.36617 21 5.78267 21 6.26919V14.2702C21 14.7567 20.8238 15.1732 20.4713 15.5197C20.1188 15.8662 19.695 16.0394 19.2 16.0394H17.4V17.7505C17.4 18.237 17.2238 18.6535 16.8713 19C16.5188 19.3465 16.095 19.5197 15.6 19.5197L5.9 19.5197ZM5.9 17.7505L15.6 17.7505V13.7699V9.78922L5.9 9.78923V17.7505ZM17.4 14.5H19C19.2762 14.5 19.5 14.2761 19.5 14V6.59442C19.5 6.31828 19.2762 6.09442 19 6.09442L9.82523 6.09443C9.54909 6.09443 9.32523 6.31828 9.32523 6.59443V8.02005L15.6 8.02005C16.095 8.02005 16.5188 8.19328 16.8713 8.53974C17.2238 8.8862 17.4 9.3027 17.4 9.78922V14.5Z" fill="var(--color2)"/>
-            </svg>
+        <button onclick={handleToggleMaximize} title={isMaximized ? "Restore" : "Maximize"}>
+            {#if isMaximized}
+                <!-- Restore icon: overlapping squares -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5.9 19.5197C5.405 19.5197 4.98125 19.3465 4.62875 19C4.27625 18.6535 4.1 18.237 4.1 17.7505V9.78923C4.1 9.30271 4.27625 8.88621 4.62875 8.53975C4.98125 8.19329 5.405 8.02005 5.9 8.02005H7.7V6.2692C7.7 5.78268 7.87625 5.36618 8.22875 5.01971C8.58125 4.67325 9.005 4.50002 9.5 4.50002L19.2 4.50001C19.695 4.50001 20.1188 4.67325 20.4713 5.01971C20.8238 5.36617 21 5.78267 21 6.26919V14.2702C21 14.7567 20.8238 15.1732 20.4713 15.5197C20.1188 15.8662 19.695 16.0394 19.2 16.0394H17.4V17.7505C17.4 18.237 17.2238 18.6535 16.8713 19C16.5188 19.3465 16.095 19.5197 15.6 19.5197L5.9 19.5197ZM5.9 17.7505L15.6 17.7505V13.7699V9.78922L5.9 9.78923V17.7505ZM17.4 14.5H19C19.2762 14.5 19.5 14.2761 19.5 14V6.59442C19.5 6.31828 19.2762 6.09442 19 6.09442L9.82523 6.09443C9.54909 6.09443 9.32523 6.31828 9.32523 6.59443V8.02005L15.6 8.02005C16.095 8.02005 16.5188 8.19328 16.8713 8.53974C17.2238 8.8862 17.4 9.3027 17.4 9.78922V14.5Z" fill="var(--color2)"/>
+                </svg>
+            {:else}
+                <!-- Maximize icon: single square -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="4.5" y="6" width="15" height="13" rx="1.5" stroke="var(--color2)" stroke-width="2" fill="none"/>
+                </svg>
+            {/if}
         </button>
         <button onclick={() => appWindow.close()} title="Close">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
