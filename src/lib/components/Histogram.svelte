@@ -21,6 +21,49 @@
     let histPipeline: HistogramPipeline | null = $state(null);
     let image: GPUImage | null = $state(null);
 
+    // The last histogram data we received — kept so we can re-draw on resize
+    // without re-running the GPU compute pass.
+    let lastHistData: { r: Uint32Array; g: Uint32Array; b: Uint32Array } | null =
+        $state(null);
+
+    // ── ResizeObserver: keep canvas backing-store at native device pixels ──
+    $effect(() => {
+        if (!canvas) return;
+
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                // Prefer devicePixelContentBoxSize (exact physical pixels).
+                // Falls back to contentBoxSize × devicePixelRatio.
+                let w: number, h: number;
+                if (entry.devicePixelContentBoxSize) {
+                    w = entry.devicePixelContentBoxSize[0].inlineSize;
+                    h = entry.devicePixelContentBoxSize[0].blockSize;
+                } else {
+                    const dpr = window.devicePixelRatio || 1;
+                    w = Math.round(entry.contentBoxSize[0].inlineSize * dpr);
+                    h = Math.round(entry.contentBoxSize[0].blockSize * dpr);
+                }
+
+                // Only touch the canvas if the size actually changed
+                if (canvas.width !== w || canvas.height !== h) {
+                    canvas.width = w;
+                    canvas.height = h;
+                    // Redraw with existing data (resizing clears the canvas)
+                    if (lastHistData) drawHistogram(lastHistData);
+                }
+            }
+        });
+
+        // Request device-pixel-level reporting when supported
+        try {
+            ro.observe(canvas, { box: "device-pixel-content-box" });
+        } catch {
+            ro.observe(canvas, { box: "content-box" });
+        }
+
+        return () => ro.disconnect();
+    });
+
     // Create the histogram pipeline once on mount
     $effect(() => {
         if (!canvas) return;
@@ -72,6 +115,7 @@
         if (!image || !histPipeline) return;
 
         const data = await histPipeline.computeHistogram(image.texture, adjustments);
+        lastHistData = data;
         drawHistogram(data);
     }
 
@@ -115,13 +159,13 @@
     }
 </script>
 
-<canvas bind:this={canvas} width={256} height={128}></canvas>
+<canvas bind:this={canvas}></canvas>
 
 <style>
     canvas {
         width: 100%;
-        height: auto;
+        aspect-ratio: 2 / 1;
         border-radius: 4px;
-        background: var(--bg3);
+        background: var(--bg1);
     }
 </style>

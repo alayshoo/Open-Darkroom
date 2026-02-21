@@ -38,7 +38,9 @@
     </div>
     <div class="side-bar">
         <div class="side-panel">
-            <Histogram {adjustments} imageSrc="/test.jpg" />
+            <div class="histogram-container">
+                <Histogram {adjustments} imageSrc="/test.jpg" />
+            </div>
             <div class="slider-section">
                 <span class="section-title">White Balance</span>
                 <SingleValSliderGroup
@@ -166,6 +168,10 @@
         min-width: 250px;
     }
 
+    .histogram-container {
+        margin: 5px;
+    }
+
     .side-panel {
         background: var(--bg4);
         flex: 1;
@@ -188,9 +194,10 @@
 
     .section-title {
         font-family: "Figtree", sans-serif;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
         color: var(--color1);
+        padding-bottom: 6px;
     }
 
     .side-panel-footer {

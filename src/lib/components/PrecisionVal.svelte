@@ -177,9 +177,9 @@
         position: relative;
         display: inline-flex;
         align-items: center;
-        padding: 0.125rem 0.35rem;
+        padding: 0.35rem 0.35rem;
         border: none;
-        border-radius: 6px;
+        border-radius: 4px;
         cursor: ew-resize;
         user-select: none;
 
@@ -187,7 +187,9 @@
         color: var(--color1);
 
         font-family: "Figtree", sans-serif;
-        font-weight: 600;
+        font-weight: 500;
+        font-size: 14px;
+        line-height: 100%;
 
         transition: background 0.2s cubic-bezier(0.2, 0, 0, 1);
     }

@@ -60,6 +60,7 @@
     .container{
         display: flex;
         flex-direction: column;
+        margin-top: -3px;
     }
 
     .text-container{
@@ -68,7 +69,7 @@
         align-items: baseline;
         justify-content: space-between;
         width: 100%;
-        margin-bottom: -4px;
+        margin-bottom: -6px;
     }
 
     .name{
