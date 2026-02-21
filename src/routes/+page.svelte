@@ -5,6 +5,7 @@
     import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
     import PreviewImageCanvas from "$lib/components/PreviewImageCanvas.svelte";
     import { mapSlidersToAdjustments } from "$lib/types/adjustments";
+    import Histogram from "$lib/components/Histogram.svelte";
 
     let temperature = $state(5600);
     let tint = $state(0);
@@ -37,6 +38,7 @@
     </div>
     <div class="side-bar">
         <div class="side-panel">
+            <Histogram {adjustments} imageSrc="/test.jpg" />
             <div class="slider-section">
                 <span class="section-title">White Balance</span>
                 <SingleValSliderGroup

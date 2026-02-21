@@ -40,3 +40,13 @@ export interface Renderer {
     render: () => void;
     destroy: () => void;
 }
+
+
+export interface HistogramPipeline {
+    computeHistogram: (inputTexture: GPUTexture, adjustments: Adjustments) => Promise<{
+        r: Uint32Array;
+        g: Uint32Array; 
+        b: Uint32Array;
+    }>;
+    destroy: () => void;
+}
