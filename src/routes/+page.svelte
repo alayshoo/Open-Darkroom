@@ -4,7 +4,7 @@
     import TitleBar from "$lib/components/TitleBar.svelte";
     import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
     import PreviewImageCanvas from "$lib/components/PreviewImageCanvas.svelte";
-  import { mapSlidersToAdjustments } from "$lib/types/adjustments";
+    import { mapSlidersToAdjustments } from "$lib/types/adjustments";
 
     let temperature = $state(5600);
     let tint = $state(0);
@@ -49,8 +49,8 @@
                     sliderStep={100}
                     dragStep={1}
                     keyboardStep={10}
-                    gradientStartColor="#FD8B00"
-                    gradientEndColor="#3EAFFF"
+                    gradientStartColor="#3EAFFF"
+                    gradientEndColor="#FD8B00"
                 ></SingleValSliderGroup>
                 <SingleValSliderGroup
                     bind:value={tint}
@@ -89,12 +89,12 @@
                 <SingleValSliderGroup
                     bind:value={brightness}
                     name="Brightness"
-                    unit="%"
-                    min={-100}
-                    max={100}
-                    decimalPlaces={1}
-                    sliderStep={1}
-                    keyboardStep={0.1}
+                    unit=""
+                    min={-10}
+                    max={10}
+                    decimalPlaces={2}
+                    sliderStep={10}
+                    keyboardStep={1}
                 ></SingleValSliderGroup>
                 <SingleValSliderGroup
                     bind:value={vibrance}
@@ -159,9 +159,9 @@
     .side-bar {
         display: flex;
         flex-direction: column;
-        width: 25%;
+        width: 23%;
         gap: 12px;
-        width: 300px;
+        min-width: 250px;
     }
 
     .side-panel {

@@ -1,9 +1,11 @@
 <!-- src/lib/components/PreviewImageCanvas.svelte -->
 <script lang="ts">
     import type { Adjustments } from "$lib/types/adjustments";
-    import { initGPU, type GPUContext } from "$lib/gpu/context";
-    import { uploadImageToGPU, type GPUImage } from "$lib/gpu/texture";
-    import { createRenderer, type Renderer } from "$lib/gpu/renderer";
+    import type { GPUCanvasLink, GPUImage, Renderer } from "$lib/types/gpuTypes";
+    import { getGPU } from "$lib/gpu/gpuInit";
+    import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
+    import { uploadImageToGPU } from "$lib/gpu/gpuTextureUpload";
+    import { createRenderer } from "$lib/gpu/renderer";
 
     let {
         adjustments,
@@ -13,21 +15,24 @@
         imageSrc: string | null;
     } = $props();
 
+    // Get the shared GPU session from layout context
+    const gpu = getGPU()!;
+
     let canvas: HTMLCanvasElement;
     let renderer: Renderer | null = $state(null);
-    let gpu: GPUContext | null = $state(null);
+    let canvasLink: GPUCanvasLink | null = $state(null);
     let image: GPUImage | null = $state(null);
 
-    // Init WebGPU once canvas is mounted
+    // Link the canvas to GPU and create the renderer once canvas is mounted
     $effect(() => {
         if (!canvas) return;
 
         let destroyed = false;
 
-        initGPU(canvas).then((g) => {
+        linkCanvas2GPU(canvas, gpu).then((link) => {
             if (destroyed) return;
-            gpu = g;
-            renderer = createRenderer(gpu);
+            canvasLink = link;
+            renderer = createRenderer(gpu, canvasLink);
         });
 
         return () => {
@@ -35,16 +40,15 @@
             image?.texture.destroy();
             renderer?.destroy();
             renderer = null;
-            gpu = null;
+            canvasLink = null;
             image = null;
         };
     });
 
     // Load image when src changes
     $effect(() => {
-        if (!gpu || !renderer || !imageSrc) return;
+        if (!renderer || !imageSrc) return;
 
-        const localGpu = gpu;
         const localRenderer = renderer;
 
         (async () => {
@@ -56,19 +60,14 @@
             canvas.width = bitmap.width;
             canvas.height = bitmap.height;
 
-            localGpu.context.configure({
-                device: localGpu.device,
-                format: localGpu.format,
-                usage:
-                    GPUTextureUsage.RENDER_ATTACHMENT |
-                    GPUTextureUsage.COPY_DST,
-            });
+            // Re-link canvas after resize (reconfigures the GPU context)
+            canvasLink = await linkCanvas2GPU(canvas, gpu);
 
             // Clean up old image
             image?.texture.destroy();
 
-            // Upload with sRGB decode for browser images
-            image = await uploadImageToGPU(localGpu.device, bitmap);
+            // Upload image
+            image = await uploadImageToGPU(gpu.device, bitmap);
             bitmap.close();
 
             localRenderer.loadImage(image);

@@ -1,10 +1,6 @@
 // src/lib/gpu/texture.ts
 
-export interface GPUImage {
-    texture: GPUTexture;
-    width: number;
-    height: number;
-}
+import type { GPUImage } from "$lib/types/gpuTypes";
 
 // Creates a GPU texture from an ImageBitmap.
 // In your app, the Rust backend will decode the RAW file and send

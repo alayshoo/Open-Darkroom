@@ -1,16 +1,14 @@
 // src/lib/gpu/shaders/develop.wgsl
 
-// A "binding" is how the shader accesses resources from JavaScript.
-// group(0) = the bind group index, binding(N) = slot within that group.
 
-// The image texture we're processing
-@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+// group(0) = bind group index, binding(N) = slot within group.
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;  // Image being processed
 
 // A sampler defines how to read the texture (filtering, wrapping, etc.)
 @group(0) @binding(1) var texSampler: sampler;
 
 // Uniform buffer = small, read-only data shared across all pixels.
-// This is where our values live.
 // Params must equate to a multiple of 16 bytes, each f32 is 4 bytes
 struct Params {
   wb_temp: f32,
@@ -93,10 +91,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   rgb *= pow(2.0, params.exposure);
 
   // 3. Contrast: pivot around mid-gray
-  let contrastFactor = 1.0 + params.contrast;
-  rgb = vec3f(0.5) + (rgb - vec3f(0.5)) * contrastFactor;
-  // S-curve contrast (future upgrade)
-  // rgb = 1.0 / (1.0 + exp(-params.contrast * (rgb - 0.5) * 10.0)) ;
+  // S-curve contrast
+  rgb = 1.0 / (1.0 + exp(-params.contrast * (rgb - 0.5) * 10.0)) ;
 
   // 4. Brightness: additive offset
   rgb += params.brightness;

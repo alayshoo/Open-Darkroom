@@ -24,7 +24,7 @@ export function mapSlidersToAdjustments(sliders: {
   tint: number;         // -100 to 100
   exposure: number;     // -5 to 5 (already correct)
   contrast: number;     // -100 to 100
-  brightness: number;   // -100 to 100
+  brightness: number;   // -10 to 10
   vibrance: number;     // -100 to 100
   saturation: number;   // -100 to 100
 }): Adjustments {
@@ -32,8 +32,8 @@ export function mapSlidersToAdjustments(sliders: {
     wbTemp: (sliders.temperature - 5600) / 4400, // maps 1200→-1, 5600→0, 10000→+1
     wbTint: sliders.tint / 100,
     exposure: sliders.exposure,
-    contrast: sliders.contrast / 100,
-    brightness: sliders.brightness / 100,
+    contrast: sliders.contrast / 200 + 0.5,
+    brightness: sliders.brightness / 10,
     saturation: sliders.saturation / 100,
     vibrance: sliders.vibrance / 100,
   };

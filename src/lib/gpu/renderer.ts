@@ -1,29 +1,17 @@
 // src/lib/gpu/renderer.ts
 
 import type { Adjustments } from "../types/adjustments";
-import type { GPUContext } from "./context";
-import type { GPUImage } from "./texture";
+import type { GPUSession, GPUImage, ImgDevPipeline, Renderer, GPUCanvasLink } from "$lib/types/gpuTypes";
 import {
     createImgDevPipeline,
-    updateParams,
-    type ImgDevPipeline,
+    updateParams
 } from "./pipelines/imgDevPipeline";
 
-export interface Renderer {
-    loadImage: (image: GPUImage) => void;
-    setAdjustments: (adjustments: Adjustments) => void;
-    render: () => void;
-    destroy: () => void;
-}
 
-export function createRenderer(gpu: GPUContext): Renderer {
-    const { device, context, format } = gpu;
+export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
 
-    // Create our pipeline(s) once at startup
-    const imgDev: ImgDevPipeline = createImgDevPipeline(
-        device,
-        format
-    );
+    // Create pipeline at startup
+    const imgDev: ImgDevPipeline = createImgDevPipeline(gpu);
 
     // The bind group connects actual resources to the layout slots.
     // We can't create it until we have an image, so it starts null.
@@ -37,7 +25,7 @@ export function createRenderer(gpu: GPUContext): Renderer {
         //   binding 0 → the actual texture view
         //   binding 1 → the actual sampler
         //   binding 2 → the actual params buffer
-        bindGroup = device.createBindGroup({
+        bindGroup = gpu.device.createBindGroup({
             label: "Image Development Bind Group",
             layout: imgDev.bindGroupLayout,
             entries: [
@@ -58,7 +46,7 @@ export function createRenderer(gpu: GPUContext): Renderer {
     }
 
     function setAdjustments(adjustments: Adjustments) {
-        updateParams(device, imgDev.paramsBuffer, adjustments);
+        updateParams(gpu.device, imgDev.paramsBuffer, adjustments);
     }
 
     function render() {
@@ -66,12 +54,12 @@ export function createRenderer(gpu: GPUContext): Renderer {
 
         // Step 1: Get the current canvas texture to render into.
         // This changes every frame (it's a swapchain texture).
-        const targetTexture = context.getCurrentTexture();
+        const targetTexture = canvas.canvasConfig.getCurrentTexture();
         const targetView = targetTexture.createView();
 
         // Step 2: Create a command encoder — this records GPU commands.
         // Nothing actually executes until we submit the command buffer.
-        const encoder = device.createCommandEncoder({
+        const encoder = gpu.device.createCommandEncoder({
             label: "Render Frame",
         });
 
@@ -95,7 +83,7 @@ export function createRenderer(gpu: GPUContext): Renderer {
 
         // Step 5: End the pass and submit
         pass.end();
-        device.queue.submit([encoder.finish()]);
+        gpu.device.queue.submit([encoder.finish()]);
     }
 
     function destroy() {
