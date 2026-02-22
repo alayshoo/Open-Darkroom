@@ -1,11 +1,11 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
-    import TitleBar from "$lib/components/TitleBar.svelte";
+    import TitleBar from "$lib/components/window/TitleBar.svelte";
 
-    import Histogram from "$lib/components/Histogram.svelte";
-    import SingleValSliderGroup from "$lib/components/SingleValSliderGroup.svelte";
-    import PreviewImageCanvas from "$lib/components/PreviewImageCanvas.svelte";
+    import Histogram from "$lib/components/outputs/Histogram.svelte";
+    import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
+    import SingleValSliderGroup from "$lib/components/inputs/SingleValSliderGroup.svelte";
 
     import { mapSlidersToAdjustments } from "$lib/types/adjustments";
 
