@@ -10,6 +10,8 @@
         step = 1,
         keyboardStep = step * 10,
         decimalPlaces = 2,
+        onCommit = () => {},
+        onInteractionStart = () => {},
     }: {
         value: number;
         unit?: string;
@@ -18,6 +20,8 @@
         step?: number;
         keyboardStep?: number;
         decimalPlaces?: number;
+        onCommit?: () => void;
+        onInteractionStart?: () => void;
     } = $props();
 
     const defaultValue = value; // capture default automatically
@@ -44,6 +48,7 @@
     }
 
     async function enterEditMode() {
+        onInteractionStart();
         editValue = formatValue(value);
         isEditing = true;
         await tick();
@@ -51,6 +56,7 @@
     }
 
     function handlePointerDown(e: PointerEvent) {
+        onInteractionStart();
         if (isEditing) return;
 
         isDragging = true;
@@ -71,6 +77,7 @@
         isDragging = false;
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
         document.body.style.cursor = "";
+        onCommit();
     }
 
     function handleClick() {
@@ -89,6 +96,7 @@
         if (!isNaN(parsed)) {
             value = clamp(parsed);
         }
+        onCommit();
     }
 
     function handleKeydownInput(e: KeyboardEvent) {
@@ -138,6 +146,7 @@
             e.stopImmediatePropagation();
             (document.activeElement as HTMLElement)?.blur();
             value = defaultValue;
+            onCommit();
         }
     }
 </script>

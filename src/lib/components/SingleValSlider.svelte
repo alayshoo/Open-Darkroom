@@ -7,7 +7,9 @@
         max = 100,
         step = 1,
         gradientStartColor = "#4d4d4d",
-        gradientEndColor = "#e6e6e6"
+        gradientEndColor = "#e6e6e6",
+        onCommit = () => {},
+        onInteractionStart = () => {},
     }: {
         value?: number;
         min?: number;
@@ -15,6 +17,8 @@
         step?: number;
         gradientStartColor?: string;
         gradientEndColor?: string;
+        onCommit?: () => void;
+        onInteractionStart?: () => void;
     } = $props();
 
     const defaultValue = value; // capture default automatically
@@ -26,6 +30,7 @@
     function handlePointerDown(e: PointerEvent) {
 
         isDragging = true;
+        onInteractionStart();       // record initial value for history
 
         const slider = e.currentTarget as HTMLDivElement;
         const rect = slider.getBoundingClientRect();
@@ -66,6 +71,7 @@
             isDragging = false;
             document.removeEventListener('pointermove', onPointerMove);
             document.removeEventListener('pointerup', onPointerUp);
+            onCommit();
         }
 
         document.addEventListener('pointermove', onPointerMove);
@@ -106,6 +112,7 @@
 
     function handleDoubleClick(){
         value = defaultValue;
+        onCommit();
     }
 
 </script>
