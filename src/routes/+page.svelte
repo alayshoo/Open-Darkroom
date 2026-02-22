@@ -2,12 +2,15 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import { slide } from "svelte/transition";
+    import { tick } from "svelte";
+
     import TitleBar from "$lib/components/window/TitleBar.svelte";
 
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/SingleValSliderGroup.svelte";
+    import ExportButton from "$lib/components/inputs/exportButton.svelte";
 
     import {
         SLIDER_DEFAULTS,
@@ -55,6 +58,13 @@
         }
     });
 
+    function movePage(right?: boolean) {
+        const next = right
+            ? Math.min(activePage + 1, pageCount - 1)
+            : Math.max(activePage - 1, 0);
+        scrollToPage(next);
+    }
+
     // ===== Variables =====
 
     let sliders: Sliders = $state({
@@ -73,12 +83,16 @@
     let isRgb = $state(true);
     let savedColorValues: Partial<typeof sliders> | null = null;
 
-    function handleColorModeToggle(isBw: boolean) {
+    async function handleColorModeToggle(isBw: boolean) {
         if (isBw) {
             savedColorValues = {};
             for (const k of COLOR_KEYS) savedColorValues[k] = sliders[k];
             animateObject(sliders, BW_TARGETS);
             pageCount = 3;
+            if (activePage > 2) {
+                await tick(); // wait for the {#if isRgb} block to unmount
+                scrollToPage(2);
+            }
         } else if (savedColorValues) {
             animateObject(sliders, savedColorValues);
             savedColorValues = null;
@@ -109,6 +123,7 @@
     const handleKeydown = createKeydownHandler({
         undo: undo,
         redo: redo,
+        movePage: movePage,
     });
 </script>
 
@@ -626,6 +641,7 @@
         </div>
         <div class="side-panel-footer">
             <div class="page-dots">
+                <div style= "position:absolute; left: 10px;"><ExportButton></ExportButton></div>
                 {#each Array(pageCount) as _, i}
                     <button
                         class="dot"
@@ -669,7 +685,7 @@
 
     .preview-container {
         margin: 36px; /**Change later when there is zoom support*/
-        border-radius: 6px;
+        border-radius: 8px;
     }
 
     .side-bar {
@@ -694,7 +710,7 @@
     .side-panel {
         background: var(--bg4);
         flex: 1;
-        border-radius: 6px;
+        border-radius: 12px;
         display: flex;
         flex-direction: column;
         min-height: 0; /* allows it to shrink below content size */
@@ -773,11 +789,12 @@
 
     .side-panel-footer {
         display: flex;
+        position: relative;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
         height: 48px;
-        border-radius: 6px;
+        border-radius: 12px;
         background: var(--bg5);
     }
 

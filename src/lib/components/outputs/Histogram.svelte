@@ -165,7 +165,10 @@
     canvas {
         width: 100%;
         aspect-ratio: 2 / 1;
-        border-radius: 4px;
+        border-bottom-left-radius: 4px;
+        border-bottom-right-radius: 4px;
+        border-top-right-radius: 8px;
+        border-top-left-radius: 8px;
         background: var(--bg1);
     }
 </style>
