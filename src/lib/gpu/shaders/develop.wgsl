@@ -73,19 +73,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let hi_in = pow((rgb + vec3f(0.055)) / 1.055, vec3f(2.4));
   rgb = select(hi_in, lo_in, rgb <= vec3f(0.04045));
 
-  // 1. White Balance
-  //    Temperature: shift along blue ↔ yellow axis
-  //    Tint: shift along green ↔ magenta axis
-  //    We scale the channels directly. The coefficients are tuned
-  //    so ±1 gives a strong but not extreme shift.
-  let temp = params.wb_temp;
-  let tint = params.wb_tint;
-  rgb.r *= 1.0 + temp * 0.4;
-  rgb.b *= 1.0 - temp * 0.4;
-  rgb.g *= 1.0 - tint * 0.4;
-  // Compensate luminance shift from WB (keep overall brightness stable)
-  let wbLumaCorrection = 1.0 / (1.0 + abs(temp) * 0.13 + abs(tint) * 0.1);
-  rgb *= wbLumaCorrection;
+  // 1. White Balance (luma-preserving)
+  let wbLuma = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
+
+  let tempDir = vec3f(0.8596, -0.1404, -1.1404);
+  let tintDir = vec3f(0.7152, -0.2848, 0.7152);
+
+  rgb += tempDir * params.wb_temp * 0.4 * wbLuma;
+  rgb += tintDir * params.wb_tint * 0.4 * wbLuma;
 
   // 2. Exposure: multiply by 2^exposure
   rgb *= pow(2.0, params.exposure);

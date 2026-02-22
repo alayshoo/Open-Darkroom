@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "open-darkroom",
+  "productName": "Open Darkroom",
   "version": "0.1.0",
-  "identifier": "com.layshoo.open-darkroom",
+  "identifier": "com.Layshoo.open-darkroom",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "open-darkroom",
+        "title": "Open Darkroom",
         "width": 1000,
         "minWidth": 700,
         "height": 800,
