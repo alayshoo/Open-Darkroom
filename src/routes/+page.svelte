@@ -31,7 +31,7 @@
 
     // ===== Control Pages =====
 
-    const pageCount = 4;
+    let pageCount = $state(4);
     let activePage = $state(0);
     let pagerEl: HTMLDivElement;
 
@@ -78,9 +78,11 @@
             savedColorValues = {};
             for (const k of COLOR_KEYS) savedColorValues[k] = sliders[k];
             animateObject(sliders, BW_TARGETS);
+            pageCount = 3;
         } else if (savedColorValues) {
             animateObject(sliders, savedColorValues);
             savedColorValues = null;
+            pageCount = 4;
         }
     }
 
@@ -471,7 +473,9 @@
                     <div class="controls-page">
                         <div class="slider-section">
                             <span class="section-title">Curves</span>
-                            <div style="display:flex; width: 100%; height: 300px; background: black; border-radius: 6px;"></div>
+                            <div
+                                style="display:flex; width: 100%; height: 300px; background: black; border-radius: 6px;"
+                            ></div>
                             <div class="sliders-separator"></div>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
@@ -482,6 +486,8 @@
                                 decimalPlaces={1}
                                 sliderStep={1}
                                 keyboardStep={0.1}
+                                gradientStartColor={"#606060"}
+                                gradientEndColor={"#afafaf"}
                                 onCommit={(oldVal, newVal) =>
                                     commit({
                                         type: "slider",
@@ -499,6 +505,8 @@
                                 decimalPlaces={2}
                                 sliderStep={10}
                                 keyboardStep={1}
+                                gradientStartColor={"#303030"}
+                                gradientEndColor={"#3f3f3f"}
                                 onCommit={(oldVal, newVal) =>
                                     commit({
                                         type: "slider",
@@ -516,6 +524,8 @@
                                 decimalPlaces={1}
                                 sliderStep={1}
                                 keyboardStep={0.1}
+                                gradientStartColor={"#b0b0b0"}
+                                gradientEndColor={"#ffffff"}
                                 onCommit={(oldVal, newVal) =>
                                     commit({
                                         type: "slider",
@@ -533,6 +543,8 @@
                                 decimalPlaces={2}
                                 sliderStep={10}
                                 keyboardStep={1}
+                                gradientStartColor={"#000000"}
+                                gradientEndColor={"#161616"}
                                 onCommit={(oldVal, newVal) =>
                                     commit({
                                         type: "slider",
@@ -542,68 +554,72 @@
                                     })}
                             ></SingleValSliderGroup>
                         </div>
+                        <div style="display: flex; height:30px;"></div>
                     </div>
                     <!-- HSL Panel -->
-                    <div class="controls-page">
-                        <div class="slider-section">
-                            <span class="section-title">HSL</span>
-                            <SingleValSliderGroup
-                                bind:value={sliders.vibrance}
-                                name="Hue"
-                                unit="º"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientEndColor="#FF0509"
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "vibrance",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.vibrance}
-                                name="Vibrance"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientEndColor="#FF0509"
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "vibrance",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.saturation}
-                                name="Saturation"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientEndColor="#FF0509"
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "saturation",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <div class="sliders-separator"></div>
+                    {#if isRgb}
+                        <div class="controls-page">
+                            <div class="slider-section">
+                                <span class="section-title">HSL</span>
+                                <SingleValSliderGroup
+                                    bind:value={sliders.vibrance}
+                                    name="Hue"
+                                    unit="º"
+                                    min={-100}
+                                    max={100}
+                                    decimalPlaces={1}
+                                    sliderStep={1}
+                                    keyboardStep={0.1}
+                                    gradientEndColor="#FF0509"
+                                    onCommit={(oldVal, newVal) =>
+                                        commit({
+                                            type: "slider",
+                                            key: "vibrance",
+                                            oldValue: oldVal,
+                                            newValue: newVal,
+                                        })}
+                                ></SingleValSliderGroup>
+                                <SingleValSliderGroup
+                                    bind:value={sliders.vibrance}
+                                    name="Vibrance"
+                                    unit="%"
+                                    min={-100}
+                                    max={100}
+                                    decimalPlaces={1}
+                                    sliderStep={1}
+                                    keyboardStep={0.1}
+                                    gradientEndColor="#FF0509"
+                                    onCommit={(oldVal, newVal) =>
+                                        commit({
+                                            type: "slider",
+                                            key: "vibrance",
+                                            oldValue: oldVal,
+                                            newValue: newVal,
+                                        })}
+                                ></SingleValSliderGroup>
+                                <SingleValSliderGroup
+                                    bind:value={sliders.saturation}
+                                    name="Saturation"
+                                    unit="%"
+                                    min={-100}
+                                    max={100}
+                                    decimalPlaces={1}
+                                    sliderStep={1}
+                                    keyboardStep={0.1}
+                                    gradientEndColor="#FF0509"
+                                    onCommit={(oldVal, newVal) =>
+                                        commit({
+                                            type: "slider",
+                                            key: "saturation",
+                                            oldValue: oldVal,
+                                            newValue: newVal,
+                                        })}
+                                ></SingleValSliderGroup>
+                                <div class="sliders-separator"></div>
+                            </div>
                         </div>
-                    </div>
+                        <div style="display: flex; height:30px;"></div>
+                    {/if}
                 </div>
                 <div class="controls-bottom-gradient"></div>
             </div>
@@ -615,6 +631,8 @@
                         class="dot"
                         class:active={activePage === i}
                         onclick={() => scrollToPage(i)}
+                        aria-label="Go to page {i + 1} of {pageCount}"
+                        aria-current={activePage === i ? "step" : undefined}
                     ></button>
                 {/each}
             </div>

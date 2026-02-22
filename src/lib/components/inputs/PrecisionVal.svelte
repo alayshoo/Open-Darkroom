@@ -59,7 +59,6 @@
     function handlePointerDown(e: PointerEvent) {
         onInteractionStart();
         if (isEditing) return;
-        void invoke ("grap_cursor", {grab: true})
 
         isDragging = true;
         hasDragged = false;
@@ -74,14 +73,14 @@
 
         hasDragged = true;
         value = clamp(value + e.movementX * step);
-        
+
         const dpr = window.devicePixelRatio || 1;
         void invoke("wrap_cursor", { x: e.clientX * dpr, y: e.clientY * dpr });
     }
 
     function handlePointerUp(e: PointerEvent) {
         if (!isDragging) return;
-        void invoke ("grap_cursor", {grab: false})
+        void invoke("grap_cursor", { grab: false });
 
         isDragging = false;
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -175,7 +174,7 @@
     onclick={handleClick}
     onkeydown={handleKeydown}
 >
-    <span bind:this={spanElement} class="value" class:hidden={isEditing}>
+    <span bind:this={spanElement} class="value" class:invisible={isEditing}>
         {displayValue}
     </span>
     <input
@@ -186,7 +185,6 @@
         onkeydown={handleKeydownInput}
         class="value value-input-box"
         class:hidden={!isEditing}
-        style="width: {spanElement?.offsetWidth}px;"
     />
 </div>
 
@@ -240,10 +238,19 @@
         color: var(--color1);
         padding: 0;
         min-width: 0;
+        position: absolute;
+        inset: 0;
+        padding: 0.35rem;
+        padding-top: 0.3rem;
+    }
+
+    .invisible {
+        visibility: hidden;
     }
 
     .hidden {
         visibility: hidden;
         position: absolute;
+        pointer-events: none;
     }
 </style>
