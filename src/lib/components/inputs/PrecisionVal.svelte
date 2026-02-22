@@ -1,5 +1,6 @@
 <!-- lib/components/PrecisionVal.svelte -->
 <script lang="ts">
+    import { invoke } from "@tauri-apps/api/core";
     import { tick } from "svelte";
 
     let {
@@ -58,6 +59,7 @@
     function handlePointerDown(e: PointerEvent) {
         onInteractionStart();
         if (isEditing) return;
+        void invoke ("grap_cursor", {grab: true})
 
         isDragging = true;
         hasDragged = false;
@@ -67,12 +69,19 @@
 
     function handlePointerMove(e: PointerEvent) {
         if (!isDragging) return;
+
+        if (Math.abs(e.movementX) > 100) return;
+
         hasDragged = true;
         value = clamp(value + e.movementX * step);
+        
+        const dpr = window.devicePixelRatio || 1;
+        void invoke("wrap_cursor", { x: e.clientX * dpr, y: e.clientY * dpr });
     }
 
     function handlePointerUp(e: PointerEvent) {
         if (!isDragging) return;
+        void invoke ("grap_cursor", {grab: false})
 
         isDragging = false;
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
