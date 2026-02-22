@@ -146,6 +146,7 @@
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
             </div>
             <div class="controls-section">
+                <div class="controls-top-gradient"></div>
                 <div
                     class="controls-pager"
                     bind:this={pagerEl}
@@ -489,7 +490,7 @@
                         <div class="slider-section">
                             <span class="section-title">Curves</span>
                             <div
-                                style="display:flex; width: 100%; height: 300px; background: black; border-radius: 6px;"
+                                style="display:flex; width: 100%; aspect-ratio: 1 / 1; background: black; border-radius: 6px;"
                             ></div>
                             <div class="sliders-separator"></div>
                             <SingleValSliderGroup
@@ -777,14 +778,26 @@
         background: var(--color5);
     }
 
+    .controls-top-gradient {
+        position: absolute;
+        width: 100%;
+        height: 20px;
+        top: 0;
+        border-radius: 6px;
+        background: linear-gradient(0, transparent, var(--bg4), var(--bg4));
+        pointer-events: none;
+        z-index: 999;
+    }
+
     .controls-bottom-gradient {
         position: absolute;
         width: 100%;
-        height: 30px;
+        height: 20px;
         bottom: 0;
         border-radius: 6px;
-        background: linear-gradient(0, var(--bg4), transparent);
+        background: linear-gradient(0, var(--bg4), var(--bg4), transparent);
         pointer-events: none;
+        z-index: 999;
     }
 
     .side-panel-footer {

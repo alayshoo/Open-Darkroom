@@ -46,6 +46,9 @@
 
 <div class="titlebar">
     <div data-tauri-drag-region class="drag"></div>
+    <div class="icon">
+        <img src="favicon.png" alt= "Darkroom Icon" aria-label="Darkroom Icon">
+    </div>
     <div class="menu-buttons">
         <MenuButton
             label="File"
@@ -176,6 +179,15 @@
 
         font-family: "Figtree", sans-serif;
         font-size: 16px;
+    }
+    
+    .icon {
+        display: flex;
+        position: absolute;
+        aspect-ratio: 1 / 1;
+        height: 28px;
+        left: 12px;
+        z-index: -2;
     }
 
     .titlebar button {
