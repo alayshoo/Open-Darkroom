@@ -178,6 +178,7 @@
                               newValue: newVal,
                             })}
                     ></SingleValSliderGroup>
+                    <div class="sliders-separator"></div>
                     <SingleValSliderGroup
                         bind:value={sliders.vibrance}
                         name="Vibrance"
@@ -215,7 +216,9 @@
                             })}
                     ></SingleValSliderGroup>
                 </div>
+                <div style="display: flex; height:30px;"></div>
             </div>
+            <div class="controls-bottom-gradient"></div>
         </div>
         <div class="side-panel-footer"></div>
     </div>
@@ -300,8 +303,26 @@
         padding-bottom: 6px;
     }
 
+    .sliders-separator {
+        height: 1px;
+        margin-top: 12px;
+        margin-bottom: 8px;
+        margin-right: 6px;
+        background: var(--color4);
+    }
+
+    .controls-bottom-gradient {
+        position: absolute;
+        width: 23%;
+        min-width: 250px;
+        height: 30px;
+        bottom: 60px;
+        border-radius: 6px;
+        background: linear-gradient(0, var(--bg4), transparent);
+    }
+
     .side-panel-footer {
-        background: var(--bg4);
+        background: var(--bg5);
         height: 48px;
         border-radius: 6px;
     }

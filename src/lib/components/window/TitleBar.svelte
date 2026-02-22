@@ -208,7 +208,7 @@
         align-items: center;
     }
     .window-controls button {
-        width: 40px;
+        width: 35px;
         background: transparent;
         color: var(--color2);
         transition:
