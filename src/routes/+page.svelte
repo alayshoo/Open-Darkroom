@@ -44,6 +44,21 @@
         activePage = index;
     }
 
+    function handlePagerWheel(e: WheelEvent) {
+        // only intercept vertical intent
+        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+
+        const pages = pagerEl?.querySelectorAll<HTMLElement>(".controls-page");
+        const page = pages?.[activePage];
+        if (!page) return;
+
+        // Only if that page can actually scroll vertically
+        if (page.scrollHeight <= page.clientHeight) return;
+
+        e.preventDefault();
+        page.scrollBy({ top: e.deltaY, behavior: "auto" });
+    }
+
     function scrollToPage(index: number) {
         pagerEl?.scrollTo({
             left: index * pagerEl.clientWidth,
@@ -151,6 +166,8 @@
                     class="controls-pager"
                     bind:this={pagerEl}
                     onscroll={handlePagerScroll}
+                    onwheel={handlePagerWheel}
+                    onwheelcapture={handlePagerWheel}
                 >
                     <!-- Sharpness Panel -->
                     <div class="controls-page">
@@ -642,7 +659,9 @@
         </div>
         <div class="side-panel-footer">
             <div class="page-dots">
-                <div style= "position:absolute; left: 10px;"><ExportButton></ExportButton></div>
+                <div style="position:absolute; left: 10px;">
+                    <ExportButton></ExportButton>
+                </div>
                 {#each Array(pageCount) as _, i}
                     <button
                         class="dot"
