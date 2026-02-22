@@ -373,11 +373,12 @@
     }
 
     .sliders-separator {
-        height: 1px;
+        height: 2px;
+        border-radius: 1px;
         margin-top: 12px;
         margin-bottom: 8px;
         margin-right: 6px;
-        background: var(--color4);
+        background: var(--color5);
     }
 
     .controls-bottom-gradient {
@@ -388,6 +389,7 @@
         bottom: 60px;
         border-radius: 6px;
         background: linear-gradient(0, var(--bg4), transparent);
+        pointer-events: none;
     }
 
     .side-panel-footer {

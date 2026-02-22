@@ -8,6 +8,7 @@
     --color2: #b3b3b3;
     --color3: #636363;
     --color4: #4c4c4c;
+    --color5: #303030;
 }
 
 :root[data-theme="darkroom"] {
