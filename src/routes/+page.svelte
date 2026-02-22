@@ -215,6 +215,75 @@
                               newValue: newVal,
                             })}
                     ></SingleValSliderGroup>
+                    <div class="sliders-separator"></div>
+                    <SingleValSliderGroup
+                        bind:value={sliders.contrast}
+                        name="Highlights"
+                        unit="%"
+                        min={-100}
+                        max={100}
+                        decimalPlaces={1}
+                        sliderStep={1}
+                        keyboardStep={0.1}
+                        onCommit={(oldVal, newVal) =>
+                            commit({
+                              type: "slider",
+                              key: "contrast",
+                              oldValue: oldVal,
+                              newValue: newVal,
+                            })}
+                    ></SingleValSliderGroup>
+                    <SingleValSliderGroup
+                        bind:value={sliders.brightness}
+                        name="Shadows"
+                        unit=""
+                        min={-10}
+                        max={10}
+                        decimalPlaces={2}
+                        sliderStep={10}
+                        keyboardStep={1}
+                        onCommit={(oldVal, newVal) =>
+                            commit({
+                              type: "slider",
+                              key: "brightness",
+                              oldValue: oldVal,
+                              newValue: newVal,
+                            })}
+                    ></SingleValSliderGroup>
+                    <SingleValSliderGroup
+                        bind:value={sliders.contrast}
+                        name="Whites"
+                        unit="%"
+                        min={-100}
+                        max={100}
+                        decimalPlaces={1}
+                        sliderStep={1}
+                        keyboardStep={0.1}
+                        onCommit={(oldVal, newVal) =>
+                            commit({
+                            type: "slider",
+                            key: "contrast",
+                            oldValue: oldVal,
+                            newValue: newVal,
+                            })}
+                    ></SingleValSliderGroup>
+                    <SingleValSliderGroup
+                        bind:value={sliders.brightness}
+                        name="Blacks"
+                        unit=""
+                        min={-10}
+                        max={10}
+                        decimalPlaces={2}
+                        sliderStep={10}
+                        keyboardStep={1}
+                        onCommit={(oldVal, newVal) =>
+                            commit({
+                            type: "slider",
+                            key: "brightness",
+                            oldValue: oldVal,
+                            newValue: newVal,
+                            })}
+                    ></SingleValSliderGroup>
                 </div>
                 <div style="display: flex; height:30px;"></div>
             </div>
