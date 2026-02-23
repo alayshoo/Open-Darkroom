@@ -3,6 +3,7 @@
     
     let {
         value = $bindable(50),
+        defaultValue = 50,
         min = 0,
         max = 100,
         step = 1,
@@ -12,6 +13,7 @@
         onInteractionStart = () => {},
     }: {
         value?: number;
+        defaultValue?: number;
         min?: number;
         max?: number;
         step?: number;
@@ -21,7 +23,6 @@
         onInteractionStart?: () => void;
     } = $props();
 
-    const defaultValue = value; // capture default automatically
 
     let bar_percentage = $derived(((value - min) / (max - min)) * 100);
 

@@ -5,6 +5,7 @@
 
     let {
         value = $bindable(50),
+        defaultValue = 50,
         name = "Slider Name",
         unit = "",
         min = 0,
@@ -18,6 +19,7 @@
         onCommit = (_old: number, _new: number) => {},
     }: {
         value?: number;
+        defaultValue?: number;
         name?: string;
         unit?: string;
         min?: number;
@@ -54,12 +56,13 @@
         <span class="name">{name}</span>
         <PrecisionVal
             bind:value
-            {min}
-            {max}
-            {unit}
+            defaultValue={defaultValue}
+            min={min}
+            max={max}
+            unit={unit}
             step={dragStep}
-            {keyboardStep}
-            {decimalPlaces}
+            keyboardStep={keyboardStep}
+            decimalPlaces={decimalPlaces}
             onCommit={handleCommit}
             onInteractionStart={handleInteractionStart}
         ></PrecisionVal>
@@ -67,11 +70,12 @@
     <div class="slider-container">
         <SingleValSlider
             bind:value
-            {min}
-            {max}
+            defaultValue={defaultValue}
+            min={min}
+            max={max}
             step={sliderStep}
-            {gradientStartColor}
-            {gradientEndColor}
+            gradientStartColor={gradientStartColor}
+            gradientEndColor={gradientEndColor}
             onCommit={handleCommit}
             onInteractionStart={handleInteractionStart}
         ></SingleValSlider>

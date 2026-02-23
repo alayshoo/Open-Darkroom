@@ -1,3 +1,5 @@
+// $lib/config/slidersConfig.ts
+
 export const SLIDER_DEFAULTS = {
     wbTemp: 5600,
     wbTint: 0,

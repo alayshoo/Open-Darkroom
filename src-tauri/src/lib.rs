@@ -4,7 +4,7 @@
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![wrap_cursor, grap_cursor])
+        .invoke_handler(tauri::generate_handler![wrap_cursor, grab_cursor])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -49,7 +49,7 @@ fn wrap_cursor(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn grap_cursor(window: tauri::Window, grab: bool) -> Result<(), String> {
+fn grab_cursor(window: tauri::Window, grab: bool) -> Result<(), String> {
     
     let _ = window.set_cursor_grab(grab);
 

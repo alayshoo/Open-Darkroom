@@ -5,6 +5,7 @@
 
     let {
         value = $bindable(0),
+        defaultValue = 0,
         unit = "",
         min = -Infinity,
         max = Infinity,
@@ -15,6 +16,7 @@
         onInteractionStart = () => {},
     }: {
         value: number;
+        defaultValue: number;
         unit?: string;
         min?: number;
         max?: number;
@@ -25,7 +27,6 @@
         onInteractionStart?: () => void;
     } = $props();
 
-    const defaultValue = value; // capture default automatically
 
     let isEditing = $state(false);
     let isDragging = $state(false);
@@ -80,7 +81,7 @@
 
     function handlePointerUp(e: PointerEvent) {
         if (!isDragging) return;
-        void invoke("grap_cursor", { grab: false });
+        void invoke("grab_cursor", { grab: false });
 
         isDragging = false;
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);

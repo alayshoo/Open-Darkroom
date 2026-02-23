@@ -288,6 +288,7 @@
                                 <span class="section-title">White Balance</span>
                                 <SingleValSliderGroup
                                     bind:value={sliders.wbTemp}
+                                    defaultValue={5600}
                                     name="Temperature"
                                     unit="K"
                                     min={1200}
@@ -308,6 +309,7 @@
                                 ></SingleValSliderGroup>
                                 <SingleValSliderGroup
                                     bind:value={sliders.wbTint}
+                                    defaultValue={0}
                                     name="Tint"
                                     unit="%"
                                     min={-100}
@@ -333,11 +335,13 @@
                             </span>
                             <SingleValSliderGroup
                                 bind:value={sliders.exposure}
+                                defaultValue={0}
                                 name="Exposure"
                                 unit="EV"
                                 min={-5}
                                 max={5}
                                 sliderStep={0.1}
+                                dragStep={0.0005}
                                 keyboardStep={0.01}
                                 onCommit={(oldVal, newVal) =>
                                     commit({
@@ -349,6 +353,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
+                                defaultValue={0}
                                 name="Contrast"
                                 unit="%"
                                 min={-100}
@@ -366,11 +371,13 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.brightness}
+                                defaultValue={0}
                                 name="Brightness"
                                 unit=""
                                 min={-10}
                                 max={10}
                                 decimalPlaces={2}
+                                dragStep={0.001}
                                 sliderStep={10}
                                 keyboardStep={1}
                                 onCommit={(oldVal, newVal) =>
@@ -386,6 +393,7 @@
                                     <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.vibrance}
+                                        defaultValue={0}
                                         name="Vibrance"
                                         unit="%"
                                         min={-100}
@@ -404,6 +412,7 @@
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
                                         bind:value={sliders.saturation}
+                                        defaultValue={0}
                                         name="Saturation"
                                         unit="%"
                                         min={-100}
@@ -425,6 +434,7 @@
                             <div class="sliders-separator"></div>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
+                                defaultValue={0}
                                 name="Highlights"
                                 unit="%"
                                 min={-100}
@@ -444,6 +454,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.brightness}
+                                defaultValue={0}
                                 name="Shadows"
                                 unit=""
                                 min={-10}
@@ -463,6 +474,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
+                                defaultValue={0}
                                 name="Whites"
                                 unit="%"
                                 min={-100}
@@ -482,6 +494,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.brightness}
+                                defaultValue={0}
                                 name="Blacks"
                                 unit=""
                                 min={-10}
@@ -512,6 +525,7 @@
                             <div class="sliders-separator"></div>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
+                                defaultValue={0}
                                 name="Highlights"
                                 unit="%"
                                 min={-100}
@@ -531,6 +545,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.brightness}
+                                defaultValue={0}
                                 name="Shadows"
                                 unit=""
                                 min={-10}
@@ -550,6 +565,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.contrast}
+                                defaultValue= {0}
                                 name="Whites"
                                 unit="%"
                                 min={-100}
@@ -569,6 +585,7 @@
                             ></SingleValSliderGroup>
                             <SingleValSliderGroup
                                 bind:value={sliders.brightness}
+                                defaultValue={0}
                                 name="Blacks"
                                 unit=""
                                 min={-10}
@@ -596,6 +613,7 @@
                                 <span class="section-title">HSL</span>
                                 <SingleValSliderGroup
                                     bind:value={sliders.vibrance}
+                                    defaultValue={0}
                                     name="Hue"
                                     unit="º"
                                     min={-100}
@@ -614,6 +632,7 @@
                                 ></SingleValSliderGroup>
                                 <SingleValSliderGroup
                                     bind:value={sliders.vibrance}
+                                    defaultValue={0}
                                     name="Vibrance"
                                     unit="%"
                                     min={-100}
@@ -632,6 +651,7 @@
                                 ></SingleValSliderGroup>
                                 <SingleValSliderGroup
                                     bind:value={sliders.saturation}
+                                    defaultValue={0}
                                     name="Saturation"
                                     unit="%"
                                     min={-100}
