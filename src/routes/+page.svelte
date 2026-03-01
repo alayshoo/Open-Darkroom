@@ -1,7 +1,7 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
-    import { slide } from "svelte/transition";
+    import { slide, blur } from "svelte/transition";
     import { tick } from "svelte";
 
     import TitleBar from "$lib/components/window/TitleBar.svelte";
@@ -10,7 +10,9 @@
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/SingleValSliderGroup.svelte";
+    import TripleValSlider from "$lib/components/inputs/TripleValSlider.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
+    import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
 
     import {
         SLIDER_DEFAULTS,
@@ -31,17 +33,41 @@
     import type { Action } from "$lib/types/historyActions";
 
     import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
+    import TripleValSliderGroup from "$lib/components/inputs/TripleValSliderGroup.svelte";
+
+    // ===== Control Modes =====
+
+    let isDarkroom = $state(false);
+    let outgoingPager: "normal" | "darkroom" | null = $state(null);
+    let outgoingDots: "normal" | "darkroom" | null = $state(null);
+
+    $effect(() => {
+        document.documentElement.dataset.theme = isDarkroom ? "darkroom" : "";
+    });
+
+    function handleModeToggle() {
+        isDarkroom = !isDarkroom;
+    }
 
     // ===== Control Pages =====
 
-    let pageCount = $state(4);
-    let activePage = $state(0);
-    let pagerEl: HTMLDivElement;
+    let activePageNormal = $state(1);
+    let activePageDarkroom = $state(0);
+    let pagerElNormal: HTMLDivElement | null = $state(null);
+    let pagerElDarkroom: HTMLDivElement | null = $state(null);
 
-    function handlePagerScroll() {
-        if (!pagerEl) return;
-        const index = Math.round(pagerEl.scrollLeft / pagerEl.clientWidth);
-        activePage = index;
+    function handleNormalPagerScroll() {
+        if (!pagerElNormal) return;
+        activePageNormal = Math.round(
+            pagerElNormal.scrollLeft / pagerElNormal.clientWidth,
+        );
+    }
+
+    function handleDarkroomPagerScroll() {
+        if (!pagerElDarkroom) return;
+        activePageDarkroom = Math.round(
+            pagerElDarkroom.scrollLeft / pagerElDarkroom.clientWidth,
+        );
     }
 
     function handlePagerWheel(e: WheelEvent) {
@@ -60,17 +86,36 @@
     }
 
     function scrollToPage(index: number) {
-        pagerEl?.scrollTo({
-            left: index * pagerEl.clientWidth,
+        const el = isDarkroom ? pagerElDarkroom : pagerElNormal;
+        el?.scrollTo({
+            left: index * el.clientWidth,
             behavior: "smooth",
         });
     }
 
+    let lastRestoredNormal: HTMLDivElement | null = null;
+    let lastRestoredDarkroom: HTMLDivElement | null = null;
     $effect(() => {
-        if (pagerEl) {
-            pagerEl.scrollLeft = pagerEl.clientWidth;
-            activePage = 1;
+        if (
+            pagerElNormal &&
+            !isDarkroom &&
+            lastRestoredNormal !== pagerElNormal
+        ) {
+            lastRestoredNormal = pagerElNormal;
+            pagerElNormal.scrollLeft =
+                activePageNormal * pagerElNormal.clientWidth;
         }
+        if (isDarkroom) lastRestoredNormal = null;
+
+        if (
+            pagerElDarkroom &&
+            isDarkroom &&
+            lastRestoredDarkroom !== pagerElDarkroom
+        ) {
+            lastRestoredDarkroom = pagerElDarkroom;
+            pagerElDarkroom.scrollLeft = 0;
+        }
+        if (!isDarkroom) lastRestoredDarkroom = null;
     });
 
     function movePage(right?: boolean) {
@@ -98,20 +143,26 @@
     let isRgb = $state(true);
     let savedColorValues: Partial<typeof sliders> | null = null;
 
+    let activePage = $derived(
+        isDarkroom ? activePageDarkroom : activePageNormal,
+    );
+    let pageCount = $derived(isDarkroom ? 1 : isRgb ? 4 : 3);
+    let pagerEl = $derived<HTMLDivElement | null>(
+        isDarkroom ? pagerElDarkroom : pagerElNormal,
+    );
+
     async function handleColorModeToggle(isBw: boolean) {
         if (isBw) {
             savedColorValues = {};
             for (const k of COLOR_KEYS) savedColorValues[k] = sliders[k];
             animateObject(sliders, BW_TARGETS);
-            pageCount = 3;
-            if (activePage > 2) {
+            if (activePageNormal > 2) {
                 await tick(); // wait for the {#if isRgb} block to unmount
                 scrollToPage(2);
             }
         } else if (savedColorValues) {
             animateObject(sliders, savedColorValues);
             savedColorValues = null;
-            pageCount = 4;
         }
     }
 
@@ -161,536 +212,616 @@
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
             </div>
             <div class="controls-section">
-                <div class="controls-top-gradient"></div>
-                <div
-                    class="controls-pager"
-                    bind:this={pagerEl}
-                    onscroll={handlePagerScroll}
-                    onwheel={handlePagerWheel}
-                    onwheelcapture={handlePagerWheel}
-                >
-                    <!-- Sharpness Panel -->
-                    <div class="controls-page">
-                        <div class="slider-section">
-                            <span class="section-title">Sharpness</span>
-                            <SingleValSliderGroup
-                                bind:value={sliders.exposure}
-                                name="Clarity"
-                                unit="EV"
-                                min={-5}
-                                max={5}
-                                sliderStep={0.1}
-                                keyboardStep={0.01}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "exposure",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                name="Texture"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                        </div>
-                        <div class="slider-section">
-                            <span class="section-title">Unsharp Mask</span>
-                            <SingleValSliderGroup
-                                bind:value={sliders.exposure}
-                                name="Amount"
-                                unit="EV"
-                                min={-5}
-                                max={5}
-                                sliderStep={0.1}
-                                keyboardStep={0.01}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "exposure",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                name="Radius"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.exposure}
-                                name="Luma Threshold"
-                                unit="EV"
-                                min={-5}
-                                max={5}
-                                sliderStep={0.1}
-                                keyboardStep={0.01}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "exposure",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                name="Detail Threshold"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                        </div>
-                        <div style="display: flex; height:30px;"></div>
-                    </div>
-                    <!-- Light & Color Panel -->
-                    <div class="controls-page">
-                        {#if isRgb}
-                            <div
-                                class="slider-section"
-                                transition:slide={{ duration: 200 }}
-                            >
-                                <span class="section-title">White Balance</span>
-                                <SingleValSliderGroup
-                                    bind:value={sliders.wbTemp}
-                                    defaultValue={5600}
-                                    name="Temperature"
-                                    unit="K"
-                                    min={1200}
-                                    max={10000}
-                                    decimalPlaces={0}
-                                    sliderStep={100}
-                                    dragStep={1}
-                                    keyboardStep={10}
-                                    gradientStartColor="#3EAFFF"
-                                    gradientEndColor="#FD8B00"
-                                    onCommit={(oldVal, newVal) =>
-                                        commit({
-                                            type: "slider",
-                                            key: "wbTemp",
-                                            oldValue: oldVal,
-                                            newValue: newVal,
-                                        })}
-                                ></SingleValSliderGroup>
-                                <SingleValSliderGroup
-                                    bind:value={sliders.wbTint}
-                                    defaultValue={0}
-                                    name="Tint"
-                                    unit="%"
-                                    min={-100}
-                                    max={100}
-                                    decimalPlaces={1}
-                                    sliderStep={1}
-                                    keyboardStep={0.1}
-                                    gradientStartColor="#64FF76"
-                                    gradientEndColor="#FF66F7"
-                                    onCommit={(oldVal, newVal) =>
-                                        commit({
-                                            type: "slider",
-                                            key: "wbTint",
-                                            oldValue: oldVal,
-                                            newValue: newVal,
-                                        })}
-                                ></SingleValSliderGroup>
-                            </div>
-                        {/if}
-                        <div class="slider-section">
-                            <span class="section-title">
-                                {isRgb ? "Light & Colour" : "Light"}
-                            </span>
-                            <SingleValSliderGroup
-                                bind:value={sliders.exposure}
-                                defaultValue={0}
-                                name="Exposure"
-                                unit="EV"
-                                min={-5}
-                                max={5}
-                                sliderStep={0.1}
-                                dragStep={0.0005}
-                                keyboardStep={0.01}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "exposure",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                defaultValue={0}
-                                name="Contrast"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.brightness}
-                                defaultValue={0}
-                                name="Brightness"
-                                unit=""
-                                min={-10}
-                                max={10}
-                                decimalPlaces={2}
-                                dragStep={0.001}
-                                sliderStep={10}
-                                keyboardStep={1}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "brightness",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            {#if isRgb}
-                                <div transition:slide={{ duration: 200 }}>
+                <div class="controls-pager-wrapper">
+                    {#if !isDarkroom}
+                        <div
+                            class="controls-pager"
+                            class:outgoing={outgoingPager === "normal"}
+                            bind:this={pagerElNormal}
+                            onscroll={handleNormalPagerScroll}
+                            onwheel={handlePagerWheel}
+                            onwheelcapture={handlePagerWheel}
+                            onoutrostart={() => (outgoingPager = "normal")}
+                            onoutroend={() => (outgoingPager = null)}
+                            transition:blur={{ duration: 500, amount: 30 }}
+                        >
+                            <!-- Sharpness Panel -->
+                            <div class="controls-page">
+                                <div class="slider-section">
+                                    <span class="section-title">Sharpness</span>
+                                    <div
+                                        style="display:flex; width: 100%; aspect-ratio: 1.5 / 1; background: black; border-radius: 6px;"
+                                    ></div>
                                     <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.vibrance}
-                                        defaultValue={0}
-                                        name="Vibrance"
-                                        unit="%"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientEndColor="#FF0509"
+                                        bind:value={sliders.exposure}
+                                        name="Clarity"
+                                        unit="EV"
+                                        min={-5}
+                                        max={5}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "vibrance",
+                                                key: "exposure",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.saturation}
-                                        defaultValue={0}
-                                        name="Saturation"
+                                        bind:value={sliders.contrast}
+                                        name="Texture"
                                         unit="%"
                                         min={-100}
                                         max={100}
                                         decimalPlaces={1}
                                         sliderStep={1}
                                         keyboardStep={0.1}
-                                        gradientEndColor="#FF0509"
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "saturation",
+                                                key: "contrast",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
+                                <div class="slider-section">
+                                    <span class="section-title"
+                                        >Unsharp Mask</span
+                                    >
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.exposure}
+                                        name="Amount"
+                                        unit="EV"
+                                        min={-5}
+                                        max={5}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "exposure",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        name="Radius"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.exposure}
+                                        name="Luma Threshold"
+                                        unit="EV"
+                                        min={-5}
+                                        max={5}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "exposure",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        name="Detail Threshold"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                </div>
+                                <div style="display: flex; height:30px;"></div>
+                            </div>
+                            <!-- Light & Color Panel -->
+                            <div class="controls-page">
+                                {#if isRgb}
+                                    <div
+                                        class="slider-section"
+                                        transition:slide={{ duration: 200 }}
+                                    >
+                                        <span class="section-title"
+                                            >White Balance</span
+                                        >
+                                        <SingleValSliderGroup
+                                            bind:value={sliders.wbTemp}
+                                            defaultValue={5600}
+                                            name="Temperature"
+                                            unit="K"
+                                            min={1200}
+                                            max={10000}
+                                            decimalPlaces={0}
+                                            sliderStep={100}
+                                            dragStep={1}
+                                            keyboardStep={10}
+                                            gradientStartColor="#3EAFFF"
+                                            gradientEndColor="#FD8B00"
+                                            onCommit={(oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key: "wbTemp",
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></SingleValSliderGroup>
+                                        <SingleValSliderGroup
+                                            bind:value={sliders.wbTint}
+                                            defaultValue={0}
+                                            name="Tint"
+                                            unit="%"
+                                            min={-100}
+                                            max={100}
+                                            decimalPlaces={1}
+                                            sliderStep={1}
+                                            keyboardStep={0.1}
+                                            gradientStartColor="#64FF76"
+                                            gradientEndColor="#FF66F7"
+                                            onCommit={(oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key: "wbTint",
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></SingleValSliderGroup>
+                                    </div>
+                                {/if}
+                                <div class="slider-section">
+                                    <span class="section-title">
+                                        {isRgb ? "Light & Colour" : "Light"}
+                                    </span>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.exposure}
+                                        defaultValue={0}
+                                        name="Exposure"
+                                        unit="EV"
+                                        min={-5}
+                                        max={5}
+                                        sliderStep={0.1}
+                                        dragStep={0.0005}
+                                        keyboardStep={0.01}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "exposure",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        defaultValue={0}
+                                        name="Contrast"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.brightness}
+                                        defaultValue={0}
+                                        name="Brightness"
+                                        unit=""
+                                        min={-10}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        dragStep={0.001}
+                                        sliderStep={10}
+                                        keyboardStep={1}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "brightness",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    {#if isRgb}
+                                        <div
+                                            transition:slide={{ duration: 200 }}
+                                        >
+                                            <div
+                                                class="sliders-separator"
+                                            ></div>
+                                            <SingleValSliderGroup
+                                                bind:value={sliders.vibrance}
+                                                defaultValue={0}
+                                                name="Vibrance"
+                                                unit="%"
+                                                min={-100}
+                                                max={100}
+                                                decimalPlaces={1}
+                                                sliderStep={1}
+                                                keyboardStep={0.1}
+                                                gradientEndColor="#FF0509"
+                                                onCommit={(oldVal, newVal) =>
+                                                    commit({
+                                                        type: "slider",
+                                                        key: "vibrance",
+                                                        oldValue: oldVal,
+                                                        newValue: newVal,
+                                                    })}
+                                            ></SingleValSliderGroup>
+                                            <SingleValSliderGroup
+                                                bind:value={sliders.saturation}
+                                                defaultValue={0}
+                                                name="Saturation"
+                                                unit="%"
+                                                min={-100}
+                                                max={100}
+                                                decimalPlaces={1}
+                                                sliderStep={1}
+                                                keyboardStep={0.1}
+                                                gradientEndColor="#FF0509"
+                                                onCommit={(oldVal, newVal) =>
+                                                    commit({
+                                                        type: "slider",
+                                                        key: "saturation",
+                                                        oldValue: oldVal,
+                                                        newValue: newVal,
+                                                    })}
+                                            ></SingleValSliderGroup>
+                                        </div>
+                                    {/if}
+                                    <div class="sliders-separator"></div>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        defaultValue={0}
+                                        name="Highlights"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        gradientStartColor={"#606060"}
+                                        gradientEndColor={"#afafaf"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.brightness}
+                                        defaultValue={0}
+                                        name="Shadows"
+                                        unit=""
+                                        min={-10}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        sliderStep={10}
+                                        keyboardStep={1}
+                                        gradientStartColor={"#303030"}
+                                        gradientEndColor={"#3f3f3f"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "brightness",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        defaultValue={0}
+                                        name="Whites"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        gradientStartColor={"#b0b0b0"}
+                                        gradientEndColor={"#ffffff"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.brightness}
+                                        defaultValue={0}
+                                        name="Blacks"
+                                        unit=""
+                                        min={-10}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        sliderStep={10}
+                                        keyboardStep={1}
+                                        gradientStartColor={"#000000"}
+                                        gradientEndColor={"#161616"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "brightness",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                </div>
+                                <div style="display: flex; height:30px;"></div>
+                            </div>
+                            <!-- Curves Panel -->
+                            <div class="controls-page">
+                                <div class="slider-section">
+                                    <span class="section-title">Curves</span>
+                                    <div
+                                        style="display:flex; width: 100%; aspect-ratio: 1 / 1; background: black; border-radius: 6px;"
+                                    ></div>
+                                    <div class="sliders-separator"></div>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        defaultValue={0}
+                                        name="Highlights"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        gradientStartColor={"#606060"}
+                                        gradientEndColor={"#afafaf"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.brightness}
+                                        defaultValue={0}
+                                        name="Shadows"
+                                        unit=""
+                                        min={-10}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        sliderStep={10}
+                                        keyboardStep={1}
+                                        gradientStartColor={"#303030"}
+                                        gradientEndColor={"#3f3f3f"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "brightness",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.contrast}
+                                        defaultValue={0}
+                                        name="Whites"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        gradientStartColor={"#b0b0b0"}
+                                        gradientEndColor={"#ffffff"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "contrast",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.brightness}
+                                        defaultValue={0}
+                                        name="Blacks"
+                                        unit=""
+                                        min={-10}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        sliderStep={10}
+                                        keyboardStep={1}
+                                        gradientStartColor={"#000000"}
+                                        gradientEndColor={"#161616"}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "brightness",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                </div>
+                                <div style="display: flex; height:30px;"></div>
+                            </div>
+                            <!-- HSL Panel -->
+                            {#if isRgb}
+                                <div class="controls-page">
+                                    <div class="slider-section">
+                                        <span class="section-title">HSL</span>
+                                        <SingleValSliderGroup
+                                            bind:value={sliders.vibrance}
+                                            defaultValue={0}
+                                            name="Hue"
+                                            unit="º"
+                                            min={-100}
+                                            max={100}
+                                            decimalPlaces={1}
+                                            sliderStep={1}
+                                            keyboardStep={0.1}
+                                            gradientEndColor="#FF0509"
+                                            onCommit={(oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key: "vibrance",
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></SingleValSliderGroup>
+                                        <SingleValSliderGroup
+                                            bind:value={sliders.vibrance}
+                                            defaultValue={0}
+                                            name="Vibrance"
+                                            unit="%"
+                                            min={-100}
+                                            max={100}
+                                            decimalPlaces={1}
+                                            sliderStep={1}
+                                            keyboardStep={0.1}
+                                            gradientEndColor="#FF0509"
+                                            onCommit={(oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key: "vibrance",
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></SingleValSliderGroup>
+                                        <SingleValSliderGroup
+                                            bind:value={sliders.saturation}
+                                            defaultValue={0}
+                                            name="Saturation"
+                                            unit="%"
+                                            min={-100}
+                                            max={100}
+                                            decimalPlaces={1}
+                                            sliderStep={1}
+                                            keyboardStep={0.1}
+                                            gradientEndColor="#FF0509"
+                                            onCommit={(oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key: "saturation",
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></SingleValSliderGroup>
+                                        <div class="sliders-separator"></div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; height:30px;"></div>
                             {/if}
-                            <div class="sliders-separator"></div>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                defaultValue={0}
-                                name="Highlights"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientStartColor={"#606060"}
-                                gradientEndColor={"#afafaf"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.brightness}
-                                defaultValue={0}
-                                name="Shadows"
-                                unit=""
-                                min={-10}
-                                max={10}
-                                decimalPlaces={2}
-                                sliderStep={10}
-                                keyboardStep={1}
-                                gradientStartColor={"#303030"}
-                                gradientEndColor={"#3f3f3f"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "brightness",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                defaultValue={0}
-                                name="Whites"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientStartColor={"#b0b0b0"}
-                                gradientEndColor={"#ffffff"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.brightness}
-                                defaultValue={0}
-                                name="Blacks"
-                                unit=""
-                                min={-10}
-                                max={10}
-                                decimalPlaces={2}
-                                sliderStep={10}
-                                keyboardStep={1}
-                                gradientStartColor={"#000000"}
-                                gradientEndColor={"#161616"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "brightness",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
                         </div>
-                        <div style="display: flex; height:30px;"></div>
-                    </div>
-                    <!-- Curves Panel -->
-                    <div class="controls-page">
-                        <div class="slider-section">
-                            <span class="section-title">Curves</span>
-                            <div
-                                style="display:flex; width: 100%; aspect-ratio: 1 / 1; background: black; border-radius: 6px;"
-                            ></div>
-                            <div class="sliders-separator"></div>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                defaultValue={0}
-                                name="Highlights"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientStartColor={"#606060"}
-                                gradientEndColor={"#afafaf"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.brightness}
-                                defaultValue={0}
-                                name="Shadows"
-                                unit=""
-                                min={-10}
-                                max={10}
-                                decimalPlaces={2}
-                                sliderStep={10}
-                                keyboardStep={1}
-                                gradientStartColor={"#303030"}
-                                gradientEndColor={"#3f3f3f"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "brightness",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.contrast}
-                                defaultValue= {0}
-                                name="Whites"
-                                unit="%"
-                                min={-100}
-                                max={100}
-                                decimalPlaces={1}
-                                sliderStep={1}
-                                keyboardStep={0.1}
-                                gradientStartColor={"#b0b0b0"}
-                                gradientEndColor={"#ffffff"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "contrast",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                            <SingleValSliderGroup
-                                bind:value={sliders.brightness}
-                                defaultValue={0}
-                                name="Blacks"
-                                unit=""
-                                min={-10}
-                                max={10}
-                                decimalPlaces={2}
-                                sliderStep={10}
-                                keyboardStep={1}
-                                gradientStartColor={"#000000"}
-                                gradientEndColor={"#161616"}
-                                onCommit={(oldVal, newVal) =>
-                                    commit({
-                                        type: "slider",
-                                        key: "brightness",
-                                        oldValue: oldVal,
-                                        newValue: newVal,
-                                    })}
-                            ></SingleValSliderGroup>
-                        </div>
-                        <div style="display: flex; height:30px;"></div>
-                    </div>
-                    <!-- HSL Panel -->
-                    {#if isRgb}
-                        <div class="controls-page">
-                            <div class="slider-section">
-                                <span class="section-title">HSL</span>
-                                <SingleValSliderGroup
-                                    bind:value={sliders.vibrance}
-                                    defaultValue={0}
-                                    name="Hue"
-                                    unit="º"
-                                    min={-100}
-                                    max={100}
-                                    decimalPlaces={1}
-                                    sliderStep={1}
-                                    keyboardStep={0.1}
-                                    gradientEndColor="#FF0509"
-                                    onCommit={(oldVal, newVal) =>
-                                        commit({
-                                            type: "slider",
-                                            key: "vibrance",
-                                            oldValue: oldVal,
-                                            newValue: newVal,
-                                        })}
-                                ></SingleValSliderGroup>
-                                <SingleValSliderGroup
-                                    bind:value={sliders.vibrance}
-                                    defaultValue={0}
-                                    name="Vibrance"
-                                    unit="%"
-                                    min={-100}
-                                    max={100}
-                                    decimalPlaces={1}
-                                    sliderStep={1}
-                                    keyboardStep={0.1}
-                                    gradientEndColor="#FF0509"
-                                    onCommit={(oldVal, newVal) =>
-                                        commit({
-                                            type: "slider",
-                                            key: "vibrance",
-                                            oldValue: oldVal,
-                                            newValue: newVal,
-                                        })}
-                                ></SingleValSliderGroup>
-                                <SingleValSliderGroup
-                                    bind:value={sliders.saturation}
-                                    defaultValue={0}
-                                    name="Saturation"
-                                    unit="%"
-                                    min={-100}
-                                    max={100}
-                                    decimalPlaces={1}
-                                    sliderStep={1}
-                                    keyboardStep={0.1}
-                                    gradientEndColor="#FF0509"
-                                    onCommit={(oldVal, newVal) =>
-                                        commit({
-                                            type: "slider",
-                                            key: "saturation",
-                                            oldValue: oldVal,
-                                            newValue: newVal,
-                                        })}
-                                ></SingleValSliderGroup>
-                                <div class="sliders-separator"></div>
+                    {/if}
+                    {#if isDarkroom}
+                        <div
+                            class="controls-pager"
+                            class:outgoing={outgoingPager === "darkroom"}
+                            bind:this={pagerElDarkroom}
+                            onscroll={handleDarkroomPagerScroll}
+                            onwheel={handlePagerWheel}
+                            onwheelcapture={handlePagerWheel}
+                            onoutrostart={() => (outgoingPager = "darkroom")}
+                            onoutroend={() => (outgoingPager = null)}
+                            transition:blur={{ duration: 500, amount: 30 }}
+                        >
+                            <div class="controls-page">
+                                <div class="slider-section">
+                                    <TripleValSliderGroup
+                                        name="Red Input"
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                    ></TripleValSliderGroup>
+                                    <TripleValSliderGroup
+                                        name="Green Input"
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                    ></TripleValSliderGroup>
+                                    <TripleValSliderGroup
+                                        name="Blue Input"
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                    ></TripleValSliderGroup>
+                                </div>
                             </div>
                         </div>
-                        <div style="display: flex; height:30px;"></div>
                     {/if}
                 </div>
-                <div class="controls-bottom-gradient"></div>
             </div>
         </div>
         <div class="side-panel-footer">
-            <div class="page-dots">
-                <div style="position:absolute; left: 10px;">
-                    <ExportButton></ExportButton>
-                </div>
-                {#each Array(pageCount) as _, i}
-                    <button
-                        class="dot"
-                        class:active={activePage === i}
-                        onclick={() => scrollToPage(i)}
-                        aria-label="Go to page {i + 1} of {pageCount}"
-                        aria-current={activePage === i ? "step" : undefined}
-                    ></button>
-                {/each}
+            <div style="position:absolute; left: 10px;">
+                <ExportButton></ExportButton>
+            </div>
+            <div class="page-dots-wrapper">
+                {#if !isDarkroom}
+                    <div
+                        class="page-dots"
+                        class:outgoing={outgoingDots === "normal"}
+                        onoutrostart={() => (outgoingDots = "normal")}
+                        onoutroend={() => (outgoingDots = null)}
+                        transition:blur={{ duration: 500, amount: 30 }}
+                    >
+                        {#each Array(isRgb ? 4 : 3) as _, i}
+                            <button
+                                class="dot"
+                                class:active={activePageNormal === i}
+                                onclick={() => scrollToPage(i)}
+                                aria-label="Go to page {i + 1}"
+                                aria-current={activePageNormal === i ? "step" : undefined}
+                            ></button>
+                        {/each}
+                    </div>
+                {/if}
+                {#if isDarkroom}
+                    <div
+                        class="page-dots"
+                        class:outgoing={outgoingDots === "darkroom"}
+                        onoutrostart={() => (outgoingDots = "darkroom")}
+                        onoutroend={() => (outgoingDots = null)}
+                        transition:blur={{ duration: 500, amount: 30 }}
+                    >
+                        <button
+                            class="dot active"
+                            aria-label="Darkroom page"
+                            aria-current="step"
+                        ></button>
+                    </div>
+                {/if}
+            </div>
+            <div style="position: absolute; right: 10px;">
+                <ModeToggle bind:isDarkroom onModeToggle={handleModeToggle}
+                ></ModeToggle>
             </div>
         </div>
     </div>
@@ -713,7 +844,7 @@
     }
 
     .image-panel {
-        background: var(--bg5);
+        background: #262626;
         flex: 1;
         border-radius: 6px;
         overflow: hidden;
@@ -749,6 +880,7 @@
 
     .side-panel {
         background: var(--bg4);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread) var(--panelInnerShadow);
         flex: 1;
         border-radius: 12px;
         display: flex;
@@ -769,13 +901,26 @@
         position: relative;
     }
 
-    .controls-pager {
-        display: flex;
+    .controls-pager-wrapper {
+        position: relative;
         flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .controls-pager {
+        position: absolute;
+        inset: 0;
+        display: flex;
         overflow-x: auto;
         overflow-y: hidden;
         scroll-snap-type: x mandatory;
         scrollbar-width: none;
+        z-index: 1;
+        backface-visibility: hidden;
+    }
+    .controls-pager.outgoing {
+        z-index: 2;
     }
     .controls-pager::-webkit-scrollbar {
         display: none;
@@ -787,6 +932,21 @@
         overflow-y: auto;
         scrollbar-width: none;
         scroll-snap-align: start;
+        /* Top and bottom fades via mask - no overlays, so inner shadow on side-panel stays visible */
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            black 20px,
+            black calc(100% - 24px),
+            transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            black 20px,
+            black calc(100% - 24px),
+            transparent 100%
+        );
     }
     .controls-page::-webkit-scrollbar {
         display: none;
@@ -817,28 +977,6 @@
         background: var(--color5);
     }
 
-    .controls-top-gradient {
-        position: absolute;
-        width: 100%;
-        height: 20px;
-        top: 0;
-        border-radius: 6px;
-        background: linear-gradient(0, transparent, var(--bg4), var(--bg4));
-        pointer-events: none;
-        z-index: 999;
-    }
-
-    .controls-bottom-gradient {
-        position: absolute;
-        width: 100%;
-        height: 20px;
-        bottom: 0;
-        border-radius: 6px;
-        background: linear-gradient(0, var(--bg4), var(--bg4), transparent);
-        pointer-events: none;
-        z-index: 999;
-    }
-
     .side-panel-footer {
         display: flex;
         position: relative;
@@ -847,14 +985,32 @@
         align-items: center;
         height: 48px;
         border-radius: 12px;
-        background: var(--bg5);
+        background: var(--bg4);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread) var(--panelInnerShadow);
     }
 
-    .page-dots {
+    .page-dots-wrapper {
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-width: 72px; /* fit up to 4 dots + gaps */
+    }
+
+    .page-dots-wrapper .page-dots {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1;
+        backface-visibility: hidden;
         display: flex;
         justify-content: center;
         align-items: center;
         gap: 12px;
+    }
+    .page-dots-wrapper .page-dots.outgoing {
+        z-index: 2;
     }
 
     .dot {

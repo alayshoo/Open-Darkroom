@@ -201,7 +201,7 @@
         user-select: none;
 
         background: transparent;
-        color: var(--color1);
+        color: var(--color1s);
 
         font-family: "Figtree", sans-serif;
         font-weight: 500;
@@ -219,7 +219,7 @@
     }
     .value-input::selection {
         background: #333333; /* your custom highlight color */
-        color: var(--color1); /* text color when highlighted */
+        color: var(--color1s); /* text color when highlighted */
     }
 
     .value-input-box {
@@ -236,7 +236,7 @@
         outline: none;
         background: transparent;
         font: inherit;
-        color: var(--color1);
+        color: var(--color1s);
         padding: 0;
         min-width: 0;
         position: absolute;

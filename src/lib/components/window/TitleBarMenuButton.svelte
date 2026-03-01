@@ -1,5 +1,6 @@
 <!-- lib/components/MenuButton.svelte -->
 <script lang="ts">
+    import "$lib/styles/palette.css"
     import { onMount, onDestroy } from "svelte";
     import { blur } from "svelte/transition";
 
@@ -108,6 +109,7 @@
     }
 
     .menu-button {
+        position: relative;
         display: inline-flex;
         justify-content: center;
         align-items: center;

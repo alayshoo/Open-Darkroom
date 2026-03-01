@@ -3,6 +3,9 @@
     import { getCurrentWindow } from "@tauri-apps/api/window";
     import { onMount, onDestroy } from "svelte";
     import MenuButton from "./TitleBarMenuButton.svelte";
+
+    import "$lib/styles/palette.css";
+
     const appWindow = getCurrentWindow();
 
     let {
@@ -224,8 +227,13 @@
         background: transparent;
         color: var(--color2);
         transition:
+            color 0.5s ease,
             background 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1);
+    }
+    .window-controls button svg path,
+    .window-controls button svg rect {
+        transition: fill 0.5s ease, stroke 0.35s ease;
     }
     .window-controls button:hover {
         background: var(--bg3);
@@ -245,6 +253,7 @@
         text-align: center;
         pointer-events: auto;
         transition:
+            color 0.5s ease,
             border-color 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1),
             height 0.2s cubic-bezier(0.2, 0, 0, 1),
@@ -264,8 +273,8 @@
 
     /* Change text selection color */
     .window-title::selection {
-        background: #333333; /* your custom highlight color */
-        color: var(--color1); /* text color when highlighted */
+        background: var(--bg5); 
+        color: var(--color1); 
     }
 
     .drag {

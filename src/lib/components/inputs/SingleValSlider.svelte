@@ -1,5 +1,7 @@
 <!-- lib/components/SingleValSlider.svelte -->
 <script lang="ts">
+
+    import "$lib/styles/palette.css"
     
     let {
         value = $bindable(50),
@@ -186,7 +188,7 @@
         border-radius: 5px;
         transform: translate(-50%, -50%);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        transition: width 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), height 0.2s cubic-bezier(0.2, 0.0, 0, 1.0);
+        transition: width 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), height 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), background 0.6s cubic-bezier(0.2, 0.0, 0, 1.0);
     }
 
     .pointer::before {    /**Expands the bounding box of pointer*/
