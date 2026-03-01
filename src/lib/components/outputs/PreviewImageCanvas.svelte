@@ -1,18 +1,24 @@
 <!-- src/lib/components/PreviewImageCanvas.svelte -->
 <script lang="ts">
     import type { Adjustments } from "$lib/types/adjustments";
-    import type { GPUCanvasLink, GPUImage, Renderer } from "$lib/types/gpuTypes";
+    import type {
+        GPUCanvasLink,
+        GPUImage,
+        Renderer,
+    } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
     import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
-    import { uploadImageToGPU } from "$lib/gpu/gpuTextureUpload";
+    import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createRenderer } from "$lib/gpu/renderer";
+    import { type ImagePayload } from "$lib/types/imagePayload";
 
+    // Props
     let {
         adjustments,
-        imageSrc,
+        imagePayload,
     }: {
         adjustments: Adjustments;
-        imageSrc: string | null;
+        imagePayload: ImagePayload | null;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -47,32 +53,32 @@
 
     // Load image when src changes
     $effect(() => {
-        if (!renderer || !imageSrc) return;
+        if (!renderer || !imagePayload) return;
 
         const localRenderer = renderer;
 
-        (async () => {
-            const res = await fetch(imageSrc);
-            const blob = await res.blob();
-            const bitmap = await createImageBitmap(blob);
+        // Resize canvas to match image
+        canvas.width = imagePayload.width;
+        canvas.height = imagePayload.height;
 
-            // Resize canvas to image
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
+        // Re-link canvas after resize
+        linkCanvas2GPU(canvas, gpu).then((link) => {
+            canvasLink = link;
 
-            // Re-link canvas after resize (reconfigures the GPU context)
-            canvasLink = await linkCanvas2GPU(canvas, gpu);
-
-            // Clean up old image
+            // Clean up old texture
             image?.texture.destroy();
 
-            // Upload image
-            image = await uploadImageToGPU(gpu.device, bitmap);
-            bitmap.close();
+            // Upload via the raw pixel path
+            image = uploadRawPixelsToGPU(
+                gpu.device,
+                imagePayload.pixels,
+                imagePayload.width,
+                imagePayload.height,
+            );
 
             localRenderer.loadImage(image);
             localRenderer.render();
-        })();
+        });
     });
 
     // Re-render on adjustment changes

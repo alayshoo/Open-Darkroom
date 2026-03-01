@@ -5,16 +5,17 @@ interface ShortcutActions {
     redo: () => void;
     movePage: (right?: boolean) => void;
     changeMode: () => void;
+    openImage: () => void;
 }
 
-export function createKeydownHandler({ undo, redo, movePage, changeMode }: ShortcutActions) {
+export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage }: ShortcutActions) {
     return (e: KeyboardEvent) => {
         let handled = false;
     
         if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
             undo();
             handled = true;
-        } else if ((e.ctrlKey && e.key === "Z") || (e.ctrlKey && e.shiftKey && e.key === "z")) {
+        } else if (e.ctrlKey && e.shiftKey && e.key === "z") {
             redo();
             handled = true;
         } else if (e.key === ".") {
@@ -23,10 +24,13 @@ export function createKeydownHandler({ undo, redo, movePage, changeMode }: Short
         } else if (e.key === ",") {
             movePage(false);
             handled = true;
-        } else if (e.key === "M" || e.key === "m") {
+        } else if (e.key === "m") {
             changeMode();
             handled = true;
-        }   
+        } else if (e.ctrlKey && e.key === "o") {
+            openImage();
+            handled = true
+        }
     
         if (handled) {
             e.preventDefault();

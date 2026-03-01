@@ -18,6 +18,9 @@
     import { SLIDER_DEFAULTS, COLOR_KEYS, BW_TARGETS, type Sliders, } from "$lib/config/slidersConfig";
     import { mapSlidersToAdjustments } from "$lib/types/adjustments";
 
+    import { type ImagePayload } from "$lib/types/imagePayload";
+    import { openImage } from "$lib/utils/openImage";
+
     import { animateObject } from "$lib/utils/animateObject";
 
     import { history } from "$lib/history/history.svelte";
@@ -153,6 +156,16 @@
         }
     }
 
+
+    // ===== Image =====
+
+    let imagePayload: ImagePayload | null = $state(null)
+
+    async function handleOpenImage() {
+        imagePayload = await openImage();
+    }
+
+
     // ===== History =====
     const stateAccessors: StateAccessors = {
         getSlider: (key) => sliders[key as keyof Sliders],
@@ -178,17 +191,19 @@
         redo: redo,
         movePage: movePage,
         changeMode: handleModeToggle,
+        openImage: handleOpenImage,
     });
+
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<TitleBar {undo} {redo}></TitleBar>
+<TitleBar {undo} {redo} open={handleOpenImage}></TitleBar>
 <div class="container">
     <div class="toolbar"></div>
     <div class="image-panel">
         <div class="preview-container">
-            <PreviewImageCanvas {adjustments} imageSrc="/test.jpg" />
+            <PreviewImageCanvas {adjustments} {imagePayload} />
         </div>
     </div>
     <div class="side-bar">

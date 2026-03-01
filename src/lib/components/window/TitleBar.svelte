@@ -13,11 +13,13 @@
         editable = false,
         undo = () => {},
         redo = () => {},
+        open = () => {},
     }: {
         title?: string;
         editable?: boolean;
         undo?: () => void;
         redo?: () => void;
+        open?: () => void;
     } = $props();
 
     let isMaximized = $state(false);
@@ -56,7 +58,7 @@
         <MenuButton
             label="File"
             items={[
-                { label: "Open…", shortcut: "Ctrl+O" },
+                { label: "Open…", shortcut: "Ctrl+O", action: open},
                 { separator: true },
                 { label: "Export…", shortcut: "Ctrl+Shift+E" },
                 { separator: true },

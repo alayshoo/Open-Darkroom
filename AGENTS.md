@@ -1,0 +1,7 @@
+The user is working on the development of a Svelte 5, Tauri 2 app called Open Darkroom. The goal of this app is to be an open source alternative to Adobe Lightroom and Negative Lab Pro. It focuses on Analog Photography workflows specifically mimicking the workflow of old Hasselblad scanners which invert negatives through the setting of black, white and gamma points for each RGB channel individually. However, the app could be used to edit regular photos as well, just like in Lightroom using Contrast, Saturation, Brightness and so on interfacing through sliders.
+
+The user aims to use WebGPU for the image processing since it needs to be very snappy and real-time. The file handling will be done in the Rust backend and so will the conversion from RAW images into a format that will be handled by the WebGPU frontend.
+
+The image data follows this path: 
+
+The file is input on the rust side and is decoded into a 32f buffer. A pyramid structure is created (number of levels and tile size). The top level tiles are fed to the frontend along with the structure of the pyramid and a special overall texture with lower resolution to be used on the calculations of the histogram. The frontend loads the image to the GPU and creates a canvas do display it. At every slider update re-render the image through the ImgDev shader. On Export the backend uses the buffer to make the transformations necessary through a copy of the ImgDev shader WGSL file. After transformations image is encoded and output as a file.

@@ -1,4 +1,4 @@
-// src/lib/gpu/texture.ts
+// src/lib/gpu/gpuTextureUpload.ts
 
 import type { GPUImage } from "$lib/types/gpuTypes";
 
@@ -45,7 +45,7 @@ export function uploadRawPixelsToGPU(
     const texture = device.createTexture({
         label: "RAW Image Texture",
         size: { width, height },
-        format: "rgba8unorm",
+        format: "rgba16float",
         usage:
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.COPY_DST,
@@ -54,12 +54,10 @@ export function uploadRawPixelsToGPU(
     // writeTexture copies a CPU byte array → GPU texture
     device.queue.writeTexture(
         { texture },
-        pixels.buffer instanceof SharedArrayBuffer
-            ? new Uint8Array(pixels).buffer as ArrayBuffer
-            : pixels.buffer as ArrayBuffer,
+        pixels.buffer as ArrayBuffer,
         {
-            // "bytes per row" — each row is width × 4 bytes (RGBA)
-            bytesPerRow: width * 4,
+            // "bytes per row" — each row is width × 4 channels × 2 bytes per f16 (RGBA)
+            bytesPerRow: width * 8,
             rowsPerImage: height,
         },
         { width, height }
