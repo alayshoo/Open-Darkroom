@@ -10,7 +10,7 @@
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
-    import TripleValSliderGroup from "$lib/components/inputs/values/TripleValSliderGroup.svelte";
+    import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
@@ -217,10 +217,6 @@
                             <div class="controls-page">
                                 <div class="slider-section">
                                     <span class="section-title">Sharpness</span>
-                                    <div
-                                        style="display:flex; width: 100%; aspect-ratio: 1.5 / 1; background: black; border-radius: 6px;"
-                                    ></div>
-                                    <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.exposure}
                                         name="Clarity"
@@ -256,9 +252,9 @@
                                     ></SingleValSliderGroup>
                                 </div>
                                 <div class="slider-section">
-                                    <span class="section-title"
-                                        >Unsharp Mask</span
-                                    >
+                                    <span class="section-title">Unsharp Mask</span>
+                                    <div style="display:flex; width: 100%; aspect-ratio: 1.3 / 1; background: black; border-radius: 6px;"></div>
+                                    <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.exposure}
                                         name="Amount"
@@ -745,21 +741,21 @@
                         >
                             <div class="controls-page">
                                 <div class="slider-section">
-                                    <TripleValSliderGroup
+                                    <TripleValSliderHistGroup
                                         name="Red Input"
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                    ></TripleValSliderGroup>
-                                    <TripleValSliderGroup
+                                    ></TripleValSliderHistGroup>
+                                    <TripleValSliderHistGroup
                                         name="Green Input"
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                    ></TripleValSliderGroup>
-                                    <TripleValSliderGroup
+                                    ></TripleValSliderHistGroup>
+                                    <TripleValSliderHistGroup
                                         name="Blue Input"
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                    ></TripleValSliderGroup>
+                                    ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"
                                         innerColor={"#430000"}
