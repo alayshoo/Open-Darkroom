@@ -9,9 +9,9 @@
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
-    import SingleValSliderGroup from "$lib/components/inputs/SingleValSliderGroup.svelte";
-    import TripleValSliderGroup from "$lib/components/inputs/TripleValSliderGroup.svelte";
-    import DoubleValSliderGroup from "$lib/components/inputs/DoubleValSliderGroup.svelte";
+    import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
+    import TripleValSliderGroup from "$lib/components/inputs/values/TripleValSliderGroup.svelte";
+    import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
 
