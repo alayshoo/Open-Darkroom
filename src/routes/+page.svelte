@@ -11,6 +11,7 @@
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/SingleValSliderGroup.svelte";
     import TripleValSlider from "$lib/components/inputs/TripleValSlider.svelte";
+    import DoubleValSlider from "$lib/components/inputs/DoubleValSlider.svelte"
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
 
@@ -34,6 +35,7 @@
 
     import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
     import TripleValSliderGroup from "$lib/components/inputs/TripleValSliderGroup.svelte";
+    import DoubleValSliderGroup from "$lib/components/inputs/DoubleValSliderGroup.svelte";
 
     // ===== Control Modes =====
 
@@ -772,6 +774,11 @@
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
                                     ></TripleValSliderGroup>
+                                    <DoubleValSliderGroup
+                                        name="RGB Output"
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                    ></DoubleValSliderGroup>
                                 </div>
                             </div>
                         </div>
