@@ -16,7 +16,7 @@ export async function uploadImageToGPU(
     const texture = device.createTexture({
         label: "Image Texture",
         size: { width, height },
-        format: "rgba8unorm", // 8 bits per channel, normalized to [0,1]
+        format: "bgra8unorm", // 8 bits per channel, normalized to [0,1]
         usage:
             GPUTextureUsage.TEXTURE_BINDING | // Can be read in shaders
             GPUTextureUsage.COPY_DST |        // Can receive data uploads

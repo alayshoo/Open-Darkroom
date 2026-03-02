@@ -14,6 +14,9 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+
+// =============== WRAP CURSOR =============== 
+
 #[tauri::command]
 fn wrap_cursor(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
     // you’ll also want window.inner_size() and some padding/threshold
@@ -53,6 +56,9 @@ fn wrap_cursor(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
+
+// =============== GRAB CURSOR ===============
+
 #[tauri::command]
 fn grab_cursor(window: tauri::Window, grab: bool) -> Result<(), String> {
     
@@ -61,21 +67,14 @@ fn grab_cursor(window: tauri::Window, grab: bool) -> Result<(), String> {
     Ok(())
 }
 
-// File opening logic
+
+// =============== IMAGE OPENING LOGIC ===============
 
 use tauri_plugin_dialog::DialogExt;
 
 use image::{DynamicImage};
-use serde::Serialize;
 use half::f16;
 use std::time::Instant;
-
-#[derive(Serialize)]
-pub struct ImagePayload {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: Vec<u8>,  // raw bytes of RGBA f16 data, length = width*height*4*2
-}
 
 use fast_image_resize as fir;
 use fast_image_resize::images::Image;
@@ -180,7 +179,7 @@ async fn open_image_file(app: tauri::AppHandle) -> Result<Response, String> {
             let r = lut[raw[src] as usize];
             let g = lut[raw[src + 1] as usize];
             let b = lut[raw[src + 2] as usize];
-            let a = lut[raw[src + 3] as usize];
+            let a = f16::from_f32(raw[src + 3] as f32 / 255.0);
             chunk[0..2].copy_from_slice(&r.to_le_bytes());
             chunk[2..4].copy_from_slice(&g.to_le_bytes());
             chunk[4..6].copy_from_slice(&b.to_le_bytes());
@@ -188,6 +187,7 @@ async fn open_image_file(app: tauri::AppHandle) -> Result<Response, String> {
         });
 
     // Create package to send to the frontend
+    // Includes header with width + row as the first 8 bytes
     let mut payload = Vec::with_capacity(8 + pixels.len());
     payload.extend_from_slice(&width.to_le_bytes());
     payload.extend_from_slice(&height.to_le_bytes());

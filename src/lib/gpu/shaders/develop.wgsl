@@ -81,8 +81,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   rgb *= pow(2.0, params.exposure);
 
   // 3. Contrast: pivot around mid-gray
-  // S-curve contrast
-  rgb = 1.0 / (1.0 + exp(-params.contrast * (rgb - 0.5) * 10.0)) ;
+  let contrasted = 1.0 / (1.0 + exp(-(rgb - 0.5) * 10.0));
+  rgb = mix(rgb, contrasted, params.contrast);  // contrast range: 0..1
 
   // 4. Brightness: additive offset
   rgb += params.brightness;
@@ -103,12 +103,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   //    -1 = full grayscale, 0 = no change, +1 = 2× saturation
   rgb = mix(vec3f(luma), rgb, 1.0 + params.saturation);
 
-  // sRGB → linear (only needed if input texture isn't rgba8unorm-srgb)
-  let lo_out = rgb * 12.92;
-  let hi_out = pow(rgb, vec3f(1.0 / 2.4)) * 1.055 - 0.055;
-  rgb = select(hi_out, lo_out, rgb <= vec3f(0.0031308));
 
-  // linear → sRGB (for displaying properly)
+  // At the bottom of fs_main, replace the return with:
+  let clamped = clamp(rgb, vec3f(0.0), vec3f(1.0));
 
-  return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), color.a);
+  // Linear → sRGB (piecewise IEC 61966-2-1)
+  let cutoff = vec3f(0.0031308);
+  let lo = clamped * 12.92;
+  let hi = 1.055 * pow(clamped, vec3f(1.0 / 2.4)) - 0.055;
+  let srgb = select(hi, lo, clamped < cutoff);
+
+  return vec4f(srgb, color.a);
 }
