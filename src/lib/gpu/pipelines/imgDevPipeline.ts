@@ -1,6 +1,6 @@
 // src/lib/gpu/pipelines/imgDevPipeline.ts
 
-import type { Adjustments } from "$lib/types/adjustments";
+import type { Parameters } from "$lib/types/imgParameters";
 import type { GPUSession, ImgDevPipeline } from "$lib/types/gpuTypes"
 import shaderSource from "../shaders/develop.wgsl?raw";        // read raw data from shader file
 
@@ -78,32 +78,49 @@ export function createImgDevPipeline(
     return { pipeline, bindGroupLayout, paramsBuffer, sampler };
 }
 
-// Single source of truth for buffer layout.
-function paramsToArray(a: Adjustments): Float32Array<ArrayBuffer> {
-    const buf = new ArrayBuffer(PARAMS_BUFFER_SIZE);
-    const view = new Float32Array(buf);
-    view.set([
-        a.wbTemp,
-        a.wbTint,
-        a.exposure,
-        a.contrast,
-        a.brightness,
-        a.saturation,
-        a.vibrance,
-        0, // _pad
-    ]);
-    return view;
-  }
+export const PARAMS_BUFFER_SIZE = 240;
 
-// Buffer size: must be multiple of 16
-export const PARAMS_BUFFER_SIZE = 32;
+function paramsToArray(p: Parameters) {
+    const buf = new Float32Array(PARAMS_BUFFER_SIZE / 4);
+    let o = 0;
 
+    // dr_matrix — mat4x4 — 16 floats
+    for (let i = 0; i < 16; i++) buf[o++] = p.darkroomMatrix[i];
+
+    // gammas + pad — 4 floats
+    buf[o++] = p.redGamma;
+    buf[o++] = p.greenGamma;
+    buf[o++] = p.blueGamma;
+    buf[o++] = 0; // _pad1
+
+    // wb_matrix — mat3x3 as 12 floats (already padded by toWGSL)
+    for (let i = 0; i < 12; i++) buf[o++] = p.wbMatrix[i];
+
+    // scalar adjustments + pad — 8 floats
+    buf[o++] = p.exposure;
+    buf[o++] = p.contrast;
+    buf[o++] = p.brightness;
+    buf[o++] = p.highlights;
+    buf[o++] = p.shadows;
+    buf[o++] = p.whites;
+    buf[o++] = p.blacks;
+    buf[o++] = 0; // _pad2
+
+    // hueSat_matrix — mat4x4 — 16 floats
+    for (let i = 0; i < 16; i++) buf[o++] = p.hueSatMatrix[i];
+
+    // vibrance + 3 pad — 4 floats
+    buf[o++] = p.vibrance;
+    // remaining 3 floats are already 0
+
+    return buf;
+}
 
 // Helper to update the parameters values on the GPU
 export function updateParams(
     device: GPUDevice,
     paramsBuffer: GPUBuffer,
-    params: Adjustments
+    params: Parameters
 ) {
     // writeBuffer copies CPU data → GPU buffer
     device.queue.writeBuffer(

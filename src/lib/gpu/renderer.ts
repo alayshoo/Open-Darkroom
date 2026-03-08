@@ -1,6 +1,6 @@
 // src/lib/gpu/renderer.ts
 
-import type { Adjustments } from "../types/adjustments";
+import { defaultSlidersRGB, mapSlidersToParameters, type Sliders } from "../types/imgParameters";
 import type { GPUSession, GPUImage, ImgDevPipeline, Renderer, GPUCanvasLink } from "$lib/types/gpuTypes";
 import {
     createImgDevPipeline,
@@ -45,8 +45,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         });
     }
 
-    function setAdjustments(adjustments: Adjustments) {
-        updateParams(gpu.device, imgDev.paramsBuffer, adjustments);
+    function setSliders(sliders: Sliders) {
+        updateParams(gpu.device, imgDev.paramsBuffer, mapSlidersToParameters(sliders));
     }
 
     function render() {
@@ -92,7 +92,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     }
 
     // Initialize exposure to 0 (no change)
-    setAdjustments({ wbTemp: 0, wbTint: 0, exposure: 0, contrast: 0, brightness: 0, vibrance: 0, saturation:0 });
+    setSliders( defaultSlidersRGB );
 
-    return { loadImage, setAdjustments, render, destroy };
+    return { loadImage, setSliders, render, destroy };
 }

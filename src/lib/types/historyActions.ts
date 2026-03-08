@@ -1,11 +1,11 @@
 // lib/types/historyActions.ts
 
-import type { Adjustments } from "$lib/types/adjustments";
+import type { Sliders } from "$lib/types/imgParameters";
 
 export type Action =
   | {
       type: "slider";
-      key: keyof Adjustments;
+      key: keyof Sliders;
       oldValue: number;
       newValue: number;
     }

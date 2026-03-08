@@ -1,6 +1,5 @@
 <!-- src/lib/components/PreviewImageCanvas.svelte -->
 <script lang="ts">
-    import type { Adjustments } from "$lib/types/adjustments";
     import type {
         GPUCanvasLink,
         GPUImage,
@@ -11,13 +10,14 @@
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createRenderer } from "$lib/gpu/renderer";
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import { type Sliders, mapSlidersToParameters } from "$lib/types/imgParameters";
 
     // Props
     let {
-        adjustments,
+        sliders,
         imagePayload,
     }: {
-        adjustments: Adjustments;
+        sliders: Sliders;
         imagePayload: ImagePayload | null;
     } = $props();
 
@@ -84,8 +84,8 @@
     // Re-render on adjustment changes
     $effect(() => {
         if (!renderer || !image) return;
-        const _ = { ...adjustments };
-        renderer.setAdjustments(adjustments);
+        const _ = { ...sliders };
+        renderer.setSliders(sliders);
         renderer.render();
     });
 </script>

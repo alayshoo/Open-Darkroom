@@ -9,17 +9,28 @@
 @group(0) @binding(1) var texSampler: sampler;
 
 // Uniform buffer = small, read-only data shared across all pixels.
-// Params must equate to a multiple of 16 bytes, each f32 is 4 bytes
+// Params must equate to a multiple of 16 bytes, each f32 is 4 bytes, mat3x3<f32> is 48 bytes
 struct Params {
-  wb_temp: f32,
-  wb_tint: f32,
-  exposure: f32,
-  contrast: f32,
-  brightness: f32,
-  saturation: f32,
-  vibrance: f32,
-  _pad: f32,  // pad to 32 bytes (multiple of 16)
-}
+  dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
+  red_gamma:      f32,          //  64
+  green_gamma:    f32,          //  68
+  blue_gamma:     f32,          //  72
+  _pad1:          f32,          //  76  (align wb_matrix to 16)
+  wb_matrix:      mat3x3<f32>,  //  80 — 48 bytes (3 cols × 16)
+  exposure:       f32,          // 128
+  contrast:       f32,          // 132
+  brightness:     f32,          // 136
+  highlights:     f32,          // 140
+  shadows:        f32,          // 144
+  whites:         f32,          // 148
+  blacks:         f32,          // 152
+  _pad2:          f32,          // 156  (align hueSat_matrix to 16)
+  hueSat_matrix:  mat4x4<f32>,  // 160 — 64 bytes
+  vibrance:       f32,          // 224
+  _pad3:          f32,          // 228
+  _pad4:          f32,          // 232
+  _pad5:          f32,          // 236
+}                               // total: 240 bytes
 @group(0) @binding(2) var<uniform> params: Params;
 
 // ---------- Vertex Shader ----------
@@ -65,49 +76,59 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
+
   let color = textureSample(inputTexture, texSampler, input.uv);
   var rgb = color.rgb;
 
-  // 1. White Balance (luma-preserving)
-  let wbLuma = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
+  // 1. Darkroom matrix — black/white point remap + optional inversion
+  rgb = (params.dr_matrix * vec4f(rgb, 1.0)).xyz;
 
-  let tempDir = vec3f(0.8596, -0.1404, -1.1404);
-  let tintDir = vec3f(0.7152, -0.2848, 0.7152);
+  // 2. Per-channel gamma
+  rgb = vec3f(
+    pow(max(rgb.r, 0.0), 1.0 / params.red_gamma),
+    pow(max(rgb.g, 0.0), 1.0 / params.green_gamma),
+    pow(max(rgb.b, 0.0), 1.0 / params.blue_gamma),
+  );
 
-  rgb += tempDir * params.wb_temp * 0.4 * wbLuma;
-  rgb += tintDir * params.wb_tint * 0.4 * wbLuma;
+  // 3. White balance (Bradford CAT, pre-computed on CPU)
+  rgb = params.wb_matrix * rgb;
 
-  // 2. Exposure: multiply by 2^exposure
+  // 4. Exposure
   rgb *= pow(2.0, params.exposure);
 
-  // 3. Contrast: pivot around mid-gray
+  // 5. Contrast — sigmoid around mid-gray
   let contrasted = 1.0 / (1.0 + exp(-(rgb - 0.5) * 10.0));
-  rgb = mix(rgb, contrasted, params.contrast);  // contrast range: 0..1
+  rgb = mix(rgb, contrasted, params.contrast);
 
-  // 4. Brightness: additive offset
+  // 6. Brightness — additive offset
   rgb += params.brightness;
 
-  // Luminance used by both vibrance and saturation (Rec.709 weights)
-  let luma = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
+  // 7. Highlights / Shadows / Whites / Blacks
+  let luma_tone = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
 
-  // 5. Vibrance: "smart" saturation
-  //    Boosts under-saturated pixels more, leaves vivid pixels alone.
-  //    Measures per-pixel saturation as the spread of RGB channels.
+  let highlightMask = smoothstep(0.5, 1.0, luma_tone);
+  let shadowMask    = 1.0 - smoothstep(0.0, 0.5, luma_tone);
+  let whiteMask     = smoothstep(0.75, 1.0, luma_tone);
+  let blackMask     = 1.0 - smoothstep(0.0, 0.25, luma_tone);
+
+  rgb += params.highlights * highlightMask;
+  rgb += params.shadows    * shadowMask;
+  rgb += params.whites     * whiteMask;
+  rgb += params.blacks     * blackMask;
+
+  // 8. Hue + Saturation (pre-composed matrix from CPU)
+  rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
+
+  // 9. Vibrance — boost under-saturated pixels more
+  let luma_vib = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
   let maxC = max(rgb.r, max(rgb.g, rgb.b));
   let minC = min(rgb.r, min(rgb.g, rgb.b));
-  let pixelSat = (maxC - minC) / (maxC + 0.001);  // 0 = gray, 1 = vivid
-  let vibranceAmount = params.vibrance * (1.0 - pixelSat);  // stronger on muted pixels
-  rgb = mix(vec3f(luma), rgb, 1.0 + vibranceAmount);
+  let pixelSat = (maxC - minC) / (maxC + 0.001);
+  let vibranceAmount = params.vibrance * (1.0 - pixelSat);
+  rgb = mix(vec3f(luma_vib), rgb, 1.0 + vibranceAmount);
 
-  // 6. Saturation: uniform boost/cut across all colors
-  //    -1 = full grayscale, 0 = no change, +1 = 2× saturation
-  rgb = mix(vec3f(luma), rgb, 1.0 + params.saturation);
-
-
-  // At the bottom of fs_main, replace the return with:
+  // Clamp + linear → sRGB
   let clamped = clamp(rgb, vec3f(0.0), vec3f(1.0));
-
-  // Linear → sRGB (piecewise IEC 61966-2-1)
   let cutoff = vec3f(0.0031308);
   let lo = clamped * 12.92;
   let hi = 1.055 * pow(clamped, vec3f(1.0 / 2.4)) - 0.055;

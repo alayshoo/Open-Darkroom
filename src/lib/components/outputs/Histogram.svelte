@@ -1,16 +1,16 @@
 <!-- src/lib/components/Histogram.svelte -->
 <script lang="ts">
-    import type { Adjustments } from "$lib/types/adjustments";
+    import { mapSlidersToParameters, type Sliders } from "$lib/types/imgParameters";
     import type { GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
     import { uploadImageToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
 
     let {
-        adjustments,
+        sliders,
         imageSrc,
     }: {
-        adjustments: Adjustments;
+        sliders: Sliders;
         imageSrc: string | null;
     } = $props();
 
@@ -107,14 +107,14 @@
     $effect(() => {
         if (!image || !histPipeline) return;
         // Read adjustments to establish Svelte reactivity tracking
-        const _ = { ...adjustments };
+        const _ = { ...sliders };
         updateHistogram();
     });
 
     async function updateHistogram() {
         if (!image || !histPipeline) return;
 
-        const data = await histPipeline.computeHistogram(image.texture, adjustments);
+        const data = await histPipeline.computeHistogram(image.texture, mapSlidersToParameters(sliders));
         lastHistData = data;
         drawHistogram(data);
     }

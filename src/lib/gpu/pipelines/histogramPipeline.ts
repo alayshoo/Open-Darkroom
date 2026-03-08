@@ -1,6 +1,6 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
-import type { Adjustments } from "$lib/types/adjustments";
+import type { Adjustments } from "$lib/types/imgParameters";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { PARAMS_BUFFER_SIZE, updateParams } from "./imgDevPipeline";
 import shaderSource from "../shaders/histogram.wgsl?raw";

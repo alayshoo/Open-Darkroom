@@ -15,8 +15,11 @@
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
 
-    import { SLIDER_DEFAULTS, COLOR_KEYS, BW_TARGETS, type Sliders, } from "$lib/config/slidersConfig";
-    import { mapSlidersToAdjustments } from "$lib/types/adjustments";
+    import {
+        type Sliders,
+        defaultSlidersRGB,
+        defaultSlidersBW,
+    } from "$lib/types/imgParameters";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { openImage } from "$lib/utils/openImage";
@@ -24,12 +27,14 @@
     import { animateObject } from "$lib/utils/animateObject";
 
     import { history } from "$lib/history/history.svelte";
-    import { applyAction, undoAction, type StateAccessors, } from "$lib/history/historyDispatch";
+    import {
+        applyAction,
+        undoAction,
+        type StateAccessors,
+    } from "$lib/history/historyDispatch";
     import type { Action } from "$lib/types/historyActions";
 
     import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
-
-
 
     // ===== Control Modes =====
 
@@ -92,16 +97,22 @@
     let lastRestoredNormal: HTMLDivElement | null = null;
     let lastRestoredDarkroom: HTMLDivElement | null = null;
     $effect(() => {
-        if (pagerElNormal && !isDarkroom && lastRestoredNormal !== pagerElNormal) 
-        {
+        if (
+            pagerElNormal &&
+            !isDarkroom &&
+            lastRestoredNormal !== pagerElNormal
+        ) {
             lastRestoredNormal = pagerElNormal;
             pagerElNormal.scrollLeft =
                 activePageNormal * pagerElNormal.clientWidth;
         }
         if (isDarkroom) lastRestoredNormal = null;
 
-        if (pagerElDarkroom && isDarkroom && lastRestoredDarkroom !== pagerElDarkroom) 
-        {
+        if (
+            pagerElDarkroom &&
+            isDarkroom &&
+            lastRestoredDarkroom !== pagerElDarkroom
+        ) {
             lastRestoredDarkroom = pagerElDarkroom;
             pagerElDarkroom.scrollLeft = 0;
         }
@@ -117,17 +128,7 @@
 
     // ===== Variables =====
 
-    let sliders: Sliders = $state({
-        wbTemp: 5600,
-        wbTint: 0,
-        exposure: 0,
-        contrast: 0,
-        brightness: 0,
-        saturation: 0,
-        vibrance: 0,
-    });
-
-    let adjustments = $derived(mapSlidersToAdjustments(sliders));
+    let sliders: Sliders = $state(defaultSlidersRGB);
 
     // ===== B&W toggle logic =====
     let isRgb = $state(true);
@@ -156,15 +157,13 @@
         }
     }
 
-
     // ===== Image =====
 
-    let imagePayload: ImagePayload | null = $state(null)
+    let imagePayload: ImagePayload | null = $state(null);
 
     async function handleOpenImage() {
         imagePayload = await openImage();
     }
-
 
     // ===== History =====
     const stateAccessors: StateAccessors = {
@@ -193,7 +192,6 @@
         changeMode: handleModeToggle,
         openImage: handleOpenImage,
     });
-
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -203,13 +201,13 @@
     <div class="toolbar"></div>
     <div class="image-panel">
         <div class="preview-container">
-            <PreviewImageCanvas {adjustments} {imagePayload} />
+            <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
     </div>
     <div class="side-bar">
         <div class="side-panel">
             <div class="histogram-container">
-                <Histogram {adjustments} imageSrc="/test.jpg" />
+                <Histogram {sliders} imageSrc="/test.jpg" />
             </div>
             <div class="quick-actions">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
@@ -267,8 +265,12 @@
                                     ></SingleValSliderGroup>
                                 </div>
                                 <div class="slider-section">
-                                    <span class="section-title">Unsharp Mask</span>
-                                    <div style="display:flex; width: 100%; aspect-ratio: 1.3 / 1; background: black; border-radius: 6px;"></div>
+                                    <span class="section-title"
+                                        >Unsharp Mask</span
+                                    >
+                                    <div
+                                        style="display:flex; width: 100%; aspect-ratio: 1.3 / 1; background: black; border-radius: 6px;"
+                                    ></div>
                                     <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.exposure}
@@ -351,11 +353,11 @@
                                         >
                                         <SingleValSliderGroup
                                             bind:value={sliders.wbTemp}
-                                            defaultValue={5600}
+                                            defaultValue={5500}
                                             name="Temperature"
                                             unit="K"
-                                            min={1200}
-                                            max={10000}
+                                            min={2200}
+                                            max={8800}
                                             decimalPlaces={0}
                                             sliderStep={100}
                                             dragStep={1}
@@ -500,15 +502,14 @@
                                     {/if}
                                     <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.highlights}
                                         defaultValue={0}
                                         name="Highlights"
-                                        unit="%"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
+                                        min={-1}
+                                        max={1}
+                                        decimalPlaces={2}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#606060"}
                                         gradientEndColor={"#afafaf"}
                                         onCommit={(oldVal, newVal) =>
@@ -520,15 +521,15 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.brightness}
+                                        bind:value={sliders.shadows}
                                         defaultValue={0}
                                         name="Shadows"
                                         unit=""
-                                        min={-10}
-                                        max={10}
+                                        min={-1}
+                                        max={1}
                                         decimalPlaces={2}
-                                        sliderStep={10}
-                                        keyboardStep={1}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#303030"}
                                         gradientEndColor={"#3f3f3f"}
                                         onCommit={(oldVal, newVal) =>
@@ -540,15 +541,14 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.whites}
                                         defaultValue={0}
                                         name="Whites"
-                                        unit="%"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
+                                        min={-1}
+                                        max={1}
+                                        decimalPlaces={2}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#b0b0b0"}
                                         gradientEndColor={"#ffffff"}
                                         onCommit={(oldVal, newVal) =>
@@ -560,15 +560,14 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.brightness}
+                                        bind:value={sliders.blacks}
                                         defaultValue={0}
                                         name="Blacks"
-                                        unit=""
-                                        min={-10}
-                                        max={10}
+                                        min={-1}
+                                        max={1}
                                         decimalPlaces={2}
-                                        sliderStep={10}
-                                        keyboardStep={1}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#000000"}
                                         gradientEndColor={"#161616"}
                                         onCommit={(oldVal, newVal) =>
@@ -591,15 +590,14 @@
                                     ></div>
                                     <div class="sliders-separator"></div>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.highlights}
                                         defaultValue={0}
                                         name="Highlights"
-                                        unit="%"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
+                                        min={-1}
+                                        max={1}
+                                        decimalPlaces={2}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#606060"}
                                         gradientEndColor={"#afafaf"}
                                         onCommit={(oldVal, newVal) =>
@@ -611,15 +609,14 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.brightness}
+                                        bind:value={sliders.shadows}
                                         defaultValue={0}
                                         name="Shadows"
-                                        unit=""
-                                        min={-10}
-                                        max={10}
+                                        min={-1}
+                                        max={1}
                                         decimalPlaces={2}
-                                        sliderStep={10}
-                                        keyboardStep={1}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#303030"}
                                         gradientEndColor={"#3f3f3f"}
                                         onCommit={(oldVal, newVal) =>
@@ -631,15 +628,14 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.whites}
                                         defaultValue={0}
                                         name="Whites"
-                                        unit="%"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
+                                        min={-1}
+                                        max={1}
+                                        decimalPlaces={2}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#b0b0b0"}
                                         gradientEndColor={"#ffffff"}
                                         onCommit={(oldVal, newVal) =>
@@ -651,15 +647,13 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.brightness}
+                                        bind:value={sliders.blacks}
                                         defaultValue={0}
-                                        name="Blacks"
-                                        unit=""
-                                        min={-10}
-                                        max={10}
+                                        min={-1}
+                                        max={1}
                                         decimalPlaces={2}
-                                        sliderStep={10}
-                                        keyboardStep={1}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         gradientStartColor={"#000000"}
                                         gradientEndColor={"#161616"}
                                         onCommit={(oldVal, newVal) =>
@@ -679,12 +673,12 @@
                                     <div class="slider-section">
                                         <span class="section-title">HSL</span>
                                         <SingleValSliderGroup
-                                            bind:value={sliders.vibrance}
+                                            bind:value={sliders.hue}
                                             defaultValue={0}
                                             name="Hue"
                                             unit="º"
-                                            min={-100}
-                                            max={100}
+                                            min={-180}
+                                            max={180}
                                             decimalPlaces={1}
                                             sliderStep={1}
                                             keyboardStep={0.1}
@@ -758,25 +752,62 @@
                                 <div class="slider-section">
                                     <TripleValSliderHistGroup
                                         name="Red Input"
+                                        bind:valueA={sliders.redBlackPoint}
+                                        bind:valueB={sliders.redGamma}
+                                        bind:valueC={sliders.redWhitePoint}
+                                        defaultValueA={0}
+                                        defaultValueB={1}
+                                        defaultValueC={255}
+                                        min={0}
+                                        max={255}
+                                        minB={0}
+                                        maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Green Input"
+                                        bind:valueA={sliders.greenBlackPoint}
+                                        bind:valueB={sliders.greenGamma}
+                                        bind:valueC={sliders.greenWhitePoint}
+                                        defaultValueA={0}
+                                        defaultValueB={1}
+                                        defaultValueC={255}
+                                        min={0}
+                                        max={255}
+                                        minB={0}
+                                        maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Blue Input"
+                                        bind:valueA={sliders.blueBlackPoint}
+                                        bind:valueB={sliders.blueGamma}
+                                        bind:valueC={sliders.blueWhitePoint}
+                                        defaultValueA={0}
+                                        defaultValueB={1}
+                                        defaultValueC={255}
+                                        min={0}
+                                        max={255}
+                                        minB={0}
+                                        maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"
+                                        bind:valueA={sliders.rgbOutputBlack}
+                                        bind:valueB={sliders.rgbOutputWhite}
+                                        defaultValueA={0}
+                                        defaultValueB={255}
+                                        min={0}
+                                        max={255}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
                                     ></DoubleValSliderGroup>
                                 </div>
+                                <div style="display: flex; height:30px;"></div>
                             </div>
                         </div>
                     {/if}
@@ -802,7 +833,9 @@
                                 class:active={activePageNormal === i}
                                 onclick={() => scrollToPage(i)}
                                 aria-label="Go to page {i + 1}"
-                                aria-current={activePageNormal === i ? "step" : undefined}
+                                aria-current={activePageNormal === i
+                                    ? "step"
+                                    : undefined}
                             ></button>
                         {/each}
                     </div>
@@ -855,12 +888,21 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 0; /* prevents flex blowout */
+        min-width: 0;
+        min-height: 0;
     }
 
     .preview-container {
-        margin: 36px; /**Change later when there is zoom support*/
+        margin: 36px;
         border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: calc(100% - 72px);
+        height: calc(100% - 72px);
+        max-width: calc(100% - 72px);
+        max-height: calc(100% - 72px);
+        overflow: hidden;
     }
 
     .side-bar {
@@ -884,7 +926,8 @@
 
     .side-panel {
         background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread) var(--panelInnerShadow);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
+            var(--panelInnerShadow);
         flex: 1;
         border-radius: 12px;
         display: flex;
@@ -990,7 +1033,8 @@
         height: 48px;
         border-radius: 12px;
         background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread) var(--panelInnerShadow);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
+            var(--panelInnerShadow);
     }
 
     .page-dots-wrapper {
