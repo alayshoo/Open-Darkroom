@@ -32,7 +32,7 @@ export interface ImgDevPipeline {
 
 
 
-import type { Sliders } from "./imgParameters";
+import type { Sliders, Parameters } from "./imgParameters";
 
 export interface Renderer {
     loadImage: (image: GPUImage) => void;
@@ -43,7 +43,7 @@ export interface Renderer {
 
 
 export interface HistogramPipeline {
-    computeHistogram: (inputTexture: GPUTexture, sliders: Sliders) => Promise<{
+    computeHistogram: (inputTexture: GPUTexture, params: Parameters) => Promise<{
         r: Uint32Array;
         g: Uint32Array; 
         b: Uint32Array;

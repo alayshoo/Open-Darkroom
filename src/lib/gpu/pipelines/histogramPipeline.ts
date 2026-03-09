@@ -1,6 +1,6 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
-import type { Adjustments } from "$lib/types/imgParameters";
+import type { Parameters } from "$lib/types/imgParameters";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { PARAMS_BUFFER_SIZE, updateParams } from "./imgDevPipeline";
 import shaderSource from "../shaders/histogram.wgsl?raw";
@@ -134,10 +134,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     async function computeHistogram(
         inputTexture: GPUTexture,
-        adjustments: Adjustments,
+        params: Parameters,
     ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array }> {
         // Upload current adjustments to the params buffer
-        updateParams(device, paramsBuffer, adjustments);
+        updateParams(device, paramsBuffer, params);
 
         // Create a bind group connecting the actual resources
         const bindGroup = device.createBindGroup({
