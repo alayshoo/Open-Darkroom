@@ -84,6 +84,13 @@ export const defaultSlidersBW: Sliders = {
     vibrance: 0,
 };
 
+export const overridesBW: Partial<Sliders> = {
+    saturation: -100,
+    vibrance: 0,
+    wbTemp: 5500,
+    wbTint: 0,
+};
+
 // Adjustments is the type used in the GPU Pipeline
 export interface Parameters {  
     darkroomMatrix: Matrix4x4;

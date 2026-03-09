@@ -6,8 +6,8 @@ export type Action =
   | {
       type: "slider";
       key: keyof Sliders;
-      oldValue: number;
-      newValue: number;
+      oldValue: number | boolean;
+      newValue: number | boolean;
     }
   // future-proof:
   // | { type: 'mask-draw'; maskId: string; strokeData: ... }

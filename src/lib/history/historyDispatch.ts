@@ -1,8 +1,8 @@
 import type { Action } from "$lib/types/historyActions";
 
 export type StateAccessors = {
-    getSlider: (key: string) => number;
-    setSlider: (key: string, value: number) => void;
+    getSlider: (key: string) => number | boolean;
+    setSlider: (key: string, value: number | boolean) => void;
     // future:
     // getMask: (id: string) => MaskData;
     // setMask: (id: string, data: MaskData) => void;

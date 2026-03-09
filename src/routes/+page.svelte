@@ -19,6 +19,7 @@
         type Sliders,
         defaultSlidersRGB,
         defaultSlidersBW,
+        overridesBW,
     } from "$lib/types/imgParameters";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -27,11 +28,7 @@
     import { animateObject } from "$lib/utils/animateObject";
 
     import { history } from "$lib/history/history.svelte";
-    import {
-        applyAction,
-        undoAction,
-        type StateAccessors,
-    } from "$lib/history/historyDispatch";
+    import { applyAction, undoAction, type StateAccessors, } from "$lib/history/historyDispatch";
     import type { Action } from "$lib/types/historyActions";
 
     import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
@@ -145,14 +142,23 @@
     async function handleColorModeToggle(isBw: boolean) {
         if (isBw) {
             savedColorValues = {};
-            for (const k of COLOR_KEYS) savedColorValues[k] = sliders[k];
-            animateObject(sliders, BW_TARGETS);
+            const colorKeys = Object.keys(overridesBW) as (keyof Sliders)[];
+            for (const k of colorKeys) {
+                (savedColorValues as any)[k] = sliders[k];
+            }
+            animateObject(
+                sliders as unknown as Record<string, number>,
+                overridesBW as Record<string, number>,
+            );
             if (activePageNormal > 2) {
                 await tick(); // wait for the {#if isRgb} block to unmount
                 scrollToPage(2);
             }
         } else if (savedColorValues) {
-            animateObject(sliders, savedColorValues);
+            animateObject(
+                sliders as unknown as Record<string, number>,
+                savedColorValues as Record<string, number>,
+            );
             savedColorValues = null;
         }
     }
@@ -169,7 +175,7 @@
     const stateAccessors: StateAccessors = {
         getSlider: (key) => sliders[key as keyof Sliders],
         setSlider: (key, val) => {
-            (sliders as any)[key] = val;
+            (sliders as unknown as Record<string, typeof val>)[key] = val;
         },
     };
 
