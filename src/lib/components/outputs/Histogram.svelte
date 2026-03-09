@@ -1,17 +1,19 @@
 <!-- src/lib/components/Histogram.svelte -->
 <script lang="ts">
+    import { untrack } from "svelte";
     import { mapSlidersToParameters, type Sliders } from "$lib/types/imgParameters";
     import type { GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
-    import { uploadImageToGPU } from "$lib/gpu/gpuTextureUpload";
+    import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
+    import { type ImagePayload } from "$lib/types/imagePayload";
 
     let {
         sliders,
-        imageSrc,
+        imagePayload,
     }: {
         sliders: Sliders;
-        imageSrc: string | null;
+        imagePayload: ImagePayload | null;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -77,30 +79,20 @@
         };
     });
 
-    // Load image when src changes
+    // Load image when payload changes
     $effect(() => {
-        if (!histPipeline || !imageSrc) return;
+        if (!histPipeline || !imagePayload) return;
 
-        let cancelled = false;
+        // Clean up previous image (untracked to avoid re-triggering this effect)
+        untrack(() => image?.texture.destroy());
 
-        (async () => {
-            const res = await fetch(imageSrc);
-            const blob = await res.blob();
-            const bitmap = await createImageBitmap(blob);
-
-            if (cancelled) { bitmap.close(); return; }
-
-            // Clean up previous image
-            image?.texture.destroy();
-
-            image = await uploadImageToGPU(gpu.device, bitmap);
-            bitmap.close();
-
-            // Trigger an initial histogram compute
-            await updateHistogram();
-        })();
-
-        return () => { cancelled = true; };
+        // Upload via the raw pixel path (same as PreviewImageCanvas)
+        image = uploadRawPixelsToGPU(
+            gpu.device,
+            imagePayload.pixels,
+            imagePayload.width,
+            imagePayload.height,
+        );
     });
 
     // Re-compute histogram when adjustments change
@@ -111,12 +103,32 @@
         updateHistogram();
     });
 
+    let computing = false;
+    let pendingUpdate = false;
+
     async function updateHistogram() {
         if (!image || !histPipeline) return;
 
-        const data = await histPipeline.computeHistogram(image.texture, mapSlidersToParameters(sliders));
-        lastHistData = data;
-        drawHistogram(data);
+        // If a compute is already in flight, flag for re-run when it finishes
+        if (computing) {
+            pendingUpdate = true;
+            return;
+        }
+
+        computing = true;
+        try {
+            const data = await histPipeline.computeHistogram(image.texture, mapSlidersToParameters(sliders));
+            lastHistData = data;
+            drawHistogram(data);
+        } finally {
+            computing = false;
+        }
+
+        // If another update was requested while we were computing, run again
+        if (pendingUpdate) {
+            pendingUpdate = false;
+            updateHistogram();
+        }
     }
 
     /**

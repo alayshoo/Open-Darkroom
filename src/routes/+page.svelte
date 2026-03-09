@@ -213,7 +213,7 @@
     <div class="side-bar">
         <div class="side-panel">
             <div class="histogram-container">
-                <Histogram {sliders} imageSrc="/test.jpg" />
+                <Histogram {sliders} {imagePayload} />
             </div>
             <div class="quick-actions">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
