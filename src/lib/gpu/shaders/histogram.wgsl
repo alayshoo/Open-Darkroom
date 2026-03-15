@@ -98,9 +98,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let srgb = select(hi, lo, clamped < cutoff);
   // ============================= (update if it ever changes) =============================
 
-  let r = u32(clamp(srgb.r, 0.0, 1.0) * 255.0);
-  let g = u32(clamp(srgb.g, 0.0, 1.0) * 255.0);
-  let b = u32(clamp(srgb.b, 0.0, 1.0) * 255.0);
+  let r = u32(clamp(srgb.r, 0.0, 1.0) * 255.0 + 0.5);
+  let g = u32(clamp(srgb.g, 0.0, 1.0) * 255.0 + 0.5);
+  let b = u32(clamp(srgb.b, 0.0, 1.0) * 255.0 + 0.5);
 
   atomicAdd(&bins_r[r], 1u);
   atomicAdd(&bins_g[g], 1u);
