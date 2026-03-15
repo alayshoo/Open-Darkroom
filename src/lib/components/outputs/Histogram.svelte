@@ -28,6 +28,46 @@
     let lastHistData: { r: Uint32Array; g: Uint32Array; b: Uint32Array } | null =
         $state(null);
 
+    // ── Animated scale ceiling ──────────────────────────────────────────────
+    // currentCeiling  – what we actually draw with (animates smoothly)
+    // targetCeiling   – where we want to end up (recomputed each histogram)
+    //
+    // Growth:  instant snap (ceiling jumps up so bars never clip)
+    // Decay:   slow lerp  (ceiling drifts down, never chases spikes)
+    let currentCeiling = 1;
+    let targetCeiling = 1;
+    let animFrameId: number | null = null;
+
+    const DECAY_RATE = 0.04;  // fraction of gap closed per frame (~60 fps → ~2 s to halve)
+    const SNAP_RATIO = 1.05;  // snap up instantly if target exceeds current by >5 %
+
+    function tickCeiling() {
+        animFrameId = null;
+        if (!lastHistData) return;
+
+        const gap = targetCeiling - currentCeiling;
+
+        if (targetCeiling > currentCeiling * SNAP_RATIO) {
+            // Hard snap upward so bars are never clipped
+            currentCeiling = targetCeiling;
+        } else {
+            // Smooth exponential decay in either direction
+            currentCeiling += gap * DECAY_RATE;
+        }
+
+        drawHistogram(lastHistData);
+
+        // Keep ticking until settled
+        if (Math.abs(gap) > currentCeiling * 0.001) {
+            animFrameId = requestAnimationFrame(tickCeiling);
+        }
+    }
+
+    function scheduleCeilingAnimation() {
+        if (animFrameId !== null) return; // already in flight
+        animFrameId = requestAnimationFrame(tickCeiling);
+    }
+
     // ── ResizeObserver: keep canvas backing-store at native device pixels ──
     $effect(() => {
         if (!canvas) return;
@@ -76,6 +116,11 @@
             histPipeline?.destroy();
             histPipeline = null;
             image = null;
+            // Cancel any in-flight animation
+            if (animFrameId !== null) {
+                cancelAnimationFrame(animFrameId);
+                animFrameId = null;
+            }
         };
     });
 
@@ -85,6 +130,10 @@
 
         // Clean up previous image (untracked to avoid re-triggering this effect)
         untrack(() => image?.texture.destroy());
+
+        // Reset both ceilings so the new image starts fresh
+        currentCeiling = 1;
+        targetCeiling = 1;
 
         // Upload via the raw pixel path (same as PreviewImageCanvas)
         image = uploadRawPixelsToGPU(
@@ -118,8 +167,17 @@
         computing = true;
         try {
             const data = await histPipeline.computeHistogram(image.texture, mapSlidersToParameters(sliders));
+
+            // Recompute the target ceiling from the new histogram data.
+            // currentCeiling animates toward it — snapping up, decaying down.
+            targetCeiling = computeCeiling(data);
+
             lastHistData = data;
+
+            // Draw immediately with the current ceiling (may be mid-animation),
+            // then let the animation loop refine it.
             drawHistogram(data);
+            scheduleCeilingAnimation();
         } finally {
             computing = false;
         }
@@ -129,6 +187,26 @@
             pendingUpdate = false;
             updateHistogram();
         }
+    }
+
+    /**
+     * Computes a y-axis ceiling from histogram data using the 99.5th
+     * percentile across all three channels (excluding the clipped-black bin 0
+     * and clipped-white bin 255, which are almost always outlier spikes).
+     */
+    function computeCeiling(histograms: {
+        r: Uint32Array;
+        g: Uint32Array;
+        b: Uint32Array;
+    }): number {
+        const allBins = [
+            ...histograms.r.subarray(1, 255),
+            ...histograms.g.subarray(1, 255),
+            ...histograms.b.subarray(1, 255),
+        ].sort((a, b) => a - b);
+
+        const p995 = allBins[Math.floor(allBins.length * 0.995)];
+        return Math.max(p995, 1);
     }
 
     /**
@@ -144,9 +222,8 @@
         const ctx = canvas.getContext("2d")!;
         const { width, height } = canvas;
 
-        // Find the global max across all channels for normalisation
-        const max = Math.max(...histograms.r, ...histograms.g, ...histograms.b);
-        if (max === 0) return; // avoid division by zero on blank images
+        // Use the live animated ceiling for normalization
+        const norm = (v: number) => Math.min(v, currentCeiling) / currentCeiling;
 
         ctx.clearRect(0, 0, width, height);
         ctx.globalCompositeOperation = "lighter"; // additive colour blend
@@ -160,7 +237,7 @@
             ctx.moveTo(0, height);
             for (let i = 0; i < 256; i++) {
                 const x = (i / 255) * width;
-                const y = height - (bins[i] / max) * height;
+                const y = height - norm(bins[i]) * height;
                 ctx.lineTo(x, y);
             }
             ctx.lineTo(width, height);
