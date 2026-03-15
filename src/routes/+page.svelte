@@ -445,12 +445,12 @@
                                         defaultValue={0}
                                         name="Brightness"
                                         unit=""
-                                        min={-10}
-                                        max={10}
-                                        decimalPlaces={2}
+                                        min={-1}
+                                        max={1}
+                                        decimalPlaces={3}
                                         dragStep={0.001}
-                                        sliderStep={10}
-                                        keyboardStep={1}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
