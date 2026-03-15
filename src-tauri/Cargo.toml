@@ -27,6 +27,7 @@ image = "0.25.9"
 half = "2"
 rayon = "1.11"
 fast_image_resize = "6.0"
+wgpu = "25"
 
 
 [profile.dev]

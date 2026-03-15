@@ -1,28 +1,31 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod image_opening;
+mod export;
+
+use image_opening::ImageState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ImageState::new(None))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            wrap_cursor, 
+            wrap_cursor,
             grab_cursor,
             image_opening::open_image_file,
+            export::export_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 
-// =============== WRAP CURSOR =============== 
+// =============== WRAP CURSOR ===============
 
 #[tauri::command]
 fn wrap_cursor(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
-    // you’ll also want window.inner_size() and some padding/threshold
-
     use tauri::PhysicalPosition;
 
     let size = window
@@ -63,8 +66,6 @@ fn wrap_cursor(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
 
 #[tauri::command]
 fn grab_cursor(window: tauri::Window, grab: bool) -> Result<(), String> {
-    
     let _ = window.set_cursor_grab(grab);
-
     Ok(())
 }

@@ -24,6 +24,7 @@
 
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { openImage } from "$lib/utils/openImage";
+    import { exportImage } from "$lib/utils/exportImage";
 
     import { animateObject } from "$lib/utils/animateObject";
 
@@ -169,6 +170,10 @@
 
     async function handleOpenImage() {
         imagePayload = await openImage();
+    }
+
+    async function handleExport() {
+        await exportImage(sliders);
     }
 
     // ===== History =====
@@ -822,7 +827,7 @@
         </div>
         <div class="side-panel-footer">
             <div style="position:absolute; left: 10px;">
-                <ExportButton></ExportButton>
+                <ExportButton onexport={handleExport}></ExportButton>
             </div>
             <div class="page-dots-wrapper">
                 {#if !isDarkroom}

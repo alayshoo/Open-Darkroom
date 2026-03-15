@@ -4,6 +4,7 @@ use fast_image_resize as fir;
 use fast_image_resize::images::Image;
 use half::f16;
 use rayon::prelude::*;
+use std::sync::Mutex;
 use std::time::Instant;
 use tauri::ipc::Response;
 use tauri_plugin_dialog::DialogExt;
@@ -11,6 +12,18 @@ use tauri_plugin_dialog::DialogExt;
 use image::{ImageBuffer, Rgba};
 
 type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+pub struct OriginalImage {
+    pub pixels_u16: Vec<u16>,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub type ImageState = Mutex<Option<OriginalImage>>;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 pub(crate) fn downscale_to_2048_u16(rgba: &Rgba16Image) -> Rgba16Image {
     let (w, h) = rgba.dimensions();
@@ -62,6 +75,7 @@ pub(crate) fn downscale_to_2048_u16(rgba: &Rgba16Image) -> Rgba16Image {
     ImageBuffer::from_raw(new_w, new_h, u16_vec).unwrap()
 }
 
+/// sRGB u16 → linear f16 lookup table (used for both preview upload and export).
 pub(crate) fn build_srgb_to_linear_lut_u16() -> Vec<f16> {
     (0..65536)
         .map(|i| {
@@ -76,8 +90,13 @@ pub(crate) fn build_srgb_to_linear_lut_u16() -> Vec<f16> {
         .collect()
 }
 
+// ── Tauri command ─────────────────────────────────────────────────────────────
+
 #[tauri::command]
-pub(crate) async fn open_image_file(app: tauri::AppHandle) -> Result<Response, String> {
+pub(crate) async fn open_image_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ImageState>,
+) -> Result<Response, String> {
     println!("open_image_file: started");
 
     let path = app
@@ -96,12 +115,22 @@ pub(crate) async fn open_image_file(app: tauri::AppHandle) -> Result<Response, S
 
     let rgba16 = img.to_rgba16();
 
-    // Downscale in u16 space
+    // Store original full-resolution image for export
+    {
+        let mut guard = state.lock().unwrap();
+        *guard = Some(OriginalImage {
+            pixels_u16: rgba16.as_raw().clone(),
+            width: rgba16.width(),
+            height: rgba16.height(),
+        });
+    }
+
+    // Downscale in u16 space for the preview sent to the frontend
     let preview = downscale_to_2048_u16(&rgba16);
     let (width, height) = preview.dimensions();
-    let raw = preview.as_raw(); // &[u16]
+    let raw = preview.as_raw();
 
-    // Linearize u16 sRGB → f16 linear
+    // Linearize u16 sRGB → f16 linear for the rgba16float GPU texture
     let lut = build_srgb_to_linear_lut_u16();
     let pixel_count = (width * height) as usize;
     let mut pixels = vec![0u8; pixel_count * 8]; // 4 × f16 = 8 bytes
@@ -135,4 +164,3 @@ pub(crate) async fn open_image_file(app: tauri::AppHandle) -> Result<Response, S
 
     Ok(Response::new(payload))
 }
-

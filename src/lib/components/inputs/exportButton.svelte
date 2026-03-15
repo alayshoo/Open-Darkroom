@@ -1,8 +1,29 @@
 <script lang="ts">
+    let {
+        onexport,
+    }: {
+        onexport: () => Promise<void>;
+    } = $props();
+
+    let isExporting = $state(false);
+
+    async function handleExport() {
+        if (isExporting) return;
+        isExporting = true;
+        try {
+            await onexport();
+        } catch (e) {
+            // Dialog cancelled or error — ignore silently
+        } finally {
+            isExporting = false;
+        }
+    }
 </script>
 
 <div class="container">
-    <div class="export-button">Export</div>
+    <button class="export-button" onclick={handleExport} disabled={isExporting}>
+        Export
+    </button>
     <div class="arrow-button">
         <svg width="13" height="8" viewBox="0 0 13 8" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path
@@ -30,6 +51,7 @@
 
         background: var(--bg2);
         color: var(--color2);
+        border: none;
 
         font-size: 16px;
         font-weight: 500;
@@ -38,6 +60,12 @@
         border-bottom-left-radius: 6px;
         border-top-right-radius: 3px;
         border-bottom-right-radius: 3px;
+
+        transition: opacity 0.2s ease;
+    }
+
+    .export-button:disabled {
+        opacity: 0.6;
     }
 
     .arrow-button {
