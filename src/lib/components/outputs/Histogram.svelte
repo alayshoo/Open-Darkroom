@@ -210,6 +210,20 @@
     }
 
     /**
+     * 3-tap triangle (1-2-1) smooth to eliminate combing artifacts caused
+     * by 8-bit source quantisation through non-linear adjustments.
+     */
+    function smooth(bins: Uint32Array): Float32Array {
+        const out = new Float32Array(256);
+        out[0] = bins[0];
+        out[255] = bins[255];
+        for (let i = 1; i < 255; i++) {
+            out[i] = (bins[i - 1] + 2 * bins[i] + bins[i + 1]) / 4;
+        }
+        return out;
+    }
+
+    /**
      * Draws the R, G, B histogram curves onto the 2D canvas using
      * additive blending so overlapping channels produce natural mixes
      * (R+G = yellow, R+B = magenta, etc.)
@@ -222,6 +236,10 @@
         const ctx = canvas.getContext("2d")!;
         const { width, height } = canvas;
 
+        const smoothR = smooth(histograms.r);
+        const smoothG = smooth(histograms.g);
+        const smoothB = smooth(histograms.b);
+
         // Use the live animated ceiling for normalization
         const norm = (v: number) => Math.min(v, currentCeiling) / currentCeiling;
 
@@ -229,9 +247,9 @@
         ctx.globalCompositeOperation = "lighter"; // additive colour blend
 
         for (const [bins, color] of [
-            [histograms.r, "rgb(255,0,0)"],
-            [histograms.g, "rgb(0,255,0)"],
-            [histograms.b, "rgb(0,0,255)"],
+            [smoothR, "rgb(255,0,0)"],
+            [smoothG, "rgb(0,255,0)"],
+            [smoothB, "rgb(0,0,255)"],
         ] as const) {
             ctx.beginPath();
             ctx.moveTo(0, height);
