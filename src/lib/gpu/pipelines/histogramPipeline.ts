@@ -1,8 +1,8 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
-import type { Parameters } from "$lib/types/imgParameters";
+import type { Sliders } from "$lib/types/imgParameters";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
-import { PARAMS_BUFFER_SIZE, updateParams } from "./imgDevPipeline";
+import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
 import shaderSource from "../shaders/histogram.wgsl?raw";
 
 /** Number of bins per channel (matches the shader's array<atomic<u32>, 256>). */
@@ -15,12 +15,15 @@ const BINS_BUFFER_SIZE = NUM_BINS * 4;
  * Creates the histogram compute pipeline.
  *
  * Returns an object with:
- *  - `computeHistogram(inputTexture, adjustments)` — dispatches the compute
+ *  - `computeHistogram(inputTexture, sliders)` — dispatches the compute
  *     shader, reads back the 3×256 bin arrays from the GPU, and returns them.
  *  - `destroy()` — releases all GPU resources owned by this pipeline.
  */
 export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     const { device } = gpu;
+
+    // ── Calc params pipeline (computes matrices on GPU) ───────────
+    const calcParams: CalcParamsPipeline = createCalcParamsPipeline(gpu);
 
     // ── Shader module ────────────────────────────────────────────────
     const shaderModule = device.createShaderModule({
@@ -38,9 +41,9 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 texture: { sampleType: "float" },
             },
             {
-                binding: 1, // params uniform
+                binding: 1, // params storage buffer (computed by calcParams shader)
                 visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "uniform" },
+                buffer: { type: "read-only-storage" },
             },
             {
                 binding: 2, // bins_r
@@ -72,13 +75,6 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             module: shaderModule,
             entryPoint: "main",
         },
-    });
-
-    // ── Params uniform buffer (same layout as imgDevPipeline) ────────
-    const paramsBuffer = device.createBuffer({
-        label: "Histogram Params",
-        size: PARAMS_BUFFER_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     // ── Storage buffers for histogram bins (GPU-side) ────────────────
@@ -134,10 +130,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     async function computeHistogram(
         inputTexture: GPUTexture,
-        params: Parameters,
+        sliders: Sliders,
     ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array }> {
-        // Upload current adjustments to the params buffer
-        updateParams(device, paramsBuffer, params);
+        // Upload raw slider values to the GPU
+        calcParams.updateSliders(sliders);
 
         // Create a bind group connecting the actual resources
         const bindGroup = device.createBindGroup({
@@ -145,7 +141,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             layout: bindGroupLayout,
             entries: [
                 { binding: 0, resource: inputTexture.createView() },
-                { binding: 1, resource: { buffer: paramsBuffer } },
+                { binding: 1, resource: { buffer: calcParams.paramsBuffer } },
                 { binding: 2, resource: { buffer: binsR } },
                 { binding: 3, resource: { buffer: binsG } },
                 { binding: 4, resource: { buffer: binsB } },
@@ -156,12 +152,15 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             label: "Histogram Compute",
         });
 
+        // First: compute params from sliders (matrices calculated on GPU)
+        calcParams.recordCalcParams(encoder);
+
         // Clear bins to zero before dispatch
         encoder.clearBuffer(binsR);
         encoder.clearBuffer(binsG);
         encoder.clearBuffer(binsB);
 
-        // Dispatch compute shader
+        // Dispatch histogram compute shader
         const pass = encoder.beginComputePass({ label: "Histogram Pass" });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
@@ -199,7 +198,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     }
 
     function destroy() {
-        paramsBuffer.destroy();
+        calcParams.destroy();
         binsR.destroy();
         binsG.destroy();
         binsB.destroy();

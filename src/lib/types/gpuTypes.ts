@@ -1,7 +1,7 @@
 // $lib/types/gpuTypes.ts
 
-// Stores the GPU reference and format for display to 
-// be shared accross svelte components. 
+// Stores the GPU reference and format for display to
+// be shared accross svelte components.
 export interface GPUSession {
     device: GPUDevice;
     format: GPUTextureFormat;
@@ -26,13 +26,12 @@ export interface GPUImage {
 export interface ImgDevPipeline {
     pipeline: GPURenderPipeline;
     bindGroupLayout: GPUBindGroupLayout;
-    paramsBuffer: GPUBuffer;
     sampler: GPUSampler;
 }
 
 
 
-import type { Sliders, Parameters } from "./imgParameters";
+import type { Sliders } from "./imgParameters";
 
 export interface Renderer {
     loadImage: (image: GPUImage) => void;
@@ -43,9 +42,9 @@ export interface Renderer {
 
 
 export interface HistogramPipeline {
-    computeHistogram: (inputTexture: GPUTexture, params: Parameters) => Promise<{
+    computeHistogram: (inputTexture: GPUTexture, sliders: Sliders) => Promise<{
         r: Uint32Array;
-        g: Uint32Array; 
+        g: Uint32Array;
         b: Uint32Array;
     }>;
     destroy: () => void;

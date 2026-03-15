@@ -1,0 +1,125 @@
+// src/lib/gpu/pipelines/calcParamsPipeline.ts
+
+import type { Sliders } from "$lib/types/imgParameters";
+import type { GPUSession } from "$lib/types/gpuTypes";
+import shaderSource from "../shaders/calcParams.wgsl?raw";
+
+export const SLIDERS_BUFFER_SIZE = 96;   // 24 f32 fields × 4 bytes
+export const PARAMS_BUFFER_SIZE  = 240;  // Params struct (must match shader)
+
+export interface CalcParamsPipeline {
+    paramsBuffer: GPUBuffer;
+    updateSliders: (sliders: Sliders) => void;
+    recordCalcParams: (encoder: GPUCommandEncoder) => void;
+    destroy: () => void;
+}
+
+export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
+    const { device } = gpu;
+
+    const shaderModule = device.createShaderModule({
+        label: "Calc Params Compute Shader",
+        code: shaderSource,
+    });
+
+    // Sliders uniform buffer — raw slider values uploaded from CPU
+    const slidersBuffer = device.createBuffer({
+        label: "Sliders Uniform Buffer",
+        size: SLIDERS_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // Params storage buffer — computed matrices written by the shader,
+    // read by develop.wgsl / histogram.wgsl
+    const paramsBuffer = device.createBuffer({
+        label: "Computed Params Storage Buffer",
+        size: PARAMS_BUFFER_SIZE,
+        usage: GPUBufferUsage.STORAGE,
+    });
+
+    const bindGroupLayout = device.createBindGroupLayout({
+        label: "Calc Params Bind Group Layout",
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "storage" },
+            },
+        ],
+    });
+
+    const pipeline = device.createComputePipeline({
+        label: "Calc Params Compute Pipeline",
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [bindGroupLayout],
+        }),
+        compute: {
+            module: shaderModule,
+            entryPoint: "main",
+        },
+    });
+
+    const bindGroup = device.createBindGroup({
+        label: "Calc Params Bind Group",
+        layout: bindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: slidersBuffer } },
+            { binding: 1, resource: { buffer: paramsBuffer } },
+        ],
+    });
+
+    function updateSliders(sliders: Sliders) {
+        const data = slidersToArray(sliders);
+        device.queue.writeBuffer(slidersBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
+    }
+
+    function recordCalcParams(encoder: GPUCommandEncoder) {
+        const pass = encoder.beginComputePass({ label: "Calc Params Pass" });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(1);
+        pass.end();
+    }
+
+    function destroy() {
+        slidersBuffer.destroy();
+        paramsBuffer.destroy();
+    }
+
+    return { paramsBuffer, updateSliders, recordCalcParams, destroy };
+}
+
+// Packs raw slider values into a Float32Array matching the WGSL Sliders struct
+function slidersToArray(s: Sliders): Float32Array {
+    return new Float32Array([
+        s.invert ? 1.0 : 0.0,
+        s.redBlackPoint,
+        s.greenBlackPoint,
+        s.blueBlackPoint,
+        s.redWhitePoint,
+        s.greenWhitePoint,
+        s.blueWhitePoint,
+        s.rgbOutputBlack,
+        s.rgbOutputWhite,
+        s.redGamma,
+        s.greenGamma,
+        s.blueGamma,
+        s.wbTemp,
+        s.wbTint,
+        s.exposure,
+        s.contrast,
+        s.brightness,
+        s.highlights,
+        s.shadows,
+        s.whites,
+        s.blacks,
+        s.saturation,
+        s.vibrance,
+        s.hue,
+    ]);
+}

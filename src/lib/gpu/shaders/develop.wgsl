@@ -31,7 +31,7 @@ struct Params {
   _pad4:          f32,          // 232
   _pad5:          f32,          // 236
 }                               // total: 240 bytes
-@group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(2) var<storage, read> params: Params;
 
 // ---------- Vertex Shader ----------
 // Runs once per vertex (6 vertices = 2 triangles = full screen quad).

@@ -1,0 +1,262 @@
+// src/lib/gpu/shaders/calcParams.wgsl
+//
+// Compute shader that calculates processing matrices from raw slider values.
+// Runs once per slider change (single invocation) to produce the Params struct
+// consumed by develop.wgsl and histogram.wgsl.
+
+struct Sliders {
+    invert:            f32,   //  0   (0.0 or 1.0)
+    red_black_point:   f32,   //  4   (0–255)
+    green_black_point: f32,   //  8
+    blue_black_point:  f32,   // 12
+    red_white_point:   f32,   // 16
+    green_white_point: f32,   // 20
+    blue_white_point:  f32,   // 24
+    rgb_output_black:  f32,   // 28
+    rgb_output_white:  f32,   // 32
+    red_gamma:         f32,   // 36
+    green_gamma:       f32,   // 40
+    blue_gamma:        f32,   // 44
+    wb_temp:           f32,   // 48
+    wb_tint:           f32,   // 52
+    exposure:          f32,   // 56
+    contrast:          f32,   // 60
+    brightness:        f32,   // 64
+    highlights:        f32,   // 68
+    shadows:           f32,   // 72
+    whites:            f32,   // 76
+    blacks:            f32,   // 80
+    saturation:        f32,   // 84
+    vibrance:          f32,   // 88
+    hue:               f32,   // 92
+}                             // total: 96 bytes
+
+struct Params {
+    dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
+    red_gamma:      f32,          //  64
+    green_gamma:    f32,          //  68
+    blue_gamma:     f32,          //  72
+    _pad1:          f32,          //  76
+    wb_matrix:      mat3x3<f32>,  //  80 — 48 bytes
+    exposure:       f32,          // 128
+    contrast:       f32,          // 132
+    brightness:     f32,          // 136
+    highlights:     f32,          // 140
+    shadows:        f32,          // 144
+    whites:         f32,          // 148
+    blacks:         f32,          // 152
+    _pad2:          f32,          // 156
+    hueSat_matrix:  mat4x4<f32>,  // 160 — 64 bytes
+    vibrance:       f32,          // 224
+    _pad3:          f32,          // 228
+    _pad4:          f32,          // 232
+    _pad5:          f32,          // 236
+}                                 // total: 240 bytes
+
+@group(0) @binding(0) var<uniform> sliders: Sliders;
+@group(0) @binding(1) var<storage, read_write> params: Params;
+
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const PI: f32 = 3.14159265358979323846;
+
+// Bradford cone-space transform (column-major, matching WGSL mat3x3 layout)
+const M_BRADFORD = mat3x3<f32>(
+    vec3f( 0.8951, -0.7502,  0.0389),
+    vec3f( 0.2664,  1.7135, -0.0685),
+    vec3f(-0.1614,  0.0367,  1.0296),
+);
+
+const M_BRADFORD_INV = mat3x3<f32>(
+    vec3f( 0.9869929,  0.4323053, -0.0085287),
+    vec3f(-0.1470543,  0.5183603,  0.0400428),
+    vec3f( 0.1599627,  0.0492912,  0.9684867),
+);
+
+// Linear sRGB <-> XYZ D65 (column-major)
+const M_RGB_TO_XYZ = mat3x3<f32>(
+    vec3f(0.4124564, 0.2126729, 0.0193339),
+    vec3f(0.3575761, 0.7151522, 0.1191920),
+    vec3f(0.1804375, 0.0721750, 0.9503041),
+);
+
+const M_XYZ_TO_RGB = mat3x3<f32>(
+    vec3f( 3.2406, -0.9689,  0.0557),
+    vec3f(-1.5372,  1.8758, -0.2040),
+    vec3f(-0.4986,  0.0415,  1.0570),
+);
+
+// BT.709 luminance coefficients
+const LR: f32 = 0.2126;
+const LG: f32 = 0.7152;
+const LB: f32 = 0.0722;
+
+
+// ── CCT -> XYZ (Planckian locus, Kim et al.) ────────────────────────────────
+
+fn cct_to_xyz(temp_raw: f32) -> vec3f {
+    let T = clamp(temp_raw, 1000.0, 25000.0);
+
+    var x: f32;
+    if (T <= 4000.0) {
+        x = -0.2661239e9 / (T * T * T)
+          - 0.234358e6  / (T * T)
+          + 0.8776956e3 / T
+          + 0.17991;
+    } else {
+        x = -3.0258469e9 / (T * T * T)
+          + 2.1070379e6  / (T * T)
+          + 0.2226347e3  / T
+          + 0.24039;
+    }
+
+    var y: f32;
+    if (T <= 4000.0) {
+        y = -1.1063814 * x * x * x
+          - 1.3481102 * x * x
+          + 2.1855583 * x
+          - 0.2021968;
+    } else {
+        y =  3.081758  * x * x * x
+          - 5.8733867 * x * x
+          + 3.75113   * x
+          - 0.3700148;
+    }
+
+    return vec3f(x / y, 1.0, (1.0 - x - y) / y);
+}
+
+
+// ── Darkroom matrix (black/white point remap + optional inversion) ──────────
+
+fn calc_darkroom_matrix() -> mat4x4<f32> {
+    let rbp = sliders.red_black_point   / 255.0;
+    let gbp = sliders.green_black_point / 255.0;
+    let bbp = sliders.blue_black_point  / 255.0;
+    let rwp = sliders.red_white_point   / 255.0;
+    let gwp = sliders.green_white_point / 255.0;
+    let bwp = sliders.blue_white_point  / 255.0;
+    let ob  = sliders.rgb_output_black  / 255.0;
+    let ow  = sliders.rgb_output_white  / 255.0;
+
+    let out_range = ow - ob;
+    let invert    = sliders.invert > 0.5;
+    let out_start = select(ob, ow, invert);
+    let out_dir   = select(out_range, -out_range, invert);
+
+    let sR = out_dir / (rwp - rbp);
+    let sG = out_dir / (gwp - gbp);
+    let sB = out_dir / (bwp - bbp);
+
+    let oR = -rbp * sR + out_start;
+    let oG = -gbp * sG + out_start;
+    let oB = -bbp * sB + out_start;
+
+    return mat4x4<f32>(
+        vec4f(sR,  0.0, 0.0, 0.0),
+        vec4f(0.0, sG,  0.0, 0.0),
+        vec4f(0.0, 0.0, sB,  0.0),
+        vec4f(oR,  oG,  oB,  1.0),
+    );
+}
+
+
+// ── White balance matrix (Bradford CAT + tint) ──────────────────────────────
+
+fn calc_wb_matrix() -> mat3x3<f32> {
+    let src_xyz = cct_to_xyz(sliders.wb_temp);
+    let dst_xyz = cct_to_xyz(5500.0);   // neutral reference
+
+    let src_cone = M_BRADFORD * src_xyz;
+    let dst_cone = M_BRADFORD * dst_xyz;
+
+    // Diagonal scale: adapt src -> dst
+    let scale = dst_cone / src_cone;
+    let diag_scale = mat3x3<f32>(
+        vec3f(scale.x, 0.0,     0.0),
+        vec3f(0.0,     scale.y, 0.0),
+        vec3f(0.0,     0.0,     scale.z),
+    );
+
+    // Full CAT in XYZ space
+    let M_CAT_XYZ = M_BRADFORD_INV * diag_scale * M_BRADFORD;
+
+    // Bring into linear sRGB space
+    let M_CAT_RGB = M_XYZ_TO_RGB * M_CAT_XYZ * M_RGB_TO_XYZ;
+
+    // Tint: perpendicular to Planckian locus (magenta/green axis)
+    let tint_scale = pow(2.0, -sliders.wb_tint / 100.0);
+    let M_TINT = mat3x3<f32>(
+        vec3f(1.0,        0.0, 0.0),
+        vec3f(0.0, tint_scale, 0.0),
+        vec3f(0.0,        0.0, 1.0),
+    );
+
+    return M_TINT * M_CAT_RGB;
+}
+
+
+// ── Hue + Saturation matrix ─────────────────────────────────────────────────
+
+fn calc_hue_sat_matrix() -> mat4x4<f32> {
+    let saturation = 1.0 + sliders.saturation / 100.0;
+    let hue        = sliders.hue * PI / 180.0;
+
+    let sr = (1.0 - saturation) * LR;
+    let sg = (1.0 - saturation) * LG;
+    let sb = (1.0 - saturation) * LB;
+
+    // Saturation matrix (column-major)
+    let sat_mat = mat4x4<f32>(
+        vec4f(sr + saturation, sr,              sr,              0.0),
+        vec4f(sg,              sg + saturation, sg,              0.0),
+        vec4f(sb,              sb,              sb + saturation, 0.0),
+        vec4f(0.0,             0.0,             0.0,             1.0),
+    );
+
+    if (hue == 0.0) {
+        return sat_mat;
+    }
+
+    // Hue rotation around (1,1,1) axis (Rodrigues' formula)
+    let c  = cos(hue);
+    let s  = sin(hue);
+    let k  = (1.0 - c) / 3.0;
+    let sq = sqrt(1.0 / 3.0);
+
+    let hue_mat = mat4x4<f32>(
+        vec4f(c + k,      k - sq * s, k + sq * s, 0.0),
+        vec4f(k + sq * s, c + k,      k - sq * s, 0.0),
+        vec4f(k - sq * s, k + sq * s, c + k,      0.0),
+        vec4f(0.0,        0.0,        0.0,        1.0),
+    );
+
+    return hue_mat * sat_mat;
+}
+
+
+// ── Main entry point (single invocation) ─────────────────────────────────────
+
+@compute @workgroup_size(1)
+fn main() {
+    params.dr_matrix     = calc_darkroom_matrix();
+    params.red_gamma     = sliders.red_gamma;
+    params.green_gamma   = sliders.green_gamma;
+    params.blue_gamma    = sliders.blue_gamma;
+    params._pad1         = 0.0;
+    params.wb_matrix     = calc_wb_matrix();
+    params.exposure      = sliders.exposure;
+    params.contrast      = sliders.contrast / 100.0;
+    params.brightness    = sliders.brightness;
+    params.highlights    = sliders.highlights;
+    params.shadows       = sliders.shadows;
+    params.whites        = sliders.whites;
+    params.blacks        = sliders.blacks;
+    params._pad2         = 0.0;
+    params.hueSat_matrix = calc_hue_sat_matrix();
+    params.vibrance      = sliders.vibrance / 100.0;
+    params._pad3         = 0.0;
+    params._pad4         = 0.0;
+    params._pad5         = 0.0;
+}

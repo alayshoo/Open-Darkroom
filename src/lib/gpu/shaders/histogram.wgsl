@@ -25,7 +25,7 @@ struct Params {
   _pad4:          f32,          // 232
   _pad5:          f32,          // 236
 }                               // total: 240 bytes
-@group(0) @binding(1) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> params: Params;
 
 // Variables to calculate data into.
 @group(0) @binding(2) var<storage, read_write> bins_r: array<atomic<u32>, 256>;

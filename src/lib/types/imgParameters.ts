@@ -1,7 +1,7 @@
-// $lib/types/adjustments.ts
+// $lib/types/imgParameters.ts
 
 // Sliders is the type used in the UI
-export interface Sliders {  
+export interface Sliders {
     invert: boolean;
     redBlackPoint: number;
     greenBlackPoint: number;
@@ -90,65 +90,3 @@ export const overridesBW: Partial<Sliders> = {
     wbTemp: 5500,
     wbTint: 0,
 };
-
-// Adjustments is the type used in the GPU Pipeline
-export interface Parameters {  
-    darkroomMatrix: Matrix4x4;
-    redGamma: number;
-    greenGamma: number;
-    blueGamma: number;
-    wbMatrix: Float32Array<ArrayBuffer>;
-    exposure: number;
-    contrast: number;
-    brightness: number;
-    highlights: number;
-    shadows: number;
-    whites: number;
-    blacks: number;
-    hueSatMatrix: Matrix4x4;
-    vibrance: number;
-}
-
-
-import type { Matrix4x4 } from "$lib/utils/calcMatrixHelpers";
-import { calcDarkroomMatrix } from "$lib/utils/calcDarkroomMatrix";
-import { calcHueSatMatrix } from "$lib/utils/calcHueSatMatrix";
-import { temperatureTintToWBMatrix } from "../utils/calcWBMatrix";
-
-// Maps UI slider values to shader-expected ranges
-export function mapSlidersToParameters(sliders: Sliders): Parameters {
-
-    let params = {} as Parameters;
-
-    params.darkroomMatrix = calcDarkroomMatrix(
-        sliders.invert,
-        sliders.redBlackPoint / 255,
-        sliders.greenBlackPoint / 255,
-        sliders.blueBlackPoint / 255,
-        sliders.redWhitePoint / 255,
-        sliders.greenWhitePoint / 255,
-        sliders.blueWhitePoint / 255,
-        sliders.rgbOutputBlack / 255,
-        sliders.rgbOutputWhite / 255,
-    );
-
-    params.hueSatMatrix = calcHueSatMatrix(
-        1 + sliders.saturation / 100, // 0..2, 1 = identity
-        sliders.hue * Math.PI / 180,  // degrees -> radians
-    );
-
-    params.redGamma = sliders.redGamma;
-    params.greenGamma = sliders.greenGamma;
-    params.blueGamma = sliders.blueGamma;
-    params.wbMatrix = temperatureTintToWBMatrix(sliders.wbTemp, sliders.wbTint);
-    params.exposure = sliders.exposure;
-    params.contrast = sliders.contrast / 100;
-    params.brightness = sliders.brightness;
-    params.highlights = sliders.highlights;
-    params.shadows = sliders.shadows;
-    params.whites = sliders.whites;
-    params.blacks = sliders.blacks;
-    params.vibrance = sliders.vibrance / 100;
-
-    return params;
-}

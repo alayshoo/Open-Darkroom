@@ -1,8 +1,7 @@
 // src/lib/gpu/pipelines/imgDevPipeline.ts
 
-import type { Parameters } from "$lib/types/imgParameters";
 import type { GPUSession, ImgDevPipeline } from "$lib/types/gpuTypes"
-import shaderSource from "../shaders/develop.wgsl?raw";        // read raw data from shader file
+import shaderSource from "../shaders/develop.wgsl?raw";
 
 
 export function createImgDevPipeline(
@@ -30,9 +29,9 @@ export function createImgDevPipeline(
                 sampler: { type: "filtering" },
             },
             {
-                binding: 2, // params uniform
+                binding: 2, // params storage buffer (computed by calcParams shader)
                 visibility: GPUShaderStage.FRAGMENT,
-                buffer: { type: "uniform" },
+                buffer: { type: "read-only-storage" },
             },
         ],
     });
@@ -58,15 +57,6 @@ export function createImgDevPipeline(
         },
     });
 
-    // Create the uniform buffer in VRAM for the parameters.
-    // 4 bytes for one f32. Minimum of 16 bytes because
-    // WebGPU requires uniform buffers to be 16-byte aligned.
-    const paramsBuffer = gpuSession.device.createBuffer({
-        label: "Image Development Params",
-        size: PARAMS_BUFFER_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
     // Create a sampler (bilinear filtering, clamp to edge)
     const sampler = gpuSession.device.createSampler({
         magFilter: "linear",
@@ -75,57 +65,5 @@ export function createImgDevPipeline(
         addressModeV: "clamp-to-edge",
     });
 
-    return { pipeline, bindGroupLayout, paramsBuffer, sampler };
-}
-
-export const PARAMS_BUFFER_SIZE = 240;
-
-function paramsToArray(p: Parameters) {
-    const buf = new Float32Array(PARAMS_BUFFER_SIZE / 4);
-    let o = 0;
-
-    // dr_matrix — mat4x4 — 16 floats
-    for (let i = 0; i < 16; i++) buf[o++] = p.darkroomMatrix[i];
-
-    // gammas + pad — 4 floats
-    buf[o++] = p.redGamma;
-    buf[o++] = p.greenGamma;
-    buf[o++] = p.blueGamma;
-    buf[o++] = 0; // _pad1
-
-    // wb_matrix — mat3x3 as 12 floats (already padded by toWGSL)
-    for (let i = 0; i < 12; i++) buf[o++] = p.wbMatrix[i];
-
-    // scalar adjustments + pad — 8 floats
-    buf[o++] = p.exposure;
-    buf[o++] = p.contrast;
-    buf[o++] = p.brightness;
-    buf[o++] = p.highlights;
-    buf[o++] = p.shadows;
-    buf[o++] = p.whites;
-    buf[o++] = p.blacks;
-    buf[o++] = 0; // _pad2
-
-    // hueSat_matrix — mat4x4 — 16 floats
-    for (let i = 0; i < 16; i++) buf[o++] = p.hueSatMatrix[i];
-
-    // vibrance + 3 pad — 4 floats
-    buf[o++] = p.vibrance;
-    // remaining 3 floats are already 0
-
-    return buf;
-}
-
-// Helper to update the parameters values on the GPU
-export function updateParams(
-    device: GPUDevice,
-    paramsBuffer: GPUBuffer,
-    params: Parameters
-) {
-    // writeBuffer copies CPU data → GPU buffer
-    device.queue.writeBuffer(
-        paramsBuffer,
-        0,
-        paramsToArray(params)
-    );
+    return { pipeline, bindGroupLayout, sampler };
 }

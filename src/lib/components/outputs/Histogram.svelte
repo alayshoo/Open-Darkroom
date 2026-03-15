@@ -1,7 +1,7 @@
 <!-- src/lib/components/Histogram.svelte -->
 <script lang="ts">
     import { untrack } from "svelte";
-    import { mapSlidersToParameters, type Sliders } from "$lib/types/imgParameters";
+    import { type Sliders } from "$lib/types/imgParameters";
     import type { GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
@@ -166,7 +166,7 @@
 
         computing = true;
         try {
-            const data = await histPipeline.computeHistogram(image.texture, mapSlidersToParameters(sliders));
+            const data = await histPipeline.computeHistogram(image.texture, sliders);
 
             // Recompute the target ceiling from the new histogram data.
             // currentCeiling animates toward it — snapping up, decaying down.

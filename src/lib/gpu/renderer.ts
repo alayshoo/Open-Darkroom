@@ -1,16 +1,15 @@
 // src/lib/gpu/renderer.ts
 
-import { defaultSlidersRGB, mapSlidersToParameters, type Sliders } from "../types/imgParameters";
+import { defaultSlidersRGB, type Sliders } from "../types/imgParameters";
 import type { GPUSession, GPUImage, ImgDevPipeline, Renderer, GPUCanvasLink } from "$lib/types/gpuTypes";
-import {
-    createImgDevPipeline,
-    updateParams
-} from "./pipelines/imgDevPipeline";
+import { createImgDevPipeline } from "./pipelines/imgDevPipeline";
+import { createCalcParamsPipeline, type CalcParamsPipeline } from "./pipelines/calcParamsPipeline";
 
 
 export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
 
-    // Create pipeline at startup
+    // Create pipelines at startup
+    const calcParams: CalcParamsPipeline = createCalcParamsPipeline(gpu);
     const imgDev: ImgDevPipeline = createImgDevPipeline(gpu);
 
     // The bind group connects actual resources to the layout slots.
@@ -24,7 +23,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         // NOW we can create the bind group — it connects:
         //   binding 0 → the actual texture view
         //   binding 1 → the actual sampler
-        //   binding 2 → the actual params buffer
+        //   binding 2 → the params storage buffer (written by calcParams compute)
         bindGroup = gpu.device.createBindGroup({
             label: "Image Development Bind Group",
             layout: imgDev.bindGroupLayout,
@@ -39,14 +38,14 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
                 },
                 {
                     binding: 2,
-                    resource: { buffer: imgDev.paramsBuffer },
+                    resource: { buffer: calcParams.paramsBuffer },
                 },
             ],
         });
     }
 
     function setSliders(sliders: Sliders) {
-        updateParams(gpu.device, imgDev.paramsBuffer, mapSlidersToParameters(sliders));
+        calcParams.updateSliders(sliders);
     }
 
     function render() {
@@ -63,7 +62,11 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             label: "Render Frame",
         });
 
-        // Step 3: Begin a render pass.
+        // Step 3: Compute params from sliders (matrices calculated on GPU).
+        // This compute pass writes the Params storage buffer.
+        calcParams.recordCalcParams(encoder);
+
+        // Step 4: Begin a render pass.
         // A render pass = "draw things into this texture."
         const pass = encoder.beginRenderPass({
             colorAttachments: [
@@ -76,22 +79,22 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             ],
         });
 
-        // Step 4: Record draw commands
+        // Step 5: Record draw commands
         pass.setPipeline(imgDev.pipeline);
         pass.setBindGroup(0, bindGroup);
         pass.draw(6); // 6 vertices = full-screen quad (2 triangles)
 
-        // Step 5: End the pass and submit
+        // Step 6: End the pass and submit
         pass.end();
         gpu.device.queue.submit([encoder.finish()]);
     }
 
     function destroy() {
-        imgDev.paramsBuffer.destroy();
+        calcParams.destroy();
         currentImage?.texture.destroy();
     }
 
-    // Initialize exposure to 0 (no change)
+    // Initialize with default sliders
     setSliders( defaultSlidersRGB );
 
     return { loadImage, setSliders, render, destroy };

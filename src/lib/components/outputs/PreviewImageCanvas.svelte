@@ -10,7 +10,7 @@
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createRenderer } from "$lib/gpu/renderer";
     import { type ImagePayload } from "$lib/types/imagePayload";
-    import { type Sliders, mapSlidersToParameters } from "$lib/types/imgParameters";
+    import { type Sliders } from "$lib/types/imgParameters";
 
     // Props
     let {
