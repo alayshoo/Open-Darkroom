@@ -10,6 +10,7 @@
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
+    import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -166,6 +167,17 @@
         }
     }
 
+    // ===== Invert toggle logic =====
+
+    function handleInvertToggle(isInverted: boolean) {
+        commit({
+            type: "slider",
+            key: "invert",
+            oldValue: !isInverted,
+            newValue: isInverted,
+        });
+    }
+
     // ===== Image =====
 
     let imagePayload: ImagePayload | null = $state(null);
@@ -237,6 +249,11 @@
             </div>
             <div class="quick-actions">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
+                {#if isDarkroom}
+                    <div transition:slide={{ axis: 'x', duration: 250 }}>
+                        <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
+                    </div>
+                {/if}
             </div>
             <div class="controls-section">
                 <div class="controls-pager-wrapper">
@@ -954,8 +971,11 @@
     .quick-actions {
         display: flex;
         flex-direction: row;
+        align-items: center;
+        gap: 8px;
         margin-left: 12px;
         margin-top: 6px;
+        overflow: hidden;
     }
 
     .side-panel {
