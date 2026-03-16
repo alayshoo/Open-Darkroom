@@ -130,15 +130,25 @@ fn cct_to_xyz(temp_raw: f32) -> vec3f {
 
 // ── Darkroom matrix (black/white point remap + optional inversion) ──────────
 
+// Sliders are expressed in sRGB (0-255). The GPU texture is already linearised,
+// so convert to linear before building the remap matrix.
+fn srgb_to_linear(s: f32) -> f32 {
+    if s <= 0.04045 {
+        return s / 12.92;
+    } else {
+        return pow((s + 0.055) / 1.055, 2.4);
+    }
+}
+
 fn calc_darkroom_matrix() -> mat4x4<f32> {
-    let rbp = sliders.red_black_point   / 255.0;
-    let gbp = sliders.green_black_point / 255.0;
-    let bbp = sliders.blue_black_point  / 255.0;
-    let rwp = sliders.red_white_point   / 255.0;
-    let gwp = sliders.green_white_point / 255.0;
-    let bwp = sliders.blue_white_point  / 255.0;
-    let ob  = sliders.rgb_output_black  / 255.0;
-    let ow  = sliders.rgb_output_white  / 255.0;
+    let rbp = srgb_to_linear(sliders.red_black_point   / 255.0);
+    let gbp = srgb_to_linear(sliders.green_black_point / 255.0);
+    let bbp = srgb_to_linear(sliders.blue_black_point  / 255.0);
+    let rwp = srgb_to_linear(sliders.red_white_point   / 255.0);
+    let gwp = srgb_to_linear(sliders.green_white_point / 255.0);
+    let bwp = srgb_to_linear(sliders.blue_white_point  / 255.0);
+    let ob  = srgb_to_linear(sliders.rgb_output_black  / 255.0);
+    let ow  = srgb_to_linear(sliders.rgb_output_white  / 255.0);
 
     let out_range = ow - ob;
     let invert    = sliders.invert > 0.5;
