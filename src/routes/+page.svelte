@@ -790,6 +790,8 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
+                                        histogramData={imagePayload?.histR ?? null}
+                                        histogramChannel="r"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Green Input"
@@ -805,6 +807,8 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
+                                        histogramData={imagePayload?.histG ?? null}
+                                        histogramChannel="g"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Blue Input"
@@ -820,6 +824,8 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
+                                        histogramData={imagePayload?.histB ?? null}
+                                        histogramChannel="b"
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"

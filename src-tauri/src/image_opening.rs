@@ -150,10 +150,24 @@ pub(crate) async fn open_image_file(
             chunk[6..8].copy_from_slice(&a.to_le_bytes());
         });
 
-    let mut payload = Vec::with_capacity(8 + pixels.len());
+    // Compute R/G/B histograms (256 bins) from original full-resolution image.
+    // Map u16 sRGB values (0-65535) to 8-bit bins (0-255) via >> 8.
+    let mut hist_r = [0u32; 256];
+    let mut hist_g = [0u32; 256];
+    let mut hist_b = [0u32; 256];
+    for chunk in rgba16.as_raw().chunks_exact(4) {
+        hist_r[(chunk[0] >> 8) as usize] += 1;
+        hist_g[(chunk[1] >> 8) as usize] += 1;
+        hist_b[(chunk[2] >> 8) as usize] += 1;
+    }
+
+    let mut payload = Vec::with_capacity(8 + pixels.len() + 3072);
     payload.extend_from_slice(&width.to_le_bytes());
     payload.extend_from_slice(&height.to_le_bytes());
     payload.extend_from_slice(&pixels);
+    for &v in hist_r.iter().chain(hist_g.iter()).chain(hist_b.iter()) {
+        payload.extend_from_slice(&v.to_le_bytes());
+    }
 
     let total_ms = overall_start.elapsed().as_millis();
     println!(
