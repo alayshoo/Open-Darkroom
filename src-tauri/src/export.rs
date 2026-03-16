@@ -8,6 +8,7 @@ use half::f16;
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::time::Instant;
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 use wgpu::util::DeviceExt;
 
@@ -112,6 +113,7 @@ fn linearize_chunk(chunk_u16: &[u16], lut: &[f16]) -> Vec<u8> {
 // ── Core GPU export ───────────────────────────────────────────────────────────
 
 async fn run_export(
+    app: tauri::AppHandle,
     pixels_u16: Vec<u16>,
     width: u32,
     height: u32,
@@ -119,6 +121,8 @@ async fn run_export(
     path: PathBuf,
 ) -> Result<(), String> {
     let t = Instant::now();
+
+    let _ = app.emit("export:started", ());
 
     // ── 1. Initialise wgpu ────────────────────────────────────────────────────
 
@@ -370,14 +374,14 @@ async fn run_export(
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &input_tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &chunk_f16_bytes,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 8), // 8 bytes per rgba16float pixel
                 rows_per_image: None,
@@ -459,15 +463,15 @@ async fn run_export(
             pass.draw(0..6, 0..1); // full-screen quad (6 vertices, hardcoded in vs_main)
         }
         enc.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &output_tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &staging_buf,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: None,
@@ -511,11 +515,15 @@ async fn run_export(
         out_rgb_offset += chunk_height as usize * width as usize * 3;
         row_start = row_end;
 
+        let progress = row_end as f32 / height as f32;
+        let _ = app.emit("export:progress", progress);
+
         println!(
-            "export: processed rows {}-{} / {}",
+            "export: processed rows {}-{} / {} ({:.0}%)",
             row_start - chunk_height,
             row_end,
-            height
+            height,
+            progress * 100.0,
         );
     }
 
@@ -525,6 +533,8 @@ async fn run_export(
         .ok_or("Failed to assemble output image")?;
     img.save(&path)
         .map_err(|e| format!("Failed to save PNG: {e}"))?;
+
+    let _ = app.emit("export:progress", 1.0f32);
 
     println!(
         "export: saved {} × {} → {} in {} ms",
@@ -568,5 +578,5 @@ pub(crate) async fn export_image(
         (img.pixels_u16.clone(), img.width, img.height)
     };
 
-    run_export(pixels_u16, width, height, sliders, path).await
+    run_export(app, pixels_u16, width, height, sliders, path).await
 }

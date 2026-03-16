@@ -1,6 +1,7 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
+    import { listen } from "@tauri-apps/api/event";
     import { slide, blur } from "svelte/transition";
     import { tick } from "svelte";
 
@@ -14,6 +15,7 @@
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
+    import ExportModal from "$lib/components/ExportModal.svelte";
 
     import {
         type Sliders,
@@ -172,8 +174,21 @@
         imagePayload = await openImage();
     }
 
+    let isExportPending = $state(false);
+    let showExportModal = $state(false);
+
     async function handleExport() {
-        await exportImage(sliders);
+        isExportPending = true;
+        const unlisten = await listen("export:started", () => {
+            showExportModal = true;
+        });
+        try {
+            await exportImage(sliders);
+        } finally {
+            unlisten();
+            isExportPending = false;
+            showExportModal = false;
+        }
     }
 
     // ===== History =====
@@ -874,6 +889,8 @@
         </div>
     </div>
 </div>
+
+<ExportModal visible={showExportModal}></ExportModal>
 
 <style>
     .container {

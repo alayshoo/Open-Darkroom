@@ -86,7 +86,7 @@
 <style>
 	canvas {
 		width: 100%;
-		aspect-ratio: 3 / 1;
+		aspect-ratio: 4 / 1;
 		border-bottom-left-radius: 4px;
 		border-bottom-right-radius: 4px;
 		border-top-right-radius: 8px;
