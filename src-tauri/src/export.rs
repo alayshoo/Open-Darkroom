@@ -20,7 +20,6 @@ const CALC_PARAMS_WGSL: &str =
 const DEVELOP_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/develop.wgsl");
 
-const SLIDERS_BYTES: u64 = 96;  // 24 × f32
 const PARAMS_BYTES: u64  = 240; // Params struct
 const CHUNK_ROWS: u32    = 512;
 
