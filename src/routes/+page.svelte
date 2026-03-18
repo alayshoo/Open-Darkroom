@@ -881,7 +881,7 @@
         </div>
         <div class="side-panel-footer" bind:this={footerEl}>
             {#if exportMenuOpen}
-                <ExportSettingsMenu bind:settings={exportSettings} />
+                <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
             {/if}
             <div style="position:absolute; left: 10px;">
                 <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>

@@ -26,6 +26,8 @@ pub(crate) async fn export_image(
     let (filter_name, extensions): (&str, &[&str]) = match settings.format {
         ExportFormat::Png  => ("PNG Image",  &["png"]),
         ExportFormat::Jpeg => ("JPEG Image", &["jpg", "jpeg"]),
+        ExportFormat::Webp => ("WebP Image", &["webp"]),
+        ExportFormat::Tiff => ("TIFF Image", &["tiff", "tif"]),
     };
 
     let path = app
@@ -40,6 +42,8 @@ pub(crate) async fn export_image(
     let path = match settings.format {
         ExportFormat::Png  => ensure_extension(path, "png"),
         ExportFormat::Jpeg => ensure_extension(path, "jpg"),
+        ExportFormat::Webp => ensure_extension(path, "webp"),
+        ExportFormat::Tiff => ensure_extension(path, "tiff"),
     };
 
     let (pixels_u16, width, height) = {
@@ -50,7 +54,12 @@ pub(crate) async fn export_image(
 
     let t = Instant::now();
 
-    let rgb_bytes = render_image(&app, pixels_u16, width, height, &sliders).await?;
+    let bit_depth = match settings.format {
+        ExportFormat::Tiff => settings.tiff_bit_depth,
+        _ => 8,
+    };
+
+    let rgb_bytes = render_image(&app, pixels_u16, width, height, &sliders, bit_depth).await?;
 
     println!("export: GPU render done in {} ms, encoding…", t.elapsed().as_millis());
 

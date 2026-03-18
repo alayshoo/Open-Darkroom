@@ -4,17 +4,23 @@
 
     let {
         settings = $bindable(),
+        isRgb = true,
     }: {
         settings: ExportSettings;
+        isRgb?: boolean;
     } = $props();
+
+    $effect(() => {
+        settings.isBw = !isRgb;
+    });
 </script>
 
 <div class="menu" role="menu" aria-label="Export settings">
     <div class="format-row">
         <button
             class="pill"
-            class:active={settings.format === "png"}
-            onclick={() => (settings.format = "png")}
+            class:active={settings.format === "webp"}
+            onclick={() => (settings.format = "webp")}
         >
             WebP
         </button>
@@ -33,12 +39,14 @@
         </button>
         <button
             class="pill"
-            class:active={settings.format === "jpeg"}
-            onclick={() => (settings.format = "jpeg")}
+            class:active={settings.format === "tiff"}
+            onclick={() => (settings.format = "tiff")}
         >
             TIFF
         </button>
     </div>
+
+    <div></div>
 
     {#if settings.format === "png"}
         <div class="setting">
@@ -50,8 +58,8 @@
                 min={0}
                 max={9}
                 step={1}
-                defaultValue={9}
-                bind:value={settings.pngCompression} 
+                defaultValue={6}
+                bind:value={settings.pngCompression}
                 ></SingleValSliderInt>
             <div class="setting-hints">
                 <span>Fast</span>
@@ -70,14 +78,95 @@
                 min={1}
                 max={100}
                 step={1}
-                defaultValue={100}
-                bind:value={settings.jpegQuality} 
+                defaultValue={90}
+                bind:value={settings.jpegQuality}
                 stepAnimation={false}
                 springy={false}
                 ></SingleValSliderInt>
             <div class="setting-hints">
                 <span>Low</span>
                 <span>High</span>
+            </div>
+        </div>
+    {/if}
+
+    {#if settings.format === "webp"}
+        <div class="setting">
+            <div class="format-row">
+                <button
+                    class="pill"
+                    class:active={settings.webpLossless}
+                    onclick={() => (settings.webpLossless = true)}
+                >
+                    Lossless
+                </button>
+                <button
+                    class="pill"
+                    class:active={!settings.webpLossless}
+                    onclick={() => (settings.webpLossless = false)}
+                >
+                    Lossy
+                </button>
+            </div>
+        </div>
+        {#if settings.webpLossless}
+            <div class="setting">
+                <div class="setting-header">
+                    <span class="setting-label">Compression</span>
+                    <span class="setting-value">{settings.webpCompression}</span>
+                </div>
+                <SingleValSliderInt
+                    min={0}
+                    max={9}
+                    step={1}
+                    defaultValue={6}
+                    bind:value={settings.webpCompression}
+                    ></SingleValSliderInt>
+                <div class="setting-hints">
+                    <span>Fast</span>
+                    <span>Small</span>
+                </div>
+            </div>
+        {:else}
+            <div class="setting">
+                <div class="setting-header">
+                    <span class="setting-label">Quality</span>
+                    <span class="setting-value">{settings.webpQuality}</span>
+                </div>
+                <SingleValSliderInt
+                    min={1}
+                    max={100}
+                    step={1}
+                    defaultValue={90}
+                    bind:value={settings.webpQuality}
+                    stepAnimation={false}
+                    springy={false}
+                    ></SingleValSliderInt>
+                <div class="setting-hints">
+                    <span>Low</span>
+                    <span>High</span>
+                </div>
+            </div>
+        {/if}
+    {/if}
+
+    {#if settings.format === "tiff"}
+        <div class="setting">
+            <div class="format-row">
+                <button
+                    class="pill"
+                    class:active={settings.tiffBitDepth === 8}
+                    onclick={() => (settings.tiffBitDepth = 8)}
+                >
+                    {isRgb ? "RGB" : "Greyscale"} 8-bit
+                </button>
+                <button
+                    class="pill"
+                    class:active={settings.tiffBitDepth === 16}
+                    onclick={() => (settings.tiffBitDepth = 16)}
+                >
+                    {isRgb ? "RGB" : "Greyscale"} 16-bit
+                </button>
             </div>
         </div>
     {/if}
@@ -93,6 +182,8 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
+
+        height: 162px;
 
         background: var(--bg3);
         border-radius: 8px;
@@ -177,6 +268,7 @@
     .setting-hints {
         display: flex;
         justify-content: space-between;
+        margin-top: -8px;
         font-size: 10px;
         color: var(--color3);
     }

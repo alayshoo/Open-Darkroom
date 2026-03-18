@@ -110,6 +110,12 @@ fn linearize_chunk(chunk_u16: &[u16], lut: &[f16]) -> Vec<u8> {
 // ── Core GPU render ───────────────────────────────────────────────────────────
 
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
+///
+/// When `bit_depth` is 8 the output texture is `Rgba8Unorm` and the returned
+/// buffer contains 3 × u8 per pixel.  When `bit_depth` is 16 the output
+/// texture is `Rgba16Float`; each channel is read back as an f16, converted to
+/// a u16 (0–65535), and stored little-endian, giving 6 bytes per pixel.
+///
 /// Emits `export:started` at the beginning and `export:progress` per chunk.
 pub async fn render_image(
     app: &tauri::AppHandle,
@@ -117,6 +123,7 @@ pub async fn render_image(
     width: u32,
     height: u32,
     sliders: &SlidersPayload,
+    bit_depth: u8,
 ) -> Result<Vec<u8>, String> {
     let t = Instant::now();
 
@@ -288,7 +295,11 @@ pub async fn render_image(
             push_constant_ranges: &[],
         });
 
-    let output_format = wgpu::TextureFormat::Rgba8Unorm;
+    let output_format = if bit_depth >= 16 {
+        wgpu::TextureFormat::Rgba16Float
+    } else {
+        wgpu::TextureFormat::Rgba8Unorm
+    };
 
     let dev_pipeline =
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -330,12 +341,16 @@ pub async fn render_image(
 
     // ── 5. Process image chunk by chunk ───────────────────────────────────────
 
-    let bytes_per_row_unpadded = width * 4; // Rgba8Unorm = 4 bytes/pixel
+    // Rgba8Unorm = 4 bytes/pixel, Rgba16Float = 8 bytes/pixel
+    let bytes_per_texel = if bit_depth >= 16 { 8u32 } else { 4u32 };
+    let bytes_per_row_unpadded = width * bytes_per_texel;
     let padded_bytes_per_row = (bytes_per_row_unpadded + 255) & !255;
 
+    // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
+    let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
     let lut = build_srgb_to_linear_lut_u16();
     let total_pixels = (width * height) as usize;
-    let mut output_rgb = vec![0u8; total_pixels * 3];
+    let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
     let mut row_start = 0u32;
     let mut out_rgb_offset = 0usize;
@@ -472,17 +487,34 @@ pub async fn render_image(
             for row in 0..chunk_height as usize {
                 let row_src = &mapped[row * padded_bytes_per_row as usize
                     ..row * padded_bytes_per_row as usize + bytes_per_row_unpadded as usize];
-                let dst_base = out_rgb_offset + row * width as usize * 3;
-                for px in 0..width as usize {
-                    output_rgb[dst_base + px * 3]     = row_src[px * 4];
-                    output_rgb[dst_base + px * 3 + 1] = row_src[px * 4 + 1];
-                    output_rgb[dst_base + px * 3 + 2] = row_src[px * 4 + 2];
+                let dst_base = out_rgb_offset + row * width as usize * bytes_per_output_pixel;
+                if bit_depth >= 16 {
+                    // Each channel is an f16 (2 bytes LE); convert to u16 and store LE.
+                    for px in 0..width as usize {
+                        let s = px * 8; // 8 bytes per Rgba16Float texel
+                        let r = half::f16::from_le_bytes([row_src[s],     row_src[s + 1]]);
+                        let g = half::f16::from_le_bytes([row_src[s + 2], row_src[s + 3]]);
+                        let b = half::f16::from_le_bytes([row_src[s + 4], row_src[s + 5]]);
+                        let r16 = (r.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        let g16 = (g.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        let b16 = (b.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        let d = dst_base + px * 6;
+                        output_rgb[d..d + 2].copy_from_slice(&r16.to_le_bytes());
+                        output_rgb[d + 2..d + 4].copy_from_slice(&g16.to_le_bytes());
+                        output_rgb[d + 4..d + 6].copy_from_slice(&b16.to_le_bytes());
+                    }
+                } else {
+                    for px in 0..width as usize {
+                        output_rgb[dst_base + px * 3]     = row_src[px * 4];
+                        output_rgb[dst_base + px * 3 + 1] = row_src[px * 4 + 1];
+                        output_rgb[dst_base + px * 3 + 2] = row_src[px * 4 + 2];
+                    }
                 }
             }
         }
         staging_buf.unmap();
 
-        out_rgb_offset += chunk_height as usize * width as usize * 3;
+        out_rgb_offset += chunk_height as usize * width as usize * bytes_per_output_pixel;
         row_start = row_end;
 
         let progress = row_end as f32 / height as f32;
