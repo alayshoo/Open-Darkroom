@@ -15,6 +15,7 @@
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
+    import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
     import ExportModal from "$lib/components/ExportModal.svelte";
 
@@ -28,6 +29,7 @@
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { openImage } from "$lib/utils/openImage";
     import { exportImage } from "$lib/utils/exportImage";
+    import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 
     import { animateObject } from "$lib/utils/animateObject";
 
@@ -188,6 +190,20 @@
 
     let isExportPending = $state(false);
     let showExportModal = $state(false);
+    let exportMenuOpen = $state(false);
+    let exportSettings = $state<ExportSettings>({ ...defaultExportSettings });
+    let footerEl: HTMLDivElement | null = $state(null);
+
+    $effect(() => {
+        if (!exportMenuOpen) return;
+        function handleDocClick(e: MouseEvent) {
+            if (!footerEl?.contains(e.target as Node)) {
+                exportMenuOpen = false;
+            }
+        }
+        document.addEventListener("click", handleDocClick);
+        return () => document.removeEventListener("click", handleDocClick);
+    });
 
     async function handleExport() {
         isExportPending = true;
@@ -195,7 +211,7 @@
             showExportModal = true;
         });
         try {
-            await exportImage(sliders);
+            await exportImage(sliders, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
@@ -255,7 +271,7 @@
                     </div>
                 {/if}
             </div>
-            <div class="controls-section">
+            <div class="controls-section" class:dimmed={exportMenuOpen}>
                 <div class="controls-pager-wrapper">
                     {#if !isDarkroom}
                         <div
@@ -863,9 +879,12 @@
                 </div>
             </div>
         </div>
-        <div class="side-panel-footer">
+        <div class="side-panel-footer" bind:this={footerEl}>
+            {#if exportMenuOpen}
+                <ExportSettingsMenu bind:settings={exportSettings} />
+            {/if}
             <div style="position:absolute; left: 10px;">
-                <ExportButton onexport={handleExport}></ExportButton>
+                <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>
             </div>
             <div class="page-dots-wrapper">
                 {#if !isDarkroom}
@@ -1000,6 +1019,12 @@
         flex-direction: column;
         overflow: hidden;
         position: relative;
+        transition: opacity 0.2s ease;
+    }
+
+    .controls-section.dimmed {
+        opacity: 0.25;
+        pointer-events: none;
     }
 
     .controls-pager-wrapper {

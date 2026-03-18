@@ -1,6 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod image_opening;
+mod export_rendering;
+mod export_encoding;
 mod export;
 
 use image_opening::ImageState;
