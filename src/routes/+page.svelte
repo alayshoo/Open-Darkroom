@@ -131,7 +131,9 @@
 
     // ===== Variables =====
 
-    let sliders: Sliders = $state(defaultSlidersRGB);
+    // Copy, don't alias: $state() proxies the object it is given, so passing the
+    // exported default directly would write every slider drag back into it.
+    let sliders: Sliders = $state({ ...defaultSlidersRGB });
 
     // ===== B&W toggle logic =====
     let isRgb = $state(true);
