@@ -32,6 +32,13 @@ struct Params {
 @group(0) @binding(3) var<storage, read_write> bins_g: array<atomic<u32>, 256>;
 @group(0) @binding(4) var<storage, read_write> bins_b: array<atomic<u32>, 256>;
 
+// Total weight each pixel contributes, split between the two bins it falls
+// between. This also bounds how many pixels a single bin can hold before the
+// u32 wraps: u32::MAX / 256 = 16.7M pixels, comfortably above the 4.2M cap of
+// a 2048×2048 preview. Raising it buys sub-bin precision at the cost of that
+// headroom — at 65536 a bin wrapped once it held just 2.3% of the image.
+const VOTE: u32 = 256u;
+
 
 
 @compute @workgroup_size(16, 16)
@@ -113,17 +120,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let g1 = min(g0 + 1u, 255u);
   let b1 = min(b0 + 1u, 255u);
 
-  // Fractional weight for the upper bin, scaled to u32 range [0, 65536]
-  // so we can distribute each pixel's vote across two adjacent bins
-  // without floating-point atomics. Eliminates 8-bit quantisation combing.
-  let rw = u32((rf - f32(r0)) * 65536.0);
-  let gw = u32((gf - f32(g0)) * 65536.0);
-  let bw = u32((bf - f32(b0)) * 65536.0);
+  // Fractional weight for the upper bin, scaled to [0, VOTE) so each pixel's
+  // vote can be split across two adjacent bins without floating-point atomics.
+  // Eliminates 8-bit quantisation combing.
+  let rw = u32((rf - f32(r0)) * f32(VOTE));
+  let gw = u32((gf - f32(g0)) * f32(VOTE));
+  let bw = u32((bf - f32(b0)) * f32(VOTE));
 
-  atomicAdd(&bins_r[r0], 65536u - rw);
+  atomicAdd(&bins_r[r0], VOTE - rw);
   atomicAdd(&bins_r[r1], rw);
-  atomicAdd(&bins_g[g0], 65536u - gw);
+  atomicAdd(&bins_g[g0], VOTE - gw);
   atomicAdd(&bins_g[g1], gw);
-  atomicAdd(&bins_b[b0], 65536u - bw);
+  atomicAdd(&bins_b[b0], VOTE - bw);
   atomicAdd(&bins_b[b1], bw);
 }
