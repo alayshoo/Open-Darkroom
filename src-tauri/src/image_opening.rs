@@ -9,7 +9,10 @@ use tauri_plugin_dialog::DialogExt;
 
 use image::{ImageBuffer, Rgba};
 
-use crate::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
+use crate::color::{
+    build_resample_lut, build_srgb_to_linear_lut_u16, linear_u16_to_f16_bytes, linearize_rgba_u16,
+    srgb_to_linear_rgba_u16, LINEAR_BYTES_PER_PIXEL,
+};
 
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 
@@ -130,12 +133,40 @@ pub fn compute_histograms(rgba16: &Rgba16Image) -> Histograms {
 pub fn prepare_image(rgba16: &Rgba16Image) -> PreparedImage {
     let (full_width, full_height) = rgba16.dimensions();
 
-    // Downscale in u16 space, then linearise sRGB → f16 for the GPU texture.
-    let preview = downscale_to_max_edge(rgba16, PREVIEW_MAX_EDGE);
-    let (preview_width, preview_height) = preview.dimensions();
+    // Resampling happens in linear light, so the image is gamma-decoded before
+    // it is downscaled rather than after.
+    //
+    // Averaging sRGB code values averages the encoding, not the light. Reduce a
+    // black-and-white checkerboard to a single pixel that way and it lands on
+    // sRGB 128 — linear 0.21 — where the light those pixels stand for is linear
+    // 0.50, sRGB 188. That is most of a stop, and it goes missing exactly in the
+    // fine texture the preview exists to predict: foliage, hair, grain,
+    // speculars. The live histogram reads the same preview, so it drifted too,
+    // and the export renders full-resolution and never resampled at all — so
+    // the two disagreed by more than resolution.
+    //
+    // Images already inside the cap are not resampled, and take the direct path
+    // so their bytes stay identical to what the export path would upload.
+    let (preview_width, preview_height, preview_pixels) =
+        if full_width.max(full_height) > PREVIEW_MAX_EDGE {
+            let linear: Rgba16Image = ImageBuffer::from_raw(
+                full_width,
+                full_height,
+                srgb_to_linear_rgba_u16(rgba16.as_raw(), &build_resample_lut()),
+            )
+            .expect("a linearised buffer keeps the dimensions of its source");
 
-    let lut = build_srgb_to_linear_lut_u16();
-    let preview_pixels = linearize_rgba_u16(preview.as_raw(), &lut);
+            let preview = downscale_to_max_edge(&linear, PREVIEW_MAX_EDGE);
+            let (w, h) = preview.dimensions();
+            (w, h, linear_u16_to_f16_bytes(preview.as_raw()))
+        } else {
+            let lut = build_srgb_to_linear_lut_u16();
+            (
+                full_width,
+                full_height,
+                linearize_rgba_u16(rgba16.as_raw(), &lut),
+            )
+        };
 
     // Histograms come from the full-resolution image, not the preview.
     let histograms = compute_histograms(rgba16);

@@ -5,7 +5,11 @@
 
 mod common;
 
-use common::{gray_ramp, noise, rgb_ramp, solid, u8_to_u16};
+use common::{gray_ramp, linear_to_srgb, noise, rgb_ramp, solid, u8_to_u16};
+
+use half::f16;
+use image::{ImageBuffer, Rgba};
+use open_darkroom_lib::image_opening::Rgba16Image;
 
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
 use open_darkroom_lib::image_opening::{
@@ -147,6 +151,49 @@ fn preview_uses_the_same_linearisation_as_export() {
     assert_eq!(
         prepared.preview_pixels, expected,
         "preview and export linearisation diverged"
+    );
+}
+
+/// The preview is resampled, and resampling averages light, not code values.
+///
+/// A checkerboard is the sharpest statement of the difference: half the pixels
+/// are black and half are white, so the honest average is linear 0.5 whatever
+/// the block size. Averaged in the sRGB encoding instead it comes out at linear
+/// 0.21 — most of a stop dark — and the error lands in exactly the fine texture
+/// the preview is there to predict.
+#[test]
+fn the_preview_is_resampled_in_linear_light() {
+    // Long edge past the cap so a resample actually happens. Every 2×2 block
+    // holds two black and two white pixels.
+    let width = PREVIEW_MAX_EDGE * 2;
+    let img: Rgba16Image = ImageBuffer::from_fn(width, 8, |x, y| {
+        let v = if (x + y) % 2 == 0 { 255u8 } else { 0u8 };
+        Rgba([u8_to_u16(v), u8_to_u16(v), u8_to_u16(v), u16::MAX])
+    });
+
+    let prepared = prepare_image(&img);
+    assert_eq!(
+        (prepared.preview_width, prepared.preview_height),
+        (PREVIEW_MAX_EDGE, 4),
+        "the fixture must actually be downscaled for this to prove anything"
+    );
+
+    // Sample the interior: the edge columns average fewer neighbours.
+    let mean: f64 = prepared
+        .preview_pixels
+        .chunks_exact(LINEAR_BYTES_PER_PIXEL)
+        .skip(8)
+        .take(prepared.preview_width as usize - 16)
+        .map(|px| f16::from_le_bytes([px[2], px[3]]).to_f32() as f64)
+        .sum::<f64>()
+        / (prepared.preview_width as usize - 16) as f64;
+
+    assert!(
+        (mean - 0.5).abs() < 0.02,
+        "checkerboard averaged to linear {mean:.4} (sRGB {:.0}/255); \
+         averaging in light gives 0.5 (sRGB 188), averaging the sRGB encoding \
+         gives 0.21 (sRGB 128)",
+        linear_to_srgb(mean) * 255.0
     );
 }
 
