@@ -168,12 +168,32 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
   // 9. Vibrance — boost under-saturated pixels more
-  let luma_vib = dot(rgb, LUMA);
-  let maxC = max(rgb.r, max(rgb.g, rgb.b));
-  let minC = min(rgb.r, min(rgb.g, rgb.b));
-  let pixelSat = (maxC - minC) / (maxC + 0.001);
+  //
+  // The whole step runs on the colour floored at black, because the saturation
+  // it measures — the HSV one, (max - min) / max — has no meaning below zero.
+  // Steps 5-7 put colours there routinely: a negative `blacks` or `shadows`, or
+  // a cold white balance. Unfloored, the divisor crosses zero and takes the mix
+  // factor to infinity with it, and vibrance hauls a below-black channel back
+  // into view as bright speckle — a dark ramp reading 0,0,0,1,3 without
+  // vibrance came back 2,6,24,0,0 with it.
+  //
+  // Flooring here is free: step 10 clamps to the same floor one line later.
+  // Headroom above white is untouched, which is the half the clamp still needs.
+  // Flooring only the measurement is not enough — the ratio then jumps from 0
+  // to 1 the instant one channel crosses zero while the others are still under
+  // it, so a boost that was full at one input is gone at the next.
+  //
+  // The divisor is floored rather than offset for the same reason of scale: an
+  // additive epsilon is only negligible beside a large max, and in linear light
+  // the shadows are not large. At sRGB 2 the old `+ 0.001` under-read
+  // saturation enough to put a 1.62x boost on an already-saturated pixel.
+  let vib_rgb = max(rgb, vec3f(0.0));
+  let luma_vib = dot(vib_rgb, LUMA);
+  let maxC = max(vib_rgb.r, max(vib_rgb.g, vib_rgb.b));
+  let minC = min(vib_rgb.r, min(vib_rgb.g, vib_rgb.b));
+  let pixelSat = (maxC - minC) / max(maxC, 1e-4);
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
-  rgb = mix(vec3f(luma_vib), rgb, 1.0 + vibranceAmount);
+  rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
 
   // Clamp + linear → sRGB
   let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));

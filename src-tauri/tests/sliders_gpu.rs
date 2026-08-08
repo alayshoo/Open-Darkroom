@@ -20,10 +20,12 @@ mod common;
 
 use common::{
     develop, develop_patch, develop_patches, gray_ramp, linear_to_srgb, mixed_ramp, srgb_to_linear,
-    through_linear,
+    through_linear, u8_to_u16,
 };
 
+use image::{ImageBuffer, Rgba};
 use open_darkroom_lib::export_rendering::SlidersPayload;
+use open_darkroom_lib::image_opening::Rgba16Image;
 
 /// Every comparison against a CPU reference allows this much 8-bit slack.
 /// One code value is texture-format rounding (the preview is Rgba16Float); two
@@ -1160,6 +1162,73 @@ fn vibrance_leaves_a_neutral_neutral() {
         assert!(
             got.iter().all(|&c| close(c, 128)),
             "vibrance {vibrance} tinted a neutral: {got:?}"
+        );
+    }
+}
+
+/// Vibrance must not manufacture light where the chain produced none.
+///
+/// It measures how saturated a pixel already is by dividing by the pixel's
+/// brightest channel. A negative `blacks` or `shadows` pushes that channel
+/// below zero, and the unguarded divisor then crossed zero and took the boost
+/// with it, hauling pixels the tone curve had legitimately crushed to black
+/// back into view. On a dark ramp that renders as 0,0,0,0,1,3 at vibrance 0,
+/// the old chain returned 2,6,24,0,0 — bright speckle scattered through the
+/// shadows, at its worst a tenth of the way up the range.
+///
+/// The invariant is deliberately one-sided. Vibrance is a per-pixel gain, so
+/// unlike the tone controls it cannot promise strict tone order — the factor
+/// legitimately differs between neighbouring pixels of different saturation,
+/// which moves 8-bit output by a code value here and there. What it can promise
+/// is that it never lifts black off the floor.
+#[test]
+fn vibrance_does_not_resurrect_crushed_shadows() {
+    // A warm ramp. Neutral pixels have no saturation to measure, so they never
+    // reach the ratio that used to blow up.
+    let img: Rgba16Image = ImageBuffer::from_fn(256, 1, |x, _| {
+        let v = x as u8;
+        Rgba([
+            u8_to_u16(v),
+            u8_to_u16(v.saturating_sub(6)),
+            u8_to_u16(v.saturating_sub(10)),
+            u16::MAX,
+        ])
+    });
+
+    for (label, crushed) in [
+        ("blacks at the bottom rail", SlidersPayload { blacks: -100.0, ..defaults() }),
+        ("shadows at the bottom rail", SlidersPayload { shadows: -100.0, ..defaults() }),
+        (
+            "blacks and shadows together",
+            SlidersPayload { blacks: -100.0, shadows: -100.0, ..defaults() },
+        ),
+    ] {
+        let reference = develop(&img, &crushed);
+        let boosted = develop(&img, &SlidersPayload { vibrance: 100.0, ..crushed });
+
+        let mut lifted = 0;
+        for (i, (&r, &b)) in reference.iter().zip(boosted.iter()).enumerate() {
+            if r == 0 {
+                assert!(
+                    b == 0,
+                    "{label}: vibrance lit a crushed pixel — byte {i} (input {}, channel {}) \
+                     renders 0 without vibrance and {b} with it",
+                    i / 3,
+                    i % 3
+                );
+                lifted += 1;
+            }
+        }
+        assert!(
+            lifted > 30,
+            "{label}: only {lifted} bytes were crushed to black, so this proves little"
+        );
+
+        // Guard against the assertion above passing because vibrance did
+        // nothing at all: it must still be visibly at work further up the ramp.
+        assert!(
+            reference != boosted,
+            "{label}: vibrance changed nothing anywhere on the ramp"
         );
     }
 }
