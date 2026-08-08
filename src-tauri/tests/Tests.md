@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 104 Rust tests, 10 TypeScript, 10 in-browser.
+Nothing is `#[ignore]`d. 108 Rust tests, 10 TypeScript, 10 in-browser.
 
 ---
 
@@ -44,7 +44,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `linearize_maps_each_channel_through_the_lut` | no channel crossing; alpha not gamma-decoded |
 | `linearize_is_order_independent` | rayon parallelism has no data race |
 
-## L1 — `image_prep.rs` (12)
+## L1 — `image_prep.rs` (13)
 
 | Test | Asserts |
 |---|---|
@@ -57,6 +57,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `histogram_channels_are_not_crossed` | R/G/B stay separate |
 | `histograms_describe_the_full_resolution_image` | counted before downscaling, not after |
 | `preview_uses_the_same_linearisation_as_export` | preview and export share one code path |
+| `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
@@ -86,7 +87,7 @@ as a whole; for one probe per slider see [`sliders_gpu.rs`](#l2--sliders_gpurs-3
 | `a_solid_patch_lands_on_its_own_bin` | flat colour occupies ≤ 2 adjacent bins |
 | `histogram_agrees_with_the_developed_image` | the two copies of the chain still match |
 
-## L2 — `sliders_gpu.rs` (37)
+## L2 — `sliders_gpu.rs` (40)
 
 One synthetic probe per control the UI exposes. `develop_gpu.rs` covers the chain
 as a whole; this covers each slider on its own — correct direction, correct
@@ -104,6 +105,8 @@ code-value shift), and tint (green scaled, then renormalised).
 | `each_white_point_pulls_only_its_own_channel` | input at the white point clips, others held |
 | `the_output_range_maps_the_endpoints_exactly` | black→64, white→192, mid interpolates linearly |
 | `raising_the_output_black_lifts_the_shadows_off_zero` | pure black lands on the output black |
+| `the_output_range_holds_its_endpoints_under_gamma` | gamma 2.2 does not drag output black 80 / white 200 |
+| `the_output_range_holds_its_endpoints_when_inverted_under_gamma` | same, inverted: white→80, black→200 |
 | `each_gamma_lifts_only_its_own_channel` | 3 channels vs an f64 reference |
 | `gamma_below_one_darkens_the_midtones` | exponent sign is not inverted |
 | `raising_the_temperature_warms_the_image` | 3200 K → B>G>R, 8800 K → R>G>B |
@@ -131,6 +134,7 @@ code-value shift), and tint (green scaled, then renormalised).
 | `positive_saturation_widens_the_channel_spread` | both directions move correctly |
 | `vibrance_boosts_muted_colours_more_than_vivid_ones` | the property that distinguishes it from saturation |
 | `vibrance_leaves_a_neutral_neutral` | no cast at either rail |
+| `vibrance_does_not_resurrect_crushed_shadows` | 3 crushing setups, no black pixel lit, still active higher up |
 | `a_hundred_and_twenty_degrees_permutes_the_primaries` | exact channel rotation about (1,1,1) |
 | `hue_rotation_is_reversible_and_wraps` | ±60 differ, ±180 agree |
 | `hue_leaves_a_neutral_neutral` | 5 angles, no cast |

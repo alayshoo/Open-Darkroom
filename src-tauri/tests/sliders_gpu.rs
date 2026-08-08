@@ -12,9 +12,6 @@
 // Reference values are computed in f64 on the CPU from the documented intent of
 // each control, never by re-running the shader, so a test failure means the
 // shader disagrees with the specification rather than with itself.
-//
-// Two tests at the bottom are `#[ignore]`d: they describe tone-order defects
-// that are real and reproducible today. See `Tests.md`.
 
 mod common;
 
