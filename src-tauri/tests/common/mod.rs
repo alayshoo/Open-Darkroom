@@ -15,7 +15,9 @@ use image::{ImageBuffer, Rgba};
 use wgpu::util::DeviceExt;
 
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16};
-use open_darkroom_lib::export_rendering::{sliders_to_bytes, SlidersPayload, PARAMS_BYTES};
+use open_darkroom_lib::export_rendering::{
+    render_image, sliders_to_bytes, SlidersPayload, PARAMS_BYTES,
+};
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 
 // ── Source files under contract ───────────────────────────────────────────────
@@ -163,6 +165,77 @@ fn ramp_value(x: u32, width: u32) -> u8 {
         return 0;
     }
     (x * 255 / (width - 1)) as u8
+}
+
+/// A chart carrying both a neutral ramp (row 0) and a saturated ramp (row 1), so
+/// a single render exercises the tone controls and the colour controls at once.
+pub fn mixed_ramp(width: u32) -> Rgba16Image {
+    ImageBuffer::from_fn(width, 2, |x, y| {
+        let v = ramp_value(x, width);
+        if y == 0 {
+            Rgba([u8_to_u16(v), u8_to_u16(v), u8_to_u16(v), u16::MAX])
+        } else {
+            Rgba([
+                u8_to_u16(v),
+                u8_to_u16(255 - v),
+                u8_to_u16(v / 2),
+                u16::MAX,
+            ])
+        }
+    })
+}
+
+// ── develop harness ───────────────────────────────────────────────────────────
+//
+// The export renderer is the only production entry point that runs the full
+// develop chain and hands the result back to the CPU, so it doubles as the
+// oracle for the shader chain the preview uses.
+
+/// Render `img` with `sliders` at 8 bits and return the RGB bytes.
+pub fn develop(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
+    let (w, h) = img.dimensions();
+    pollster::block_on(render_image(img.as_raw(), w, h, sliders, 8, |_| {}))
+        .expect("render should succeed")
+}
+
+/// Render `img` with `sliders` at 16 bits, returning one u16 per channel.
+pub fn develop16(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u16> {
+    let (w, h) = img.dimensions();
+    let bytes = pollster::block_on(render_image(img.as_raw(), w, h, sliders, 16, |_| {}))
+        .expect("render should succeed");
+    bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect()
+}
+
+/// The developed value of a solid 8-bit patch, as one RGB triple.
+pub fn develop_patch(value: [u8; 3], sliders: &SlidersPayload) -> [u8; 3] {
+    let img = solid(
+        2,
+        2,
+        [
+            u8_to_u16(value[0]),
+            u8_to_u16(value[1]),
+            u8_to_u16(value[2]),
+            u16::MAX,
+        ],
+    );
+    let out = develop(&img, sliders);
+    [out[0], out[1], out[2]]
+}
+
+/// One developed patch per input value, all from a single render — a whole tone
+/// curve for the cost of one GPU pass.
+pub fn develop_patches(values: &[u8], sliders: &SlidersPayload) -> Vec<[u8; 3]> {
+    let img: Rgba16Image = ImageBuffer::from_fn(values.len() as u32, 1, |x, _| {
+        let v = u8_to_u16(values[x as usize]);
+        Rgba([v, v, v, u16::MAX])
+    });
+    let out = develop(&img, sliders);
+    (0..values.len())
+        .map(|i| [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]])
+        .collect()
 }
 
 // ── Shared GPU device ─────────────────────────────────────────────────────────

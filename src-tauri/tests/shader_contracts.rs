@@ -310,25 +310,44 @@ fn params_field_offsets_match_the_readback_accessors() {
 
 // ── The develop chain, duplicated in two shaders ──────────────────────────────
 
-/// Pull the shared adjustment chain out of a shader: everything from the first
-/// numbered step through the linear→sRGB conversion.
-fn develop_chain(source: &str, label: &str) -> Vec<String> {
-    const START: &str = "// 1. Darkroom matrix";
-    const END: &str = "let srgb = select(hi, lo, clamped < cutoff);";
-
+/// Pull a delimited region out of a shader as normalised lines.
+fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) -> Vec<String> {
     let start = source
-        .find(START)
-        .unwrap_or_else(|| panic!("{label}: chain start marker {START:?} not found"));
-    let end = source
-        .find(END)
-        .unwrap_or_else(|| panic!("{label}: chain end marker {END:?} not found"))
-        + END.len();
+        .find(start_marker)
+        .unwrap_or_else(|| panic!("{label}: start marker {start_marker:?} not found"));
+    let end = source[start..]
+        .find(end_marker)
+        .map(|i| start + i + end_marker.len())
+        .unwrap_or_else(|| panic!("{label}: end marker {end_marker:?} not found"));
 
     source[start..end]
         .lines()
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|l| !l.is_empty())
         .collect()
+}
+
+/// Pull the shared adjustment chain out of a shader: everything from the first
+/// numbered step through the linear→sRGB conversion.
+fn develop_chain(source: &str, label: &str) -> Vec<String> {
+    wgsl_region(
+        source,
+        label,
+        "// 1. Darkroom matrix",
+        "let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));",
+    )
+}
+
+/// Pull the tone maths the two shaders both need — the transfer functions and the
+/// contrast curve. These live at module scope rather than inside the chain, so
+/// the chain comparison alone would not notice one copy drifting.
+fn tone_maths(source: &str, label: &str) -> Vec<String> {
+    wgsl_region(
+        source,
+        label,
+        "// ===================== Shared tone maths",
+        "// ========================== (update both files together) ==========================",
+    )
 }
 
 #[test]
@@ -345,6 +364,51 @@ fn develop_and_histogram_apply_the_same_chain() {
     if develop != histogram {
         let mut report = String::from(
             "develop.wgsl and histogram.wgsl no longer apply the same adjustment chain.\n\
+             The histogram would describe an image the preview never renders.\n\n",
+        );
+        for (i, (d, h)) in develop.iter().zip(histogram.iter()).enumerate() {
+            if d != h {
+                report.push_str(&format!("line {i}:\n  develop:   {d}\n  histogram: {h}\n"));
+            }
+        }
+        if develop.len() != histogram.len() {
+            report.push_str(&format!(
+                "\nlength differs: develop has {} lines, histogram has {}\n",
+                develop.len(),
+                histogram.len()
+            ));
+        }
+        panic!("{report}");
+    }
+}
+
+/// The chain calls into `encode_srgb`, `decode_srgb` and `contrast_curve`, and
+/// each shader carries its own copy. Identical call sites over different maths
+/// would be invisible to the test above.
+#[test]
+fn develop_and_histogram_share_the_same_tone_maths() {
+    let develop = tone_maths(DEVELOP_WGSL, "develop.wgsl");
+    let histogram = tone_maths(HISTOGRAM_WGSL, "histogram.wgsl");
+
+    assert!(
+        develop.len() > 20,
+        "tone maths extraction looks wrong — only {} lines",
+        develop.len()
+    );
+
+    // The contrast pivot and its base decide the whole shape of the curve, so
+    // they are named here: a silent edit to either in one file only would change
+    // what the histogram claims about the image.
+    for needle in ["TONE_PIVOT", "CONTRAST_BASE", "fn contrast_curve", "fn encode_srgb"] {
+        assert!(
+            develop.iter().any(|l| l.contains(needle)),
+            "the shared tone maths no longer defines {needle}"
+        );
+    }
+
+    if develop != histogram {
+        let mut report = String::from(
+            "develop.wgsl and histogram.wgsl no longer share the same tone maths.\n\
              The histogram would describe an image the preview never renders.\n\n",
         );
         for (i, (d, h)) in develop.iter().zip(histogram.iter()).enumerate() {

@@ -10,46 +10,12 @@
 mod common;
 
 use common::{
-    gray_ramp, primaries, rgb_ramp, run_calc_params, run_histogram, solid, through_linear,
-    u8_to_u16, weighted_mean_bin, HIST_VOTE,
+    develop, develop16, develop_patch, gray_ramp, primaries, rgb_ramp, run_calc_params,
+    run_histogram, solid, through_linear, u8_to_u16, weighted_mean_bin, HIST_VOTE,
 };
 
-use open_darkroom_lib::export_rendering::{render_image, SlidersPayload};
+use open_darkroom_lib::export_rendering::SlidersPayload;
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
-
-/// Render a chart with `sliders` at 8 bits and return the RGB bytes.
-fn develop(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
-    let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, sliders, 8, |_| {}))
-        .expect("render should succeed")
-}
-
-/// Render a chart with `sliders` at 16 bits, returning one u16 per channel.
-fn develop16(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u16> {
-    let (w, h) = img.dimensions();
-    let bytes = pollster::block_on(render_image(img.as_raw(), w, h, sliders, 16, |_| {}))
-        .expect("render should succeed");
-    bytes
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect()
-}
-
-/// The developed value of a solid patch, as one RGB triple.
-fn develop_patch(value: [u8; 3], sliders: &SlidersPayload) -> [u8; 3] {
-    let img = solid(
-        2,
-        2,
-        [
-            u8_to_u16(value[0]),
-            u8_to_u16(value[1]),
-            u8_to_u16(value[2]),
-            u16::MAX,
-        ],
-    );
-    let out = develop(&img, sliders);
-    [out[0], out[1], out[2]]
-}
 
 // ── calcParams: matrix construction ───────────────────────────────────────────
 
@@ -99,20 +65,34 @@ fn default_sliders_build_identity_matrices() {
     assert_eq!(p.vibrance(), 0.0);
 }
 
+/// Every slider but exposure arrives as -100..100 from the UI and is scaled to
+/// the range the shader works in. Exposure is the exception: it is measured in
+/// stops, so it passes straight through.
 #[test]
-fn percentage_sliders_are_scaled_to_unit_range() {
+fn percentage_sliders_are_scaled_to_the_shader_range() {
     let p = run_calc_params(&SlidersPayload {
         contrast: 50.0,
         vibrance: 25.0,
         exposure: 1.5,
-        brightness: 0.2,
+        brightness: 40.0,
+        highlights: 100.0,
+        shadows: -50.0,
+        whites: 100.0,
+        blacks: -100.0,
         ..Default::default()
     });
 
     assert!((p.contrast() - 0.5).abs() < 1e-6, "contrast is a percentage");
     assert!((p.vibrance() - 0.25).abs() < 1e-6, "vibrance is a percentage");
     assert!((p.exposure() - 1.5).abs() < 1e-6, "exposure passes through");
-    assert!((p.brightness() - 0.2).abs() < 1e-6, "brightness passes through");
+
+    // The tone-region amplitudes are budgeted so that no combination of the four
+    // can fold the tone curve back on itself — see calcParams.wgsl.
+    assert!((p.brightness() - 0.10).abs() < 1e-6, "brightness × 0.25");
+    assert!((p.highlights() - 0.20).abs() < 1e-6, "highlights × 0.20");
+    assert!((p.shadows() + 0.10).abs() < 1e-6, "shadows × 0.20");
+    assert!((p.whites() - 0.07).abs() < 1e-6, "whites × 0.07");
+    assert!((p.blacks() + 0.07).abs() < 1e-6, "blacks × 0.07");
 }
 
 #[test]
@@ -232,11 +212,11 @@ fn extreme_sliders_never_produce_non_finite_params() {
                 blue_gamma: 0.0,
                 exposure: 10.0,
                 contrast: 100.0,
-                brightness: 1.0,
-                highlights: 1.0,
-                shadows: 1.0,
-                whites: 1.0,
-                blacks: 1.0,
+                brightness: 100.0,
+                highlights: 100.0,
+                shadows: 100.0,
+                whites: 100.0,
+                blacks: 100.0,
                 saturation: 100.0,
                 vibrance: 100.0,
                 hue: 360.0,
@@ -424,8 +404,12 @@ fn a_ramp_stays_ordered_under_every_tone_control() {
             SlidersPayload { contrast: 50.0, ..Default::default() },
         ),
         (
-            "brightness +0.1",
-            SlidersPayload { brightness: 0.1, ..Default::default() },
+            "contrast -100",
+            SlidersPayload { contrast: -100.0, ..Default::default() },
+        ),
+        (
+            "brightness +40",
+            SlidersPayload { brightness: 40.0, ..Default::default() },
         ),
         (
             "gamma 2.2",
@@ -451,8 +435,20 @@ fn a_ramp_stays_ordered_under_every_tone_control() {
         (
             "shadows and highlights lifted",
             SlidersPayload {
-                shadows: 0.05,
-                highlights: 0.05,
+                shadows: 100.0,
+                highlights: 100.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "every tone control at a rail",
+            SlidersPayload {
+                contrast: -100.0,
+                brightness: 50.0,
+                highlights: -100.0,
+                shadows: 100.0,
+                whites: -100.0,
+                blacks: 100.0,
                 ..Default::default()
             },
         ),

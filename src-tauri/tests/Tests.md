@@ -12,9 +12,11 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
+Nothing is `#[ignore]`d. 104 Rust tests, 10 TypeScript, 10 in-browser.
+
 ---
 
-## L1 — `shader_contracts.rs` (9)
+## L1 — `shader_contracts.rs` (10)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -29,6 +31,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `params_struct_matches_the_declared_size` | `Params` = 240 bytes |
 | `params_field_offsets_match_the_readback_accessors` | test harness offsets still valid |
 | `develop_and_histogram_apply_the_same_chain` | the duplicated develop chain has not drifted |
+| `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths it calls |
 
 ## L1 — `color.rs` (6)
 
@@ -60,12 +63,13 @@ Reads source files as text. Catches a field added in one language and not the ot
 
 ## L2 — `develop_gpu.rs` (17)
 
-`calcParams.wgsl`, `develop.wgsl` and `histogram.wgsl` on real hardware.
+`calcParams.wgsl`, `develop.wgsl` and `histogram.wgsl` on real hardware. The chain
+as a whole; for one probe per slider see [`sliders_gpu.rs`](#l2--sliders_gpurs-37).
 
 | Test | Asserts |
 |---|---|
 | `default_sliders_build_identity_matrices` | all three matrices are identity to 1e-5 |
-| `percentage_sliders_are_scaled_to_unit_range` | contrast/vibrance ÷ 100, exposure passes through |
+| `percentage_sliders_are_scaled_to_the_shader_range` | every −100..100 slider's scale factor; exposure passes through |
 | `gamma_is_clamped_away_from_zero` | gamma 0 or negative is clamped |
 | `inversion_flips_the_darkroom_matrix_slope` | slope sign flips, offset moves to output white |
 | `extreme_sliders_never_produce_non_finite_params` | 9 rail positions, no inf/NaN |
@@ -75,12 +79,87 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `per_channel_gamma_lifts_midtones` | gamma hits only its own channel |
 | `inversion_is_its_own_inverse` | invert twice returns the original (16-bit) |
 | `inversion_reverses_the_tone_order` | black ↔ white |
-| `a_ramp_stays_ordered_under_every_tone_control` | 8 slider sets, ramp stays monotonic |
+| `a_ramp_stays_ordered_under_every_tone_control` | 10 slider sets incl. both rails, ramp stays monotonic |
 | `black_and_white_points_remap_the_endpoints` | new white point clips to white |
 | `every_pixel_casts_exactly_one_vote` | histogram weight is exactly pixels × 256 |
 | `vote_totals_hold_under_extreme_sliders` | same, at the rails |
 | `a_solid_patch_lands_on_its_own_bin` | flat colour occupies ≤ 2 adjacent bins |
 | `histogram_agrees_with_the_developed_image` | the two copies of the chain still match |
+
+## L2 — `sliders_gpu.rs` (37)
+
+One synthetic probe per control the UI exposes. `develop_gpu.rs` covers the chain
+as a whole; this covers each slider on its own — correct direction, correct
+magnitude where a closed-form reference exists, and no leakage into channels or
+tonal regions the slider should not touch.
+
+Three controls have exact CPU oracles rather than direction checks, because their
+maths is a closed form: contrast (`contrast_reference`), brightness (a uniform
+code-value shift), and tint (green scaled, then renormalised).
+
+| Test | Asserts |
+|---|---|
+| `each_black_point_lifts_only_its_own_channel` | linear-light remap, R/G/B isolated |
+| `a_black_point_clips_everything_below_it` | tones under the black point crush |
+| `each_white_point_pulls_only_its_own_channel` | input at the white point clips, others held |
+| `the_output_range_maps_the_endpoints_exactly` | black→64, white→192, mid interpolates linearly |
+| `raising_the_output_black_lifts_the_shadows_off_zero` | pure black lands on the output black |
+| `each_gamma_lifts_only_its_own_channel` | 3 channels vs an f64 reference |
+| `gamma_below_one_darkens_the_midtones` | exponent sign is not inverted |
+| `raising_the_temperature_warms_the_image` | 3200 K → B>G>R, 8800 K → R>G>B |
+| `the_red_to_blue_ratio_rises_with_temperature` | monotonic across 5 temperatures |
+| `tint_moves_green_against_the_slider` | green scales by 2^(-tint/100), then renormalises |
+| `white_balance_does_not_change_the_exposure` | 90 in-gamut temp × tint combos hold luminance within 4% |
+| `white_balance_still_shifts_the_colour` | the normalisation has not swallowed the control |
+| `the_coldest_temperatures_clip_red_out_of_gamut` | pins the 2200 K gamut limit |
+| `exposure_is_symmetric_in_stops` | ±1 and ±2 EV are exact powers of two |
+| `contrast_matches_the_reference_curve` | 17 tones × 6 settings vs an f64 oracle |
+| `contrast_holds_mid_grey_and_both_endpoints` | pivot holds, 0 stays 0, 255 stays 255 |
+| `contrast_keeps_the_tone_order_at_every_setting` | 7 settings incl. both rails, no fold |
+| `negative_contrast_inverts_positive_contrast` | +50 then −50 returns the original tone |
+| `positive_contrast_widens_the_tonal_spread` | shadows down, highlights up |
+| `negative_contrast_narrows_the_tonal_spread` | spread shrinks |
+| `brightness_shifts_every_tone_by_the_same_amount` | exact code-value shift, 4 settings, stays neutral |
+| `brightness_keeps_the_tone_order_at_every_setting` | both rails |
+| `highlights_act_only_above_mid_grey` | mask opens at sRGB 128, both directions |
+| `shadows_act_only_below_mid_grey` | mask closes at sRGB 128, favours deeper tones |
+| `whites_act_only_in_the_top_quarter` | opens at sRGB 191, and *ramps* rather than steps |
+| `blacks_act_only_in_the_bottom_quarter` | closes at sRGB 64, reaches pure black |
+| `the_four_masks_cover_four_different_ranges` | all 6 pairs differ; the two sides never cross |
+| `the_region_controls_keep_the_tone_order_in_combination` | **13 cases** incl. all four at both rails |
+| `saturation_at_the_bottom_rail_gives_neutral_grey` | −100 lands on BT.709 luma exactly |
+| `positive_saturation_widens_the_channel_spread` | both directions move correctly |
+| `vibrance_boosts_muted_colours_more_than_vivid_ones` | the property that distinguishes it from saturation |
+| `vibrance_leaves_a_neutral_neutral` | no cast at either rail |
+| `a_hundred_and_twenty_degrees_permutes_the_primaries` | exact channel rotation about (1,1,1) |
+| `hue_rotation_is_reversible_and_wraps` | ±60 differ, ±180 agree |
+| `hue_leaves_a_neutral_neutral` | 5 angles, no cast |
+| `every_slider_changes_the_rendered_image` | **all 24 lanes**, moved alone, alter the output |
+| `the_neutral_axis_stays_neutral` | 12 non-channel sliders introduce no tint |
+
+### Why the tone block is monotone by construction
+
+The two tone-order defects this file used to document are fixed, not tolerated.
+Both came from the same place: a control whose strength could outrun the shape of
+its own curve.
+
+**Contrast** was `mix(rgb, sigmoid(rgb), contrast)`. A negative factor
+extrapolates *away* from the sigmoid, and since `f'(x) = (1−t) + t·S'(x)` with
+`S'(0.5) = 2.5`, the slope vanished at `t = −2/3` — below contrast −67 the curve
+ran backwards. It is now a power curve on each side of a mid-grey pivot,
+`k = 3^contrast`, which is monotone for every `k > 0`, fixes 0 / pivot / 1, and
+makes the negative branch the exact inverse of the positive one.
+
+**The four region controls** are `x + A·mask(x)`. `smoothstep(0, W, x)` peaks at
+slope `1.5/W`, so a single control folds once `A > W/1.5`, and because the masks
+overlap their slopes add. `calcParams.wgsl` now budgets the amplitudes jointly —
+`2.25·0.20 + 6.0·0.07 = 0.87 < 1` at the binding point, the peak of the black
+mask — so no combination of the four can fold. The UI sliders are −100..100.
+
+Both also moved into a **perceptually encoded** domain along with brightness, which
+is where Lightroom's Basic panel works. That is what puts the mask boundaries at
+sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
+real mid-grey instead of on a bright highlight.
 
 ## L2 — `export_gpu.rs` (11)
 
