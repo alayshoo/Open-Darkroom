@@ -576,7 +576,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "highlights",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -596,7 +596,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "brightness",
+                                                key: "shadows",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -615,7 +615,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "whites",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -634,7 +634,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "brightness",
+                                                key: "blacks",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -664,7 +664,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "highlights",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -683,7 +683,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "brightness",
+                                                key: "shadows",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -702,7 +702,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "whites",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -710,6 +710,7 @@
                                     <SingleValSliderGroup
                                         bind:value={sliders.blacks}
                                         defaultValue={0}
+                                        name="Blacks"
                                         min={-1}
                                         max={1}
                                         decimalPlaces={2}
@@ -720,7 +721,7 @@
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "brightness",
+                                                key: "blacks",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
