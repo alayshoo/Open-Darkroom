@@ -229,6 +229,64 @@ fn raising_the_output_black_lifts_the_shadows_off_zero() {
     );
 }
 
+/// Gamma sits *between* the input remap and the output remap, so the output pair
+/// pins the endpoints whatever gamma does — the order a Levels dialog and a
+/// scanner both use. With the output range folded into the darkroom matrix it
+/// was applied before the power instead, and gamma dragged both ends away:
+/// output black 80 landed at 153 and output white 200 at 228.
+#[test]
+fn the_output_range_holds_its_endpoints_under_gamma() {
+    let sliders = SlidersPayload {
+        rgb_output_black: 80.0,
+        rgb_output_white: 200.0,
+        red_gamma: 2.2,
+        green_gamma: 2.2,
+        blue_gamma: 2.2,
+        ..defaults()
+    };
+
+    let black = develop_patch([0; 3], &sliders);
+    let white = develop_patch([255; 3], &sliders);
+
+    assert!(
+        black.iter().all(|&c| close(c, 80)),
+        "output black must survive gamma 2.2, got {black:?}"
+    );
+    assert!(
+        white.iter().all(|&c| close(c, 200)),
+        "output white must survive gamma 2.2, got {white:?}"
+    );
+}
+
+/// The same guarantee on the path that actually matters: a negative being
+/// inverted, with gamma shaping the positive and the output pair setting the
+/// print's black and white.
+#[test]
+fn the_output_range_holds_its_endpoints_when_inverted_under_gamma() {
+    let sliders = SlidersPayload {
+        invert: true,
+        rgb_output_black: 80.0,
+        rgb_output_white: 200.0,
+        red_gamma: 2.2,
+        green_gamma: 2.2,
+        blue_gamma: 2.2,
+        ..defaults()
+    };
+
+    // Inverted, so full input maps to the output black and vice versa.
+    let from_white = develop_patch([255; 3], &sliders);
+    let from_black = develop_patch([0; 3], &sliders);
+
+    assert!(
+        from_white.iter().all(|&c| close(c, 80)),
+        "inverted, input white must land on output black, got {from_white:?}"
+    );
+    assert!(
+        from_black.iter().all(|&c| close(c, 200)),
+        "inverted, input black must land on output white, got {from_black:?}"
+    );
+}
+
 // ── Darkroom group: per-channel gamma ─────────────────────────────────────────
 
 #[test]

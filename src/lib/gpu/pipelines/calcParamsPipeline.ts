@@ -5,7 +5,7 @@ import type { GPUSession } from "$lib/types/gpuTypes";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
 
 export const SLIDERS_BUFFER_SIZE = 96;   // 24 f32 fields × 4 bytes
-export const PARAMS_BUFFER_SIZE  = 240;  // Params struct (must match shader)
+export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;

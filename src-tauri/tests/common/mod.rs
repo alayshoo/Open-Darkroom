@@ -287,7 +287,7 @@ fn read_buffer(device: &wgpu::Device, staging: &wgpu::Buffer) -> Vec<u8> {
 
 // ── calcParams harness ────────────────────────────────────────────────────────
 
-/// The `Params` struct as 60 f32s, read straight back off the GPU.
+/// The `Params` struct as 64 f32s, read straight back off the GPU.
 ///
 /// Field offsets follow the WGSL layout documented in calcParams.wgsl; the
 /// accessors below are the only place those offsets are hard-coded, and
@@ -295,53 +295,63 @@ fn read_buffer(device: &wgpu::Device, staging: &wgpu::Buffer) -> Vec<u8> {
 pub struct Params(pub Vec<f32>);
 
 impl Params {
-    /// Column-major 4×4 darkroom matrix.
+    /// Column-major 4×4 darkroom matrix. Normalises each channel to 0..1 between
+    /// its black and white point; the output pair is applied separately, after
+    /// gamma, via `out_black` and `out_scale`.
     pub fn dr_matrix(&self) -> &[f32] {
         &self.0[0..16]
     }
     pub fn gammas(&self) -> [f32; 3] {
         [self.0[16], self.0[17], self.0[18]]
     }
+    /// Output black point, in linear light.
+    pub fn out_black(&self) -> f32 {
+        self.0[19]
+    }
+    /// Output white minus output black, in linear light.
+    pub fn out_scale(&self) -> f32 {
+        self.0[20]
+    }
     /// White-balance matrix as three columns of three (the mat3x3 is padded to
     /// 16-byte column stride, so the fourth lane of each column is skipped).
     pub fn wb_matrix(&self) -> [[f32; 3]; 3] {
         [
-            [self.0[20], self.0[21], self.0[22]],
             [self.0[24], self.0[25], self.0[26]],
             [self.0[28], self.0[29], self.0[30]],
+            [self.0[32], self.0[33], self.0[34]],
         ]
     }
     pub fn exposure(&self) -> f32 {
-        self.0[32]
-    }
-    pub fn contrast(&self) -> f32 {
-        self.0[33]
-    }
-    pub fn brightness(&self) -> f32 {
-        self.0[34]
-    }
-    pub fn highlights(&self) -> f32 {
-        self.0[35]
-    }
-    pub fn shadows(&self) -> f32 {
         self.0[36]
     }
-    pub fn whites(&self) -> f32 {
+    pub fn contrast(&self) -> f32 {
         self.0[37]
     }
-    pub fn blacks(&self) -> f32 {
+    pub fn brightness(&self) -> f32 {
         self.0[38]
     }
+    pub fn highlights(&self) -> f32 {
+        self.0[39]
+    }
+    pub fn shadows(&self) -> f32 {
+        self.0[40]
+    }
+    pub fn whites(&self) -> f32 {
+        self.0[41]
+    }
+    pub fn blacks(&self) -> f32 {
+        self.0[42]
+    }
     pub fn hue_sat_matrix(&self) -> &[f32] {
-        &self.0[40..56]
+        &self.0[44..60]
     }
     pub fn vibrance(&self) -> f32 {
-        self.0[56]
+        self.0[60]
     }
 
     /// Every meaningful lane, skipping the explicit padding slots.
     pub fn significant_values(&self) -> Vec<(usize, f32)> {
-        const PADDING: [usize; 8] = [19, 23, 27, 31, 39, 57, 58, 59];
+        const PADDING: [usize; 10] = [21, 22, 23, 27, 31, 35, 43, 61, 62, 63];
         self.0
             .iter()
             .enumerate()

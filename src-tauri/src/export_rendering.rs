@@ -21,7 +21,7 @@ pub const DEVELOP_WGSL: &str =
 
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
-pub const PARAMS_BYTES: u64 = 240;
+pub const PARAMS_BYTES: u64 = 256;
 
 /// Size of the `Sliders` uniform consumed by calcParams.wgsl.
 pub const SLIDERS_BYTES: usize = 96;

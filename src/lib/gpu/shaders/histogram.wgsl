@@ -9,22 +9,26 @@ struct Params {
   red_gamma:      f32,          //  64
   green_gamma:    f32,          //  68
   blue_gamma:     f32,          //  72
-  _pad1:          f32,          //  76  (align wb_matrix to 16)
-  wb_matrix:      mat3x3<f32>,  //  80 — 48 bytes (3 cols × 16)
-  exposure:       f32,          // 128
-  contrast:       f32,          // 132
-  brightness:     f32,          // 136
-  highlights:     f32,          // 140
-  shadows:        f32,          // 144
-  whites:         f32,          // 148
-  blacks:         f32,          // 152
-  _pad2:          f32,          // 156  (align hueSat_matrix to 16)
-  hueSat_matrix:  mat4x4<f32>,  // 160 — 64 bytes
-  vibrance:       f32,          // 224
-  _pad3:          f32,          // 228
-  _pad4:          f32,          // 232
-  _pad5:          f32,          // 236
-}                               // total: 240 bytes
+  out_black:      f32,          //  76
+  out_scale:      f32,          //  80
+  _pad1:          f32,          //  84
+  _pad2:          f32,          //  88
+  _pad3:          f32,          //  92  (align wb_matrix to 16)
+  wb_matrix:      mat3x3<f32>,  //  96 — 48 bytes (3 cols × 16)
+  exposure:       f32,          // 144
+  contrast:       f32,          // 148
+  brightness:     f32,          // 152
+  highlights:     f32,          // 156
+  shadows:        f32,          // 160
+  whites:         f32,          // 164
+  blacks:         f32,          // 168
+  _pad4:          f32,          // 172  (align hueSat_matrix to 16)
+  hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
+  vibrance:       f32,          // 240
+  _pad5:          f32,          // 244
+  _pad6:          f32,          // 248
+  _pad7:          f32,          // 252
+}                               // total: 256 bytes
 @group(0) @binding(1) var<storage, read> params: Params;
 
 // Variables to calculate data into.
@@ -106,7 +110,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   // ===================== Apply same adjustment chain as develop.wgsl =====================
 
-  // 1. Darkroom matrix — black/white point remap + optional inversion
+  // 1. Darkroom matrix — black/white point remap + optional inversion,
+  //    normalised so the black point lands on 0 and the white point on 1
   rgb = (params.dr_matrix * vec4f(rgb, 1.0)).xyz;
 
   // 2. Per-channel gamma
@@ -116,13 +121,22 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     pow(max(rgb.b, 0.0), 1.0 / params.blue_gamma),
   );
 
-  // 3. White balance (Bradford CAT, pre-computed on CPU)
+  // 3. Output black/white — the print end of the darkroom block.
+  //
+  // This sits after gamma, not inside the matrix in step 1, so the two output
+  // sliders stay the true endpoints of the result. Applied before the power
+  // they were not: output black 80 with gamma 2.2 put pure black at sRGB 153,
+  // and output white 200 put pure white at 228. Input remap → gamma → output
+  // remap is the order a Levels dialog and a scanner both use.
+  rgb = rgb * params.out_scale + params.out_black;
+
+  // 4. White balance (Bradford CAT, pre-computed on CPU)
   rgb = params.wb_matrix * rgb;
 
-  // 4. Exposure — a stop is a multiplication of light, so it stays linear
+  // 5. Exposure — a stop is a multiplication of light, so it stays linear
   rgb *= pow(2.0, params.exposure);
 
-  // ── Steps 5-7 run on a perceptually encoded signal ─────────────────────────
+  // ── Steps 6-8 run on a perceptually encoded signal ─────────────────────────
   // Contrast and the four region controls are judgements about how a print
   // looks, not about how much light reached the film, and Lightroom's Basic
   // panel works the same way. Two things depend on it. Contrast pivots on real
@@ -133,7 +147,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // almost everything else.
   var tone = encode_srgb(rgb);
 
-  // 5. Contrast — symmetric power curve pivoting on mid-grey
+  // 6. Contrast — symmetric power curve pivoting on mid-grey
   let k = pow(CONTRAST_BASE, params.contrast);
   tone = vec3f(
     contrast_curve(tone.r, k),
@@ -141,10 +155,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     contrast_curve(tone.b, k),
   );
 
-  // 6. Brightness — a uniform shift in code values
+  // 7. Brightness — a uniform shift in code values
   tone += params.brightness;
 
-  // 7. Highlights / Shadows / Whites / Blacks
+  // 8. Highlights / Shadows / Whites / Blacks
   //
   // Each is an offset gated by a luminance mask. The amplitudes arriving here
   // are already budgeted by calcParams so that the sum of their mask slopes can
@@ -164,20 +178,20 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   rgb = decode_srgb(tone);
 
-  // 8. Hue + Saturation (pre-composed matrix from CPU)
+  // 9. Hue + Saturation (pre-composed matrix from CPU)
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
-  // 9. Vibrance — boost under-saturated pixels more
+  // 10. Vibrance — boost under-saturated pixels more
   //
   // The whole step runs on the colour floored at black, because the saturation
   // it measures — the HSV one, (max - min) / max — has no meaning below zero.
-  // Steps 5-7 put colours there routinely: a negative `blacks` or `shadows`, or
+  // Steps 6-8 put colours there routinely: a negative `blacks` or `shadows`, or
   // a cold white balance. Unfloored, the divisor crosses zero and takes the mix
   // factor to infinity with it, and vibrance hauls a below-black channel back
   // into view as bright speckle — a dark ramp reading 0,0,0,1,3 without
   // vibrance came back 2,6,24,0,0 with it.
   //
-  // Flooring here is free: step 10 clamps to the same floor one line later.
+  // Flooring here is free: step 11 clamps to the same floor one line later.
   // Headroom above white is untouched, which is the half the clamp still needs.
   // Flooring only the measurement is not enough — the ratio then jumps from 0
   // to 1 the instant one channel crosses zero while the others are still under

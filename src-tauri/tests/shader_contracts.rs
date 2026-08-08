@@ -296,16 +296,18 @@ fn params_field_offsets_match_the_readback_accessors() {
 
     expect("dr_matrix", 0);
     expect("red_gamma", 16);
-    expect("wb_matrix", 20);
-    expect("exposure", 32);
-    expect("contrast", 33);
-    expect("brightness", 34);
-    expect("highlights", 35);
-    expect("shadows", 36);
-    expect("whites", 37);
-    expect("blacks", 38);
-    expect("hueSat_matrix", 40);
-    expect("vibrance", 56);
+    expect("out_black", 19);
+    expect("out_scale", 20);
+    expect("wb_matrix", 24);
+    expect("exposure", 36);
+    expect("contrast", 37);
+    expect("brightness", 38);
+    expect("highlights", 39);
+    expect("shadows", 40);
+    expect("whites", 41);
+    expect("blacks", 42);
+    expect("hueSat_matrix", 44);
+    expect("vibrance", 60);
 }
 
 // ── The develop chain, duplicated in two shaders ──────────────────────────────

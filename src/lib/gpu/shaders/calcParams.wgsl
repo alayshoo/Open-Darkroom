@@ -36,22 +36,26 @@ struct Params {
     red_gamma:      f32,          //  64
     green_gamma:    f32,          //  68
     blue_gamma:     f32,          //  72
-    _pad1:          f32,          //  76
-    wb_matrix:      mat3x3<f32>,  //  80 — 48 bytes
-    exposure:       f32,          // 128
-    contrast:       f32,          // 132
-    brightness:     f32,          // 136
-    highlights:     f32,          // 140
-    shadows:        f32,          // 144
-    whites:         f32,          // 148
-    blacks:         f32,          // 152
-    _pad2:          f32,          // 156
-    hueSat_matrix:  mat4x4<f32>,  // 160 — 64 bytes
-    vibrance:       f32,          // 224
-    _pad3:          f32,          // 228
-    _pad4:          f32,          // 232
-    _pad5:          f32,          // 236
-}                                 // total: 240 bytes
+    out_black:      f32,          //  76
+    out_scale:      f32,          //  80
+    _pad1:          f32,          //  84
+    _pad2:          f32,          //  88
+    _pad3:          f32,          //  92  (align wb_matrix to 96)
+    wb_matrix:      mat3x3<f32>,  //  96 — 48 bytes
+    exposure:       f32,          // 144
+    contrast:       f32,          // 148
+    brightness:     f32,          // 152
+    highlights:     f32,          // 156
+    shadows:        f32,          // 160
+    whites:         f32,          // 164
+    blacks:         f32,          // 168
+    _pad4:          f32,          // 172  (align hueSat_matrix to 176)
+    hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
+    vibrance:       f32,          // 240
+    _pad5:          f32,          // 244
+    _pad6:          f32,          // 248
+    _pad7:          f32,          // 252
+}                                 // total: 256 bytes
 
 @group(0) @binding(0) var<uniform> sliders: Sliders;
 @group(0) @binding(1) var<storage, read_write> params: Params;
@@ -192,6 +196,11 @@ fn safe_range(range: f32) -> f32 {
     return select(MIN_POINT_RANGE, -MIN_POINT_RANGE, range < 0.0);
 }
 
+// Maps each channel's black point to 0 and its white point to 1, flipping the
+// direction when the negative is being inverted. The output black/white pair is
+// deliberately *not* folded in here — it is applied after gamma, in step 3 of
+// the develop chain, so that the two output sliders remain the true endpoints of
+// the result. See the comment on `out_black` in main().
 fn calc_darkroom_matrix() -> mat4x4<f32> {
     let rbp = srgb_to_linear(sliders.red_black_point   / 255.0);
     let gbp = srgb_to_linear(sliders.green_black_point / 255.0);
@@ -199,21 +208,18 @@ fn calc_darkroom_matrix() -> mat4x4<f32> {
     let rwp = srgb_to_linear(sliders.red_white_point   / 255.0);
     let gwp = srgb_to_linear(sliders.green_white_point / 255.0);
     let bwp = srgb_to_linear(sliders.blue_white_point  / 255.0);
-    let ob  = srgb_to_linear(sliders.rgb_output_black  / 255.0);
-    let ow  = srgb_to_linear(sliders.rgb_output_white  / 255.0);
 
-    let out_range = ow - ob;
-    let invert    = sliders.invert > 0.5;
-    let out_start = select(ob, ow, invert);
-    let out_dir   = select(out_range, -out_range, invert);
+    let invert = sliders.invert > 0.5;
+    let start  = select(0.0, 1.0, invert);
+    let dir    = select(1.0, -1.0, invert);
 
-    let sR = out_dir / safe_range(rwp - rbp);
-    let sG = out_dir / safe_range(gwp - gbp);
-    let sB = out_dir / safe_range(bwp - bbp);
+    let sR = dir / safe_range(rwp - rbp);
+    let sG = dir / safe_range(gwp - gbp);
+    let sB = dir / safe_range(bwp - bbp);
 
-    let oR = -rbp * sR + out_start;
-    let oG = -gbp * sG + out_start;
-    let oB = -bbp * sB + out_start;
+    let oR = -rbp * sR + start;
+    let oG = -gbp * sG + start;
+    let oB = -bbp * sB + start;
 
     return mat4x4<f32>(
         vec4f(sR,  0.0, 0.0, 0.0),
@@ -325,7 +331,26 @@ fn main() {
     params.red_gamma     = max(sliders.red_gamma,   MIN_GAMMA);
     params.green_gamma   = max(sliders.green_gamma, MIN_GAMMA);
     params.blue_gamma    = max(sliders.blue_gamma,  MIN_GAMMA);
+
+    // Output black/white, as an affine map applied after gamma rather than
+    // inside dr_matrix. The order that matters is input remap → gamma → output
+    // remap, which is what a Levels dialog and a scanner both do. Folded into
+    // dr_matrix the output pair was applied *before* the power, and gamma then
+    // dragged both endpoints somewhere else entirely: output black 80 with gamma
+    // 2.2 put pure black at sRGB 153, and output white 200 put pure white at 228
+    // — the two sliders whose entire job is to pin the endpoints no longer did.
+    //
+    // Collapsing the pair (ow == ob) still yields a flat field at ob, and the
+    // default 0/255 gives out_scale exactly 1 and out_black exactly 0, so the
+    // neutral chain stays a bit-exact no-op.
+    let ob = srgb_to_linear(sliders.rgb_output_black / 255.0);
+    let ow = srgb_to_linear(sliders.rgb_output_white / 255.0);
+    params.out_black     = ob;
+    params.out_scale     = ow - ob;
+
     params._pad1         = 0.0;
+    params._pad2         = 0.0;
+    params._pad3         = 0.0;
     params.wb_matrix     = calc_wb_matrix();
     params.exposure      = sliders.exposure;
     params.contrast      = sliders.contrast / 100.0;
@@ -334,10 +359,10 @@ fn main() {
     params.shadows       = sliders.shadows    / 100.0 * MAX_WIDE_REGION;
     params.whites        = sliders.whites     / 100.0 * MAX_NARROW_REGION;
     params.blacks        = sliders.blacks     / 100.0 * MAX_NARROW_REGION;
-    params._pad2         = 0.0;
+    params._pad4         = 0.0;
     params.hueSat_matrix = calc_hue_sat_matrix();
     params.vibrance      = sliders.vibrance / 100.0;
-    params._pad3         = 0.0;
-    params._pad4         = 0.0;
     params._pad5         = 0.0;
+    params._pad6         = 0.0;
+    params._pad7         = 0.0;
 }

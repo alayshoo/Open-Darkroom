@@ -204,7 +204,7 @@ describe("pipeline construction", () => {
 
   it("declares buffer sizes matching the WGSL structs", () => {
     expect(SLIDERS_BUFFER_SIZE).toBe(24 * 4);
-    expect(PARAMS_BUFFER_SIZE).toBe(240);
+    expect(PARAMS_BUFFER_SIZE).toBe(256);
   });
 
   it("accepts a params bind group built the way renderer.ts builds it", () => {
