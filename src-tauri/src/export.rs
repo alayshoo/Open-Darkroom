@@ -60,7 +60,22 @@ pub(crate) async fn export_image(
         _ => 8,
     };
 
-    let rgb_bytes = render_image(&app, &pixels_u16, width, height, &sliders, bit_depth).await?;
+    let _ = app.emit("export:started", ());
+
+    // The renderer is Tauri-agnostic; bridging its progress to the frontend is
+    // this command's job.
+    let progress_handle = app.clone();
+    let rgb_bytes = render_image(
+        &pixels_u16,
+        width,
+        height,
+        &sliders,
+        bit_depth,
+        move |progress| {
+            let _ = progress_handle.emit("export:progress", progress);
+        },
+    )
+    .await?;
 
     println!(
         "export: GPU render done in {} ms, encoding…",

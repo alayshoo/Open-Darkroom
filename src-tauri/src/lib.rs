@@ -1,8 +1,11 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
-mod image_opening;
-mod export_rendering;
-mod export_encoding;
+// Modules are public so the integration tests in `tests/` can drive the
+// pipeline directly, without a running Tauri app.
+pub mod color;
+pub mod image_opening;
+pub mod export_rendering;
+pub mod export_encoding;
 mod export;
 
 use image_opening::ImageState;

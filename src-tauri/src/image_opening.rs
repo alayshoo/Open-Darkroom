@@ -2,8 +2,6 @@
 
 use fast_image_resize as fir;
 use fast_image_resize::images::{Image, ImageRef};
-use half::f16;
-use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::ipc::Response;
@@ -11,7 +9,18 @@ use tauri_plugin_dialog::DialogExt;
 
 use image::{ImageBuffer, Rgba};
 
-type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
+use crate::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
+
+pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
+
+/// Longest edge of the preview handed to the frontend.
+pub const PREVIEW_MAX_EDGE: u32 = 2048;
+
+/// Bins in each per-channel histogram.
+pub const HIST_BINS: usize = 256;
+
+/// Bytes preceding the pixel data in the frontend payload: width + height, u32 LE.
+pub const PAYLOAD_HEADER_BYTES: usize = 8;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -25,17 +34,45 @@ pub struct OriginalImage {
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
 
+// ── Derived image data ────────────────────────────────────────────────────────
+
+/// Per-channel histograms of the full-resolution sRGB image.
+pub struct Histograms {
+    pub r: [u32; HIST_BINS],
+    pub g: [u32; HIST_BINS],
+    pub b: [u32; HIST_BINS],
+}
+
+/// Everything derived from a decoded image that the frontend needs, with no
+/// Tauri or filesystem involvement — this is the unit the tests exercise.
+pub struct PreparedImage {
+    /// Linearised preview pixels: RGBA f16 little-endian, 8 bytes per pixel.
+    pub preview_pixels: Vec<u8>,
+    pub preview_width: u32,
+    pub preview_height: u32,
+    pub full_width: u32,
+    pub full_height: u32,
+    pub histograms: Histograms,
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-pub(crate) fn downscale_to_2048_u16(rgba: &Rgba16Image) -> Rgba16Image {
+/// Downscale so the longest edge is at most `max_edge`, preserving aspect ratio.
+/// Images already within the limit are returned unchanged.
+///
+/// Resampling happens in u16 space so the preview keeps the source precision.
+/// `max_edge` must be greater than zero.
+pub fn downscale_to_max_edge(rgba: &Rgba16Image, max_edge: u32) -> Rgba16Image {
+    assert!(max_edge > 0, "max_edge must be non-zero");
+
     let (w, h) = rgba.dimensions();
-    let max_edge = w.max(h);
-    if max_edge <= 2048 {
+    if w.max(h) <= max_edge {
         return rgba.clone();
     }
-    let scale = 2048.0 / max_edge as f32;
-    let new_w = (w as f32 * scale).round() as u32;
-    let new_h = (h as f32 * scale).round() as u32;
+
+    let scale = max_edge as f32 / w.max(h) as f32;
+    let new_w = ((w as f32 * scale).round() as u32).max(1);
+    let new_h = ((h as f32 * scale).round() as u32).max(1);
 
     let src_image = ImageRef::new(
         w,
@@ -70,19 +107,79 @@ pub(crate) fn downscale_to_2048_u16(rgba: &Rgba16Image) -> Rgba16Image {
     ImageBuffer::from_raw(new_w, new_h, u16_vec).unwrap()
 }
 
-/// sRGB u16 → linear f16 lookup table (used for both preview upload and export).
-pub(crate) fn build_srgb_to_linear_lut_u16() -> Vec<f16> {
-    (0..65536)
-        .map(|i| {
-            let s = i as f32 / 65535.0;
-            let linear = if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055_f32).powf(2.4)
-            };
-            f16::from_f32(linear)
-        })
-        .collect()
+/// R/G/B histograms of the full-resolution image. u16 sRGB values (0–65535) are
+/// mapped to 8-bit bins (0–255) via `>> 8`.
+pub fn compute_histograms(rgba16: &Rgba16Image) -> Histograms {
+    let mut r = [0u32; HIST_BINS];
+    let mut g = [0u32; HIST_BINS];
+    let mut b = [0u32; HIST_BINS];
+
+    for px in rgba16.as_raw().chunks_exact(4) {
+        r[(px[0] >> 8) as usize] += 1;
+        g[(px[1] >> 8) as usize] += 1;
+        b[(px[2] >> 8) as usize] += 1;
+    }
+
+    Histograms { r, g, b }
+}
+
+/// Build the preview texture and histograms for a decoded image.
+///
+/// Borrows rather than consumes, so the caller can move the full-resolution
+/// buffer into the shared state afterwards without cloning it.
+pub fn prepare_image(rgba16: &Rgba16Image) -> PreparedImage {
+    let (full_width, full_height) = rgba16.dimensions();
+
+    // Downscale in u16 space, then linearise sRGB → f16 for the GPU texture.
+    let preview = downscale_to_max_edge(rgba16, PREVIEW_MAX_EDGE);
+    let (preview_width, preview_height) = preview.dimensions();
+
+    let lut = build_srgb_to_linear_lut_u16();
+    let preview_pixels = linearize_rgba_u16(preview.as_raw(), &lut);
+
+    // Histograms come from the full-resolution image, not the preview.
+    let histograms = compute_histograms(rgba16);
+
+    PreparedImage {
+        preview_pixels,
+        preview_width,
+        preview_height,
+        full_width,
+        full_height,
+        histograms,
+    }
+}
+
+/// Serialise a [`PreparedImage`] into the byte layout `openImage.ts` parses:
+///
+/// | offset | size          | contents                          |
+/// |--------|---------------|-----------------------------------|
+/// | 0      | 4             | preview width, u32 LE             |
+/// | 4      | 4             | preview height, u32 LE            |
+/// | 8      | w × h × 8     | RGBA f16 LE preview pixels        |
+/// | …      | 3 × 256 × 4   | R, G, B histogram bins, u32 LE    |
+pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
+    let hist_bytes = 3 * HIST_BINS * 4;
+    let mut payload =
+        Vec::with_capacity(PAYLOAD_HEADER_BYTES + prepared.preview_pixels.len() + hist_bytes);
+
+    payload.extend_from_slice(&prepared.preview_width.to_le_bytes());
+    payload.extend_from_slice(&prepared.preview_height.to_le_bytes());
+    payload.extend_from_slice(&prepared.preview_pixels);
+
+    let h = &prepared.histograms;
+    for &v in h.r.iter().chain(h.g.iter()).chain(h.b.iter()) {
+        payload.extend_from_slice(&v.to_le_bytes());
+    }
+
+    payload
+}
+
+/// Expected payload length for a preview of the given dimensions.
+pub fn payload_len_for(preview_width: u32, preview_height: u32) -> usize {
+    PAYLOAD_HEADER_BYTES
+        + (preview_width as usize) * (preview_height as usize) * LINEAR_BYTES_PER_PIXEL
+        + 3 * HIST_BINS * 4
 }
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
@@ -110,47 +207,13 @@ pub(crate) async fn open_image_file(
     // `into_rgba16` consumes the DynamicImage, so the decoded source buffer is
     // released as soon as the conversion is done rather than idling.
     let rgba16 = img.into_rgba16();
-    let (full_width, full_height) = rgba16.dimensions();
 
-    // Downscale in u16 space for the preview sent to the frontend
-    let preview = downscale_to_2048_u16(&rgba16);
-    let (width, height) = preview.dimensions();
-    let raw = preview.as_raw();
+    let prepared = prepare_image(&rgba16);
+    let (full_width, full_height) = (prepared.full_width, prepared.full_height);
 
-    // Linearize u16 sRGB → f16 linear for the rgba16float GPU texture
-    let lut = build_srgb_to_linear_lut_u16();
-    let pixel_count = (width * height) as usize;
-    let mut pixels = vec![0u8; pixel_count * 8]; // 4 × f16 = 8 bytes
-
-    pixels
-        .par_chunks_exact_mut(8)
-        .enumerate()
-        .for_each(|(i, chunk)| {
-            let src = i * 4;
-            let r = lut[raw[src] as usize];
-            let g = lut[raw[src + 1] as usize];
-            let b = lut[raw[src + 2] as usize];
-            let a = f16::from_f32(raw[src + 3] as f32 / 65535.0);
-            chunk[0..2].copy_from_slice(&r.to_le_bytes());
-            chunk[2..4].copy_from_slice(&g.to_le_bytes());
-            chunk[4..6].copy_from_slice(&b.to_le_bytes());
-            chunk[6..8].copy_from_slice(&a.to_le_bytes());
-        });
-
-    // Compute R/G/B histograms (256 bins) from original full-resolution image.
-    // Map u16 sRGB values (0-65535) to 8-bit bins (0-255) via >> 8.
-    let mut hist_r = [0u32; 256];
-    let mut hist_g = [0u32; 256];
-    let mut hist_b = [0u32; 256];
-    for chunk in rgba16.as_raw().chunks_exact(4) {
-        hist_r[(chunk[0] >> 8) as usize] += 1;
-        hist_g[(chunk[1] >> 8) as usize] += 1;
-        hist_b[(chunk[2] >> 8) as usize] += 1;
-    }
-
-    // Store the original full-resolution image for export. This happens last so
-    // the buffer can be moved into the state rather than cloned — everything
-    // above only needed to borrow it.
+    // Store the original full-resolution image for export. This happens after
+    // `prepare_image` so the buffer can be moved into the state rather than
+    // cloned — preparation only needed to borrow it.
     {
         let mut guard = state.lock().unwrap();
         *guard = Some(OriginalImage {
@@ -160,18 +223,11 @@ pub(crate) async fn open_image_file(
         });
     }
 
-    let mut payload = Vec::with_capacity(8 + pixels.len() + 3072);
-    payload.extend_from_slice(&width.to_le_bytes());
-    payload.extend_from_slice(&height.to_le_bytes());
-    payload.extend_from_slice(&pixels);
-    for &v in hist_r.iter().chain(hist_g.iter()).chain(hist_b.iter()) {
-        payload.extend_from_slice(&v.to_le_bytes());
-    }
+    let payload = build_payload(&prepared);
 
-    let total_ms = overall_start.elapsed().as_millis();
     println!(
         "open_image_file: total backend time = {} ms, payload size = {} bytes",
-        total_ms,
+        overall_start.elapsed().as_millis(),
         payload.len()
     );
 

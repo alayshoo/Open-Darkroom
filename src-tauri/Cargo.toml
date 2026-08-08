@@ -31,6 +31,10 @@ rayon = "1.11"
 fast_image_resize = "6.0"
 wgpu = "25"
 
+[dev-dependencies]
+# Drives the async wgpu pipeline from synchronous #[test] functions.
+pollster = "0.4"
+
 
 [profile.dev]
 opt-level = 2       # Enable deeper compilation. Improves backend image processing by 250x in dev mode

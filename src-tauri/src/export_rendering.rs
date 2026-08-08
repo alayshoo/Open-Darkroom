@@ -4,26 +4,34 @@
 // frontend. Runs calcParams.wgsl (compute) then develop.wgsl (render) via wgpu,
 // processing the full-resolution image chunk by chunk.
 // Returns raw RGB bytes ready for encoding.
+//
+// This module is deliberately free of Tauri: it takes plain pixels and a
+// progress callback, so it can be driven headlessly from tests as well as from
+// the export command.
 
-use half::f16;
-use rayon::prelude::*;
 use std::time::Instant;
-use tauri::Emitter;
 use wgpu::util::DeviceExt;
 
-use crate::image_opening::build_srgb_to_linear_lut_u16;
+use crate::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
 
-const CALC_PARAMS_WGSL: &str =
+pub const CALC_PARAMS_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
-const DEVELOP_WGSL: &str =
+pub const DEVELOP_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/develop.wgsl");
 
-const PARAMS_BYTES: u64 = 240;
-const CHUNK_ROWS: u32 = 512;
+/// Size of the `Params` struct written by calcParams.wgsl and read by
+/// develop.wgsl / histogram.wgsl.
+pub const PARAMS_BYTES: u64 = 240;
+
+/// Size of the `Sliders` uniform consumed by calcParams.wgsl.
+pub const SLIDERS_BYTES: usize = 96;
+
+/// Rows rendered per GPU pass. Bounds peak VRAM for very large images.
+pub const CHUNK_ROWS: u32 = 512;
 
 // ── Sliders payload ───────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SlidersPayload {
     pub invert:            bool,
@@ -52,8 +60,46 @@ pub struct SlidersPayload {
     pub hue:               f32,
 }
 
+impl Default for SlidersPayload {
+    /// Neutral sliders — must stay in step with `defaultSlidersRGB` in
+    /// `src/lib/types/imgParameters.ts`. These values make the develop chain a
+    /// mathematical no-op, which is what the identity test relies on.
+    fn default() -> Self {
+        Self {
+            invert:            false,
+            red_black_point:   0.0,
+            green_black_point: 0.0,
+            blue_black_point:  0.0,
+            red_white_point:   255.0,
+            green_white_point: 255.0,
+            blue_white_point:  255.0,
+            rgb_output_black:  0.0,
+            rgb_output_white:  255.0,
+            red_gamma:         1.0,
+            green_gamma:       1.0,
+            blue_gamma:        1.0,
+            wb_temp:           5500.0,
+            wb_tint:           0.0,
+            exposure:          0.0,
+            contrast:          0.0,
+            brightness:        0.0,
+            highlights:        0.0,
+            shadows:           0.0,
+            whites:            0.0,
+            blacks:            0.0,
+            saturation:        0.0,
+            vibrance:          0.0,
+            hue:               0.0,
+        }
+    }
+}
+
 /// Pack sliders into a 96-byte uniform buffer matching the WGSL Sliders struct.
-fn sliders_to_bytes(s: &SlidersPayload) -> [u8; 96] {
+///
+/// The order here must match `Sliders` in calcParams.wgsl *and* `slidersToArray`
+/// in calcParamsPipeline.ts — all three are the same struct viewed from three
+/// languages, and a reordering in one is silent corruption in the others.
+pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
     let values: [f32; 24] = [
         if s.invert { 1.0 } else { 0.0 },
         s.red_black_point,
@@ -80,34 +126,37 @@ fn sliders_to_bytes(s: &SlidersPayload) -> [u8; 96] {
         s.vibrance,
         s.hue,
     ];
-    let mut bytes = [0u8; 96];
+    let mut bytes = [0u8; SLIDERS_BYTES];
     for (i, v) in values.iter().enumerate() {
         bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
     bytes
 }
 
-/// Convert a u16 RGBA chunk to f16 linear RGBA bytes for upload as rgba16float texture.
-fn linearize_chunk(chunk_u16: &[u16], lut: &[f16]) -> Vec<u8> {
-    let pixel_count = chunk_u16.len() / 4;
-    let mut out = vec![0u8; pixel_count * 8]; // 4 × f16 = 8 bytes/pixel
-    out.par_chunks_exact_mut(8)
-        .enumerate()
-        .for_each(|(i, chunk)| {
-            let src = i * 4;
-            let r = lut[chunk_u16[src] as usize];
-            let g = lut[chunk_u16[src + 1] as usize];
-            let b = lut[chunk_u16[src + 2] as usize];
-            let a = f16::from_f32(chunk_u16[src + 3] as f32 / 65535.0);
-            chunk[0..2].copy_from_slice(&r.to_le_bytes());
-            chunk[2..4].copy_from_slice(&g.to_le_bytes());
-            chunk[4..6].copy_from_slice(&b.to_le_bytes());
-            chunk[6..8].copy_from_slice(&a.to_le_bytes());
-        });
-    out
-}
-
 // ── Core GPU render ───────────────────────────────────────────────────────────
+
+/// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
+///
+/// See [`render_image_with_chunk_rows`]; this uses the default [`CHUNK_ROWS`].
+pub async fn render_image(
+    pixels_u16: &[u16],
+    width: u32,
+    height: u32,
+    sliders: &SlidersPayload,
+    bit_depth: u8,
+    on_progress: impl Fn(f32) + Send + Sync,
+) -> Result<Vec<u8>, String> {
+    render_image_with_chunk_rows(
+        pixels_u16,
+        width,
+        height,
+        sliders,
+        bit_depth,
+        CHUNK_ROWS,
+        on_progress,
+    )
+    .await
+}
 
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
 ///
@@ -116,18 +165,38 @@ fn linearize_chunk(chunk_u16: &[u16], lut: &[f16]) -> Vec<u8> {
 /// texture is `Rgba16Float`; each channel is read back as an f16, converted to
 /// a u16 (0–65535), and stored little-endian, giving 6 bytes per pixel.
 ///
-/// Emits `export:started` at the beginning and `export:progress` per chunk.
-pub async fn render_image(
-    app: &tauri::AppHandle,
+/// `pixels_u16` is interleaved RGBA at `width` × `height`. The image is
+/// rendered `chunk_rows` rows at a time; `on_progress` is called after each
+/// chunk with the fraction completed, in (0, 1].
+///
+/// `chunk_rows` is exposed so tests can vary the chunking — rendering an image
+/// in one pass and in several must produce identical output.
+pub async fn render_image_with_chunk_rows(
     pixels_u16: &[u16],
     width: u32,
     height: u32,
     sliders: &SlidersPayload,
     bit_depth: u8,
+    chunk_rows: u32,
+    on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
     let t = Instant::now();
 
-    let _ = app.emit("export:started", ());
+    // ── 0. Validate inputs ────────────────────────────────────────────────────
+
+    if width == 0 || height == 0 {
+        return Err(format!("Cannot render a {width} × {height} image"));
+    }
+    if chunk_rows == 0 {
+        return Err("chunk_rows must be non-zero".to_string());
+    }
+    let expected = (width as usize) * (height as usize) * 4;
+    if pixels_u16.len() != expected {
+        return Err(format!(
+            "Pixel buffer is {} u16 values, expected {expected} for {width} × {height} RGBA",
+            pixels_u16.len()
+        ));
+    }
 
     // ── 1. Initialise wgpu ────────────────────────────────────────────────────
 
@@ -356,13 +425,13 @@ pub async fn render_image(
     let mut out_rgb_offset = 0usize;
 
     while row_start < height {
-        let row_end = (row_start + CHUNK_ROWS).min(height);
+        let row_end = (row_start + chunk_rows).min(height);
         let chunk_height = row_end - row_start;
         let pixel_start = (row_start * width) as usize;
         let pixel_count = (chunk_height * width) as usize;
 
         let src_u16 = &pixels_u16[pixel_start * 4..(pixel_start + pixel_count) * 4];
-        let chunk_f16_bytes = linearize_chunk(src_u16, &lut);
+        let chunk_f16_bytes = linearize_rgba_u16(src_u16, &lut);
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),
@@ -385,7 +454,7 @@ pub async fn render_image(
             &chunk_f16_bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width * 8),
+                bytes_per_row: Some(width * LINEAR_BYTES_PER_PIXEL as u32),
                 rows_per_image: None,
             },
             wgpu::Extent3d { width, height: chunk_height, depth_or_array_layers: 1 },
@@ -518,7 +587,7 @@ pub async fn render_image(
         row_start = row_end;
 
         let progress = row_end as f32 / height as f32;
-        let _ = app.emit("export:progress", progress);
+        on_progress(progress);
 
         println!(
             "export: rendered rows {}-{} / {} ({:.0}%) in {} ms total",
