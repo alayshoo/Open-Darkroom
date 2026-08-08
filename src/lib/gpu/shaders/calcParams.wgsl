@@ -89,6 +89,11 @@ const M_XYZ_TO_RGB = mat3x3<f32>(
 
 const MIN_GAMMA: f32 = 0.01;
 
+// Smallest black-to-white separation the darkroom matrix will divide by.
+// Coincident points would otherwise give an infinite slope, and the offset term
+// (-black * slope) an outright NaN, poisoning every pixel of the image.
+const MIN_POINT_RANGE: f32 = 1e-6;
+
 // BT.709 luminance coefficients
 const LR: f32 = 0.2126;
 const LG: f32 = 0.7152;
@@ -142,6 +147,17 @@ fn srgb_to_linear(s: f32) -> f32 {
     }
 }
 
+// Keep a black-to-white span away from zero without flipping its direction.
+// The resulting slope is steep enough to act as a hard threshold, which is the
+// sensible reading of "black and white points are the same value".
+fn safe_range(range: f32) -> f32 {
+    if abs(range) >= MIN_POINT_RANGE {
+        return range;
+    }
+    // sign(0.0) is 0.0, so bias exact coincidence to the positive side.
+    return select(MIN_POINT_RANGE, -MIN_POINT_RANGE, range < 0.0);
+}
+
 fn calc_darkroom_matrix() -> mat4x4<f32> {
     let rbp = srgb_to_linear(sliders.red_black_point   / 255.0);
     let gbp = srgb_to_linear(sliders.green_black_point / 255.0);
@@ -157,9 +173,9 @@ fn calc_darkroom_matrix() -> mat4x4<f32> {
     let out_start = select(ob, ow, invert);
     let out_dir   = select(out_range, -out_range, invert);
 
-    let sR = out_dir / (rwp - rbp);
-    let sG = out_dir / (gwp - gbp);
-    let sB = out_dir / (bwp - bbp);
+    let sR = out_dir / safe_range(rwp - rbp);
+    let sG = out_dir / safe_range(gwp - gbp);
+    let sB = out_dir / safe_range(bwp - bbp);
 
     let oR = -rbp * sR + out_start;
     let oG = -gbp * sG + out_start;
