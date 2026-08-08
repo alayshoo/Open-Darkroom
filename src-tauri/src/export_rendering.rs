@@ -119,7 +119,7 @@ fn linearize_chunk(chunk_u16: &[u16], lut: &[f16]) -> Vec<u8> {
 /// Emits `export:started` at the beginning and `export:progress` per chunk.
 pub async fn render_image(
     app: &tauri::AppHandle,
-    pixels_u16: Vec<u16>,
+    pixels_u16: &[u16],
     width: u32,
     height: u32,
     sliders: &SlidersPayload,

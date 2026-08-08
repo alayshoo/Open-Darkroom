@@ -3052,6 +3052,7 @@ dependencies = [
 name = "open-darkroom"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "fast_image_resize",
  "half",
  "image",

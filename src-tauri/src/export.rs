@@ -4,6 +4,7 @@
 // Orchestrates: file dialog → GPU render (export_rendering) → encode (export_encoding).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
@@ -24,7 +25,7 @@ pub(crate) async fn export_image(
     println!("export_image: opening save dialog ({:?})", settings.format);
 
     let (filter_name, extensions): (&str, &[&str]) = match settings.format {
-        ExportFormat::Png  => ("PNG Image",  &["png"]),
+        ExportFormat::Png => ("PNG Image", &["png"]),
         ExportFormat::Jpeg => ("JPEG Image", &["jpg", "jpeg"]),
         ExportFormat::Webp => ("WebP Image", &["webp"]),
         ExportFormat::Tiff => ("TIFF Image", &["tiff", "tif"]),
@@ -40,7 +41,7 @@ pub(crate) async fn export_image(
         .map_err(|e| e.to_string())?;
 
     let path = match settings.format {
-        ExportFormat::Png  => ensure_extension(path, "png"),
+        ExportFormat::Png => ensure_extension(path, "png"),
         ExportFormat::Jpeg => ensure_extension(path, "jpg"),
         ExportFormat::Webp => ensure_extension(path, "webp"),
         ExportFormat::Tiff => ensure_extension(path, "tiff"),
@@ -49,7 +50,7 @@ pub(crate) async fn export_image(
     let (pixels_u16, width, height) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
-        (img.pixels_u16.clone(), img.width, img.height)
+        (Arc::clone(&img.pixels_u16), img.width, img.height)
     };
 
     let t = Instant::now();
@@ -59,9 +60,12 @@ pub(crate) async fn export_image(
         _ => 8,
     };
 
-    let rgb_bytes = render_image(&app, pixels_u16, width, height, &sliders, bit_depth).await?;
+    let rgb_bytes = render_image(&app, &pixels_u16, width, height, &sliders, bit_depth).await?;
 
-    println!("export: GPU render done in {} ms, encoding…", t.elapsed().as_millis());
+    println!(
+        "export: GPU render done in {} ms, encoding…",
+        t.elapsed().as_millis()
+    );
 
     encode_and_save(rgb_bytes, width, height, &settings, &path)?;
 

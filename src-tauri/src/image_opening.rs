@@ -1,10 +1,10 @@
 // src-tauri/src/image_opening.rs
 
 use fast_image_resize as fir;
-use fast_image_resize::images::Image;
+use fast_image_resize::images::{Image, ImageRef};
 use half::f16;
 use rayon::prelude::*;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::ipc::Response;
 use tauri_plugin_dialog::DialogExt;
@@ -16,7 +16,9 @@ type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 // ── State ─────────────────────────────────────────────────────────────────────
 
 pub struct OriginalImage {
-    pub pixels_u16: Vec<u16>,
+    /// Full-resolution RGBA u16 pixels. Behind an `Arc` so export can take a
+    /// reference-counted handle instead of copying the whole buffer.
+    pub pixels_u16: Arc<Vec<u16>>,
     pub width: u32,
     pub height: u32,
 }
@@ -35,17 +37,10 @@ pub(crate) fn downscale_to_2048_u16(rgba: &Rgba16Image) -> Rgba16Image {
     let new_w = (w as f32 * scale).round() as u32;
     let new_h = (h as f32 * scale).round() as u32;
 
-    // fast_image_resize expects raw bytes even for U16x4
-    let raw_bytes: Vec<u8> = rgba
-        .as_raw()
-        .iter()
-        .flat_map(|&v| v.to_le_bytes())
-        .collect();
-
-    let src_image = Image::from_vec_u8(
-        w.try_into().unwrap(),
-        h.try_into().unwrap(),
-        raw_bytes,
+    let src_image = ImageRef::new(
+        w,
+        h,
+        bytemuck::cast_slice(rgba.as_raw()),
         fir::PixelType::U16x4,
     )
     .unwrap();
@@ -110,20 +105,12 @@ pub(crate) async fn open_image_file(
 
     let overall_start = Instant::now();
 
-    let img = image::open(&path)
-        .map_err(|e| format!("Failed to open image: {e}"))?;
+    let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
 
-    let rgba16 = img.to_rgba16();
-
-    // Store original full-resolution image for export
-    {
-        let mut guard = state.lock().unwrap();
-        *guard = Some(OriginalImage {
-            pixels_u16: rgba16.as_raw().clone(),
-            width: rgba16.width(),
-            height: rgba16.height(),
-        });
-    }
+    // `into_rgba16` consumes the DynamicImage, so the decoded source buffer is
+    // released as soon as the conversion is done rather than idling.
+    let rgba16 = img.into_rgba16();
+    let (full_width, full_height) = rgba16.dimensions();
 
     // Downscale in u16 space for the preview sent to the frontend
     let preview = downscale_to_2048_u16(&rgba16);
@@ -159,6 +146,18 @@ pub(crate) async fn open_image_file(
         hist_r[(chunk[0] >> 8) as usize] += 1;
         hist_g[(chunk[1] >> 8) as usize] += 1;
         hist_b[(chunk[2] >> 8) as usize] += 1;
+    }
+
+    // Store the original full-resolution image for export. This happens last so
+    // the buffer can be moved into the state rather than cloned — everything
+    // above only needed to borrow it.
+    {
+        let mut guard = state.lock().unwrap();
+        *guard = Some(OriginalImage {
+            pixels_u16: Arc::new(rgba16.into_raw()),
+            width: full_width,
+            height: full_height,
+        });
     }
 
     let mut payload = Vec::with_capacity(8 + pixels.len() + 3072);
