@@ -102,6 +102,37 @@ const LR: f32 = 0.2126;
 const LG: f32 = 0.7152;
 const LB: f32 = 0.0722;
 
+// ── Tone-region amplitude budget ─────────────────────────────────────────────
+//
+// Highlights, shadows, whites and blacks are additive offsets gated by a
+// smoothstep mask, so the developed tone is `x + A·mask(x)` with slope
+// `1 - A·mask'(x)`. `smoothstep(0, W, x)` peaks at slope `1.5/W`, so a single
+// control folds the tone curve back on itself once `A > W/1.5` — 0.167 for the
+// quarter-width masks and 0.333 for the half-width ones. The masks also overlap:
+// blacks and shadows are both active below linear 0.25, and their slopes add, so
+// the budget has to be shared rather than spent twice.
+//
+// The binding case is the peak of the black mask at x = 0.125, where the shadow
+// mask contributes slope 2.25 and the black mask 6.0:
+//
+//     2.25 · MAX_WIDE + 6.0 · MAX_NARROW  =  0.45 + 0.42  =  0.87  <  1
+//
+// so every combination of the four stays monotone with about 13% to spare. The
+// sliders are -100..100 in the UI, like every other slider in the app, and the
+// rails map to these amplitudes. Nothing is given up by being provably safe:
+// at the rail, shadows still takes sRGB 40 to 80 and highlights takes 210 to
+// 249. Blacks and whites move less because their masks are narrower, which is
+// the same division of labour Lightroom has — the endpoints themselves belong to
+// the output black and white point sliders.
+const MAX_WIDE_REGION:   f32 = 0.20;   // highlights, shadows (mask width 0.5)
+const MAX_NARROW_REGION: f32 = 0.07;   // whites, blacks      (mask width 0.25)
+
+// Brightness is a uniform shift in encoded code values, so it is monotone at any
+// amplitude; this is a judgement about feel. A quarter of the range is already a
+// drastic move, and the slider needed rescaling regardless: as a linear-light
+// offset on a -1..1 range, +0.2 took sRGB 32 to 128.
+const MAX_BRIGHTNESS: f32 = 0.25;
+
 
 // ── CCT -> XYZ (Planckian locus, Kim et al.) ────────────────────────────────
 
@@ -224,7 +255,26 @@ fn calc_wb_matrix() -> mat3x3<f32> {
         vec3f(0.0,        0.0, 1.0),
     );
 
-    return M_TINT * M_CAT_RGB;
+    let M_WB = M_TINT * M_CAT_RGB;
+
+    // Normalise so the neutral axis keeps its luminance.
+    //
+    // Neither factor above preserves brightness on its own. The tint term is the
+    // worse of the two: it scales green, which carries 72% of luminance, so tint
+    // +100 costs two thirds of a stop and tint -100 gains three quarters of one.
+    // Temperature drifts less but still drifts. Uncompensated, that makes white
+    // balance a hidden exposure control — you correct a cast, the image changes
+    // brightness, you correct the exposure, and the histogram never settles.
+    //
+    // A single scalar is the right correction: it cancels the luminance change
+    // exactly while leaving every channel ratio — the actual colour decision —
+    // untouched. Because luma(1,1,1) = LR + LG + LB = 1, dividing by the luma of
+    // the transformed white is what makes a neutral come out at its input
+    // luminance.
+    let neutral = M_WB * vec3f(1.0, 1.0, 1.0);
+    let neutral_luma = dot(vec3f(LR, LG, LB), neutral);
+
+    return M_WB * (1.0 / max(neutral_luma, 1e-6));
 }
 
 
@@ -279,11 +329,11 @@ fn main() {
     params.wb_matrix     = calc_wb_matrix();
     params.exposure      = sliders.exposure;
     params.contrast      = sliders.contrast / 100.0;
-    params.brightness    = sliders.brightness;
-    params.highlights    = sliders.highlights;
-    params.shadows       = sliders.shadows;
-    params.whites        = sliders.whites;
-    params.blacks        = sliders.blacks;
+    params.brightness    = sliders.brightness / 100.0 * MAX_BRIGHTNESS;
+    params.highlights    = sliders.highlights / 100.0 * MAX_WIDE_REGION;
+    params.shadows       = sliders.shadows    / 100.0 * MAX_WIDE_REGION;
+    params.whites        = sliders.whites     / 100.0 * MAX_NARROW_REGION;
+    params.blacks        = sliders.blacks     / 100.0 * MAX_NARROW_REGION;
     params._pad2         = 0.0;
     params.hueSat_matrix = calc_hue_sat_matrix();
     params.vibrance      = sliders.vibrance / 100.0;

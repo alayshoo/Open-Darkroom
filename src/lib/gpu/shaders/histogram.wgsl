@@ -39,6 +39,62 @@ struct Params {
 // headroom — at 65536 a bin wrapped once it held just 2.3% of the image.
 const VOTE: u32 = 256u;
 
+// ===================== Shared tone maths — must match histogram.wgsl =====================
+
+// BT.709 luminance coefficients
+const LUMA = vec3f(0.2126, 0.7152, 0.0722);
+
+// Mid-grey in the encoded domain. Contrast pivots here, so this is the one tone
+// that does not move when the contrast slider does.
+const TONE_PIVOT: f32 = 0.5;
+
+// Midtone slope at contrast +100. The one free parameter in the curve below.
+const CONTRAST_BASE: f32 = 3.0;
+
+// sRGB transfer functions. Values outside 0..1 are passed through the linear
+// segment rather than clamped: the chain carries highlight headroom and the
+// occasional out-of-gamut negative all the way to the final clamp, and losing
+// either here would clip detail the later steps can still recover.
+fn encode_srgb(c: vec3f) -> vec3f {
+  let lo = c * 12.92;
+  let hi = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
+  return select(hi, lo, c < vec3f(0.0031308));
+}
+
+fn decode_srgb(c: vec3f) -> vec3f {
+  let lo = c / 12.92;
+  let hi = pow(max((c + 0.055) / 1.055, vec3f(0.0)), vec3f(2.4));
+  return select(hi, lo, c < vec3f(0.04045));
+}
+
+// Contrast as a power curve on each side of the pivot.
+//
+//   k > 1  steepens the midtones  (positive contrast)
+//   k < 1  flattens them          (negative contrast)
+//
+// Every property that matters follows from the shape. Both branches fix 0, the
+// pivot and 1, so mid-grey holds and the endpoints survive every slider
+// position — contrast +100 still reaches true black and true white. The two
+// branches meet with slope k on both sides, so there is no seam at the pivot.
+// It is monotone for every k > 0, so no setting can double the tone curve back
+// on itself. And since k = base^contrast, contrast -50 is the exact inverse of
+// contrast +50.
+//
+// This replaced `mix(rgb, sigmoid(rgb), contrast)`, which failed all four: it
+// pivoted on linear 0.5 (sRGB 188, so adding contrast darkened most of the
+// frame), it could not reach black or white at +100 (0 → 19, 255 → 254), and
+// below contrast -67 it ran backwards, folding smooth gradients.
+fn contrast_curve(x: f32, k: f32) -> f32 {
+  // Outside the display range the curve is undefined (a power of a negative
+  // number); those tones are headroom and are clamped at the end anyway.
+  if (x <= 0.0 || x >= 1.0) { return x; }
+
+  if (x < TONE_PIVOT) {
+    return TONE_PIVOT * pow(x / TONE_PIVOT, k);
+  }
+  return 1.0 - (1.0 - TONE_PIVOT) * pow((1.0 - x) / (1.0 - TONE_PIVOT), k);
+}
+// ========================== (update both files together) ==========================
 
 
 @compute @workgroup_size(16, 16)
@@ -63,34 +119,56 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // 3. White balance (Bradford CAT, pre-computed on CPU)
   rgb = params.wb_matrix * rgb;
 
-  // 4. Exposure
+  // 4. Exposure — a stop is a multiplication of light, so it stays linear
   rgb *= pow(2.0, params.exposure);
 
-  // 5. Contrast — sigmoid around mid-gray
-  let contrasted = 1.0 / (1.0 + exp(-(rgb - 0.5) * 10.0));
-  rgb = mix(rgb, contrasted, params.contrast);
+  // ── Steps 5-7 run on a perceptually encoded signal ─────────────────────────
+  // Contrast and the four region controls are judgements about how a print
+  // looks, not about how much light reached the film, and Lightroom's Basic
+  // panel works the same way. Two things depend on it. Contrast pivots on real
+  // mid-grey, where linear 0.5 would be sRGB 188 — well up into the highlights.
+  // And the mask thresholds below land where their names claim: in linear light
+  // 0.5 and 0.75 are sRGB 188 and 225, so "highlights" and "whites" would both
+  // be crowded into the top tenth of the visible range while "shadows" covered
+  // almost everything else.
+  var tone = encode_srgb(rgb);
 
-  // 6. Brightness — additive offset
-  rgb += params.brightness;
+  // 5. Contrast — symmetric power curve pivoting on mid-grey
+  let k = pow(CONTRAST_BASE, params.contrast);
+  tone = vec3f(
+    contrast_curve(tone.r, k),
+    contrast_curve(tone.g, k),
+    contrast_curve(tone.b, k),
+  );
+
+  // 6. Brightness — a uniform shift in code values
+  tone += params.brightness;
 
   // 7. Highlights / Shadows / Whites / Blacks
-  let luma_tone = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
+  //
+  // Each is an offset gated by a luminance mask. The amplitudes arriving here
+  // are already budgeted by calcParams so that the sum of their mask slopes can
+  // never exceed 1 — see MAX_WIDE_REGION there. Without that budget the tone
+  // curve doubles back and shadow detail folds over on itself.
+  let luma_tone = dot(tone, LUMA);
 
   let highlightMask = smoothstep(0.5, 1.0, luma_tone);
   let shadowMask    = 1.0 - smoothstep(0.0, 0.5, luma_tone);
   let whiteMask     = smoothstep(0.75, 1.0, luma_tone);
   let blackMask     = 1.0 - smoothstep(0.0, 0.25, luma_tone);
 
-  rgb += params.highlights * highlightMask;
-  rgb += params.shadows    * shadowMask;
-  rgb += params.whites     * whiteMask;
-  rgb += params.blacks     * blackMask;
+  tone += params.highlights * highlightMask;
+  tone += params.shadows    * shadowMask;
+  tone += params.whites     * whiteMask;
+  tone += params.blacks     * blackMask;
+
+  rgb = decode_srgb(tone);
 
   // 8. Hue + Saturation (pre-composed matrix from CPU)
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
   // 9. Vibrance — boost under-saturated pixels more
-  let luma_vib = dot(rgb, vec3f(0.2126, 0.7152, 0.0722));
+  let luma_vib = dot(rgb, LUMA);
   let maxC = max(rgb.r, max(rgb.g, rgb.b));
   let minC = min(rgb.r, min(rgb.g, rgb.b));
   let pixelSat = (maxC - minC) / (maxC + 0.001);
@@ -98,11 +176,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   rgb = mix(vec3f(luma_vib), rgb, 1.0 + vibranceAmount);
 
   // Clamp + linear → sRGB
-  let clamped = clamp(rgb, vec3f(0.0), vec3f(1.0));
-  let cutoff = vec3f(0.0031308);
-  let lo = clamped * 12.92;
-  let hi = 1.055 * pow(clamped, vec3f(1.0 / 2.4)) - 0.055;
-  let srgb = select(hi, lo, clamped < cutoff);
+  let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));
   // ============================= (update if it ever changes) =============================
 
   // Fractional bin position in [0, 255]

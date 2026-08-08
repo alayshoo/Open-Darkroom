@@ -500,12 +500,12 @@
                                         defaultValue={0}
                                         name="Brightness"
                                         unit=""
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={3}
-                                        dragStep={0.001}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
@@ -566,11 +566,12 @@
                                         bind:value={sliders.highlights}
                                         defaultValue={0}
                                         name="Highlights"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#606060"}
                                         gradientEndColor={"#afafaf"}
                                         onCommit={(oldVal, newVal) =>
@@ -586,11 +587,12 @@
                                         defaultValue={0}
                                         name="Shadows"
                                         unit=""
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#303030"}
                                         gradientEndColor={"#3f3f3f"}
                                         onCommit={(oldVal, newVal) =>
@@ -605,11 +607,12 @@
                                         bind:value={sliders.whites}
                                         defaultValue={0}
                                         name="Whites"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#b0b0b0"}
                                         gradientEndColor={"#ffffff"}
                                         onCommit={(oldVal, newVal) =>
@@ -624,11 +627,12 @@
                                         bind:value={sliders.blacks}
                                         defaultValue={0}
                                         name="Blacks"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#000000"}
                                         gradientEndColor={"#161616"}
                                         onCommit={(oldVal, newVal) =>
@@ -654,11 +658,12 @@
                                         bind:value={sliders.highlights}
                                         defaultValue={0}
                                         name="Highlights"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#606060"}
                                         gradientEndColor={"#afafaf"}
                                         onCommit={(oldVal, newVal) =>
@@ -673,11 +678,12 @@
                                         bind:value={sliders.shadows}
                                         defaultValue={0}
                                         name="Shadows"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#303030"}
                                         gradientEndColor={"#3f3f3f"}
                                         onCommit={(oldVal, newVal) =>
@@ -692,11 +698,12 @@
                                         bind:value={sliders.whites}
                                         defaultValue={0}
                                         name="Whites"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#b0b0b0"}
                                         gradientEndColor={"#ffffff"}
                                         onCommit={(oldVal, newVal) =>
@@ -711,11 +718,12 @@
                                         bind:value={sliders.blacks}
                                         defaultValue={0}
                                         name="Blacks"
-                                        min={-1}
-                                        max={1}
-                                        decimalPlaces={2}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
                                         gradientStartColor={"#000000"}
                                         gradientEndColor={"#161616"}
                                         onCommit={(oldVal, newVal) =>
