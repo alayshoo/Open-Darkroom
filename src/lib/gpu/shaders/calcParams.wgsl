@@ -81,10 +81,13 @@ const M_RGB_TO_XYZ = mat3x3<f32>(
     vec3f(0.1804375, 0.0721750, 0.9503041),
 );
 
+// Must be the inverse of M_RGB_TO_XYZ to the same precision: at the neutral
+// reference temperature the adaptation collapses to M_XYZ_TO_RGB * M_RGB_TO_XYZ,
+// so any truncation here shows up as a tint on an image nobody white-balanced.
 const M_XYZ_TO_RGB = mat3x3<f32>(
-    vec3f( 3.2406, -0.9689,  0.0557),
-    vec3f(-1.5372,  1.8758, -0.2040),
-    vec3f(-0.4986,  0.0415,  1.0570),
+    vec3f( 3.2404542, -0.9692660,  0.0556434),
+    vec3f(-1.5371385,  1.8760108, -0.2040259),
+    vec3f(-0.4985314,  0.0415560,  1.0572252),
 );
 
 const MIN_GAMMA: f32 = 0.01;
