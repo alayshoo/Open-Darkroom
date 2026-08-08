@@ -821,7 +821,7 @@
                                         defaultValueC={255}
                                         min={0}
                                         max={255}
-                                        minB={0}
+                                        minB={0.1}
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
@@ -838,7 +838,7 @@
                                         defaultValueC={255}
                                         min={0}
                                         max={255}
-                                        minB={0}
+                                        minB={0.1}
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
@@ -855,7 +855,7 @@
                                         defaultValueC={255}
                                         min={0}
                                         max={255}
-                                        minB={0}
+                                        minB={0.1}
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}

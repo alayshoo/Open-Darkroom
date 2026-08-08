@@ -87,6 +87,8 @@ const M_XYZ_TO_RGB = mat3x3<f32>(
     vec3f(-0.4986,  0.0415,  1.0570),
 );
 
+const MIN_GAMMA: f32 = 0.01;
+
 // BT.709 luminance coefficients
 const LR: f32 = 0.2126;
 const LG: f32 = 0.7152;
@@ -251,9 +253,9 @@ fn calc_hue_sat_matrix() -> mat4x4<f32> {
 @compute @workgroup_size(1)
 fn main() {
     params.dr_matrix     = calc_darkroom_matrix();
-    params.red_gamma     = sliders.red_gamma;
-    params.green_gamma   = sliders.green_gamma;
-    params.blue_gamma    = sliders.blue_gamma;
+    params.red_gamma     = max(sliders.red_gamma,   MIN_GAMMA);
+    params.green_gamma   = max(sliders.green_gamma, MIN_GAMMA);
+    params.blue_gamma    = max(sliders.blue_gamma,  MIN_GAMMA);
     params._pad1         = 0.0;
     params.wb_matrix     = calc_wb_matrix();
     params.exposure      = sliders.exposure;
