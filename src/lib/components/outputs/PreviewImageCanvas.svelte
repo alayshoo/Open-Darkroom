@@ -29,6 +29,57 @@
     let canvasLink: GPUCanvasLink | null = $state(null);
     let image: GPUImage | null = $state(null);
 
+    let slotWidth = $state(0);
+    let slotHeight = $state(0);
+    let dpr = $state(1);
+
+    // Track the slot the canvas is centred in, and the device pixel ratio: the
+    // fit below is expressed in CSS pixels but has to hold in device pixels.
+    $effect(() => {
+        const slot = canvas?.parentElement;
+        if (!slot) return;
+
+        const observer = new ResizeObserver(([entry]) => {
+            slotWidth = entry.contentRect.width;
+            slotHeight = entry.contentRect.height;
+        });
+        observer.observe(slot);
+
+        // A dppx media query only matches the ratio it was built with, so each
+        // change needs a fresh query to keep watching.
+        let query: MediaQueryList | null = null;
+        function trackDpr() {
+            query?.removeEventListener("change", trackDpr);
+            dpr = window.devicePixelRatio || 1;
+            query = window.matchMedia(`(resolution: ${dpr}dppx)`);
+            query.addEventListener("change", trackDpr);
+        }
+        trackDpr();
+
+        return () => {
+            observer.disconnect();
+            query?.removeEventListener("change", trackDpr);
+        };
+    });
+
+    // Fit the image to the slot, but never past 1:1 — one image pixel covers at
+    // most one device pixel, so the preview is downscaled or shown at native
+    // size and never magnified to fill the slot.
+    let displaySize = $derived.by(() => {
+        if (!imagePayload) return null;
+
+        const nativeWidth = imagePayload.width / dpr;
+        const nativeHeight = imagePayload.height / dpr;
+        if (!slotWidth || !slotHeight) return { w: nativeWidth, h: nativeHeight };
+
+        const scale = Math.min(
+            1,
+            slotWidth / nativeWidth,
+            slotHeight / nativeHeight,
+        );
+        return { w: nativeWidth * scale, h: nativeHeight * scale };
+    });
+
     // Link the canvas to GPU and create the renderer once canvas is mounted
     $effect(() => {
         if (!canvas) return;
@@ -90,12 +141,17 @@
     });
 </script>
 
-<canvas bind:this={canvas}></canvas>
+<canvas
+    bind:this={canvas}
+    style={displaySize
+        ? `width: ${displaySize.w}px; height: ${displaySize.h}px;`
+        : "width: 0; height: 0;"}
+></canvas>
 
 <style>
     canvas {
+        display: block;
         max-width: 100%;
         max-height: 100%;
-        object-fit: contain;
     }
 </style>
