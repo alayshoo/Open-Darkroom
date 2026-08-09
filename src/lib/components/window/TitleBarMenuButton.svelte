@@ -3,6 +3,7 @@
     import "$lib/styles/palette.css";
     import { onMount, onDestroy } from "svelte";
     import { blur } from "svelte/transition";
+    import { menuBar } from "./menuBar.svelte";
 
     type MenuItem =
         | {
@@ -24,16 +25,14 @@
         items: MenuItem[];
     } = $props();
 
-    let isOpen = $state(false);
+    /* Which button is open lives on the bar, not here — see menuBar.svelte.ts. */
+    const id = $props.id();
+    let isOpen = $derived(menuBar.isOpen(id));
     let buttonEl: HTMLButtonElement;
     let menuEl: HTMLDivElement | null = $state(null);
 
-    function toggle() {
-        isOpen = !isOpen;
-    }
-
     function close() {
-        isOpen = false;
+        menuBar.close();
     }
 
     function handleItemClick(item: MenuItem) {
@@ -75,7 +74,8 @@
         bind:this={buttonEl}
         class="menu-button relative inline-flex justify-center items-center h-5.5 px-1.5 py-0 rounded-[6px] border-0 cursor-app"
         class:active={isOpen}
-        onclick={toggle}
+        onclick={() => menuBar.toggle(id)}
+        onmouseenter={() => menuBar.hover(id)}
     >
         {label}
     </button>
@@ -84,6 +84,7 @@
         <div
             bind:this={menuEl}
             class="menu-dropdown absolute p-1 rounded-[10px] border border-bg5 z-100 flex flex-col"
+            class:instant={menuBar.switching}
         >
             {#each items as item}
                 {#if "separator" in item && item.separator}
@@ -131,6 +132,12 @@
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 
         animation: menuFadeIn 0.15s cubic-bezier(0.2, 0, 0, 1) forwards;
+    }
+
+    /* Hover-switching between siblings keeps the bar open the whole time, so
+       the incoming panel appears in place rather than fading in again. */
+    .menu-dropdown.instant {
+        animation: none;
     }
 
     @keyframes menuFadeIn {
