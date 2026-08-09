@@ -203,7 +203,10 @@ describe("pipeline construction", () => {
   });
 
   it("declares buffer sizes matching the WGSL structs", () => {
-    expect(SLIDERS_BUFFER_SIZE).toBe(24 * 4);
+    // 30 f32 fields, rounded up to the 16-byte alignment of a uniform struct.
+    expect(SLIDERS_BUFFER_SIZE).toBe(128);
+    expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
+    expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(30 * 4);
     expect(PARAMS_BUFFER_SIZE).toBe(256);
   });
 
@@ -297,5 +300,26 @@ describe("develop chain through the frontend pipelines", () => {
     // Order matters: develop.wgsl applies gamma (step 2) before exposure (step 4).
     const expected = throughLinear(160, (l) => Math.pow(l, 1 / 1.4) * Math.pow(2, 0.5));
     expect(Math.abs(out[0] - expected)).toBeLessThanOrEqual(3);
+  });
+
+  it("carries the sharpness sliders without disturbing the ones before them", async () => {
+    // The sharpness block sits at the tail of the uniform and nothing reads it
+    // yet, so railing every one of its fields must leave the render alone. A
+    // field inserted in the wrong place would push exposure into another lane
+    // and this would come back at the wrong brightness.
+    const source = new Uint8Array(WIDTH * HEIGHT * 3).fill(128);
+    const out = await develop(source, {
+      ...defaultSlidersRGB,
+      exposure: 1,
+      clarity: 100,
+      texture: -100,
+      usmAmount: 300,
+      usmRadius: 10,
+      usmLumaThreshold: 100,
+      usmDetailThreshold: 100,
+    });
+
+    const expected = throughLinear(128, (l) => l * 2);
+    expect(Math.abs(out[0] - expected)).toBeLessThanOrEqual(2);
   });
 });

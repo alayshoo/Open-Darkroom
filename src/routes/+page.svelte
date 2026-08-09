@@ -342,34 +342,39 @@
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <span class="section-title pb-1.5">Sharpness</span>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.exposure}
+                                        bind:value={sliders.clarity}
+                                        defaultValue={0}
                                         name="Clarity"
-                                        unit="EV"
-                                        min={-5}
-                                        max={5}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "exposure",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
-                                        name="Texture"
                                         unit="%"
                                         min={-100}
                                         max={100}
                                         decimalPlaces={1}
+                                        dragStep={0.1}
                                         sliderStep={1}
                                         keyboardStep={0.1}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "clarity",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.texture}
+                                        defaultValue={0}
+                                        name="Texture"
+                                        unit="%"
+                                        min={-100}
+                                        max={100}
+                                        decimalPlaces={1}
+                                        dragStep={0.1}
+                                        sliderStep={1}
+                                        keyboardStep={0.1}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "texture",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -385,67 +390,79 @@
                                     ></div>
                                     <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.exposure}
+                                        bind:value={sliders.usmAmount}
+                                        defaultValue={0}
                                         name="Amount"
-                                        unit="EV"
-                                        min={-5}
-                                        max={5}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
+                                        unit="%"
+                                        min={0}
+                                        max={300}
+                                        decimalPlaces={0}
+                                        dragStep={1}
+                                        sliderStep={1}
+                                        keyboardStep={1}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "exposure",
+                                                key: "usmAmount",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.usmRadius}
+                                        defaultValue={1}
                                         name="Radius"
+                                        unit="px"
+                                        min={0.1}
+                                        max={10}
+                                        decimalPlaces={2}
+                                        dragStep={0.01}
+                                        sliderStep={0.1}
+                                        keyboardStep={0.01}
+                                        onCommit={(oldVal, newVal) =>
+                                            commit({
+                                                type: "slider",
+                                                key: "usmRadius",
+                                                oldValue: oldVal,
+                                                newValue: newVal,
+                                            })}
+                                    ></SingleValSliderGroup>
+                                    <SingleValSliderGroup
+                                        bind:value={sliders.usmLumaThreshold}
+                                        defaultValue={0}
+                                        name="Luma Threshold"
                                         unit="%"
-                                        min={-100}
+                                        min={0}
                                         max={100}
                                         decimalPlaces={1}
+                                        dragStep={0.1}
                                         sliderStep={1}
                                         keyboardStep={0.1}
+                                        gradientStartColor="#000000"
+                                        gradientEndColor="#ffffff"
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "usmLumaThreshold",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.exposure}
-                                        name="Luma Threshold"
-                                        unit="EV"
-                                        min={-5}
-                                        max={5}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "exposure",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={sliders.usmDetailThreshold}
+                                        defaultValue={0}
                                         name="Detail Threshold"
                                         unit="%"
-                                        min={-100}
+                                        min={0}
                                         max={100}
                                         decimalPlaces={1}
+                                        dragStep={0.1}
                                         sliderStep={1}
                                         keyboardStep={0.1}
                                         onCommit={(oldVal, newVal) =>
                                             commit({
                                                 type: "slider",
-                                                key: "contrast",
+                                                key: "usmDetailThreshold",
                                                 oldValue: oldVal,
                                                 newValue: newVal,
                                             })}
@@ -810,7 +827,7 @@
                                             onCommit={(oldVal, newVal) =>
                                                 commit({
                                                     type: "slider",
-                                                    key: "vibrance",
+                                                    key: "hue",
                                                     oldValue: oldVal,
                                                     newValue: newVal,
                                                 })}

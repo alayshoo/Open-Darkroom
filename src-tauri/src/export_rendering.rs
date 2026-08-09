@@ -23,8 +23,13 @@ pub const DEVELOP_WGSL: &str =
 /// develop.wgsl / histogram.wgsl.
 pub const PARAMS_BYTES: u64 = 256;
 
-/// Size of the `Sliders` uniform consumed by calcParams.wgsl.
-pub const SLIDERS_BYTES: usize = 96;
+/// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 30
+/// f32 fields occupy 120 bytes; a uniform struct is bound 16-aligned, so the
+/// last 8 bytes are tail padding and are never written.
+pub const SLIDERS_BYTES: usize = 128;
+
+/// Number of f32 fields in the `Sliders` struct, ahead of the tail padding.
+pub const SLIDER_COUNT: usize = 30;
 
 /// Rows rendered per GPU pass. Bounds peak VRAM for very large images.
 pub const CHUNK_ROWS: u32 = 512;
@@ -58,6 +63,12 @@ pub struct SlidersPayload {
     pub saturation:        f32,
     pub vibrance:          f32,
     pub hue:               f32,
+    pub clarity:              f32,
+    pub texture:              f32,
+    pub usm_amount:           f32,
+    pub usm_radius:           f32,
+    pub usm_luma_threshold:   f32,
+    pub usm_detail_threshold: f32,
 }
 
 impl Default for SlidersPayload {
@@ -90,17 +101,23 @@ impl Default for SlidersPayload {
             saturation:        0.0,
             vibrance:          0.0,
             hue:               0.0,
+            clarity:              0.0,
+            texture:              0.0,
+            usm_amount:           0.0,
+            usm_radius:           1.0,
+            usm_luma_threshold:   0.0,
+            usm_detail_threshold: 0.0,
         }
     }
 }
 
-/// Pack sliders into a 96-byte uniform buffer matching the WGSL Sliders struct.
+/// Pack sliders into the uniform buffer matching the WGSL Sliders struct.
 ///
 /// The order here must match `Sliders` in calcParams.wgsl *and* `slidersToArray`
 /// in calcParamsPipeline.ts — all three are the same struct viewed from three
 /// languages, and a reordering in one is silent corruption in the others.
 pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
-    let values: [f32; 24] = [
+    let values: [f32; SLIDER_COUNT] = [
         if s.invert { 1.0 } else { 0.0 },
         s.red_black_point,
         s.green_black_point,
@@ -125,6 +142,12 @@ pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
         s.saturation,
         s.vibrance,
         s.hue,
+        s.clarity,
+        s.texture,
+        s.usm_amount,
+        s.usm_radius,
+        s.usm_luma_threshold,
+        s.usm_detail_threshold,
     ];
     let mut bytes = [0u8; SLIDERS_BYTES];
     for (i, v) in values.iter().enumerate() {
