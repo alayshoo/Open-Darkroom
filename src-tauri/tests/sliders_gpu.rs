@@ -521,11 +521,11 @@ fn white_balance_still_shifts_the_colour() {
     }
 }
 
-/// Below about 2700 K, adapting a neutral all the way to the 5500 K reference
+/// Below about 2360 K, adapting a neutral all the way to the 5500 K reference
 /// lands outside sRGB: red goes negative and clips. That is a gamut limit of the
-/// output space, not a bug in the matrix, and Lightroom clips there too — but it
-/// does mean the luminance guarantee above cannot hold at the bottom rail, so
-/// the boundary is pinned here rather than left to be rediscovered.
+/// output space, not a bug in the matrix, and Lightroom clips there too. The UI
+/// rail stops at 2700 K, on the safe side of it, but presets and export can pass
+/// anything, so the boundary is pinned rather than left to be rediscovered.
 #[test]
 fn the_coldest_temperatures_clip_red_out_of_gamut() {
     let got = develop_patch(

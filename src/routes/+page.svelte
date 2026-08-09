@@ -468,12 +468,14 @@
                                             defaultValue={5500}
                                             name="Temperature"
                                             unit="K"
-                                            min={2200}
-                                            max={8800}
+                                            min={2700}
+                                            max={12000}
                                             decimalPlaces={0}
                                             sliderStep={100}
                                             dragStep={1}
                                             keyboardStep={10}
+                                            scale="reciprocal"
+                                            centerValue={5500}
                                             gradientStartColor="#3EAFFF"
                                             gradientEndColor="#FD8B00"
                                             onCommit={(oldVal, newVal) =>

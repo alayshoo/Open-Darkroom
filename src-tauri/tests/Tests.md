@@ -81,7 +81,7 @@ measured is the constant the pipeline compiles, not a copy kept in the test.
 | `the_luminance_coefficients_are_bt709` | the matrix Y row and the `LR`/`LG`/`LB` constants both match BT.709 |
 | `the_locus_matches_published_blackbody_chromaticities` | 15 temperatures vs tabulated CIE 1931 values |
 | `the_locus_is_continuous_across_its_branch_boundaries` | no step at 2222 K or 4000 K |
-| `the_locus_runs_monotonically_across_the_slider_range` | 133 points over 2200–8800 K |
+| `the_locus_runs_monotonically_across_the_slider_range` | 133 points over 2700–12000 K |
 
 ### The branch these tests were written to find
 

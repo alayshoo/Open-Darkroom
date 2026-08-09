@@ -14,6 +14,8 @@
         sliderStep = 1,
         dragStep = 0.01,
         keyboardStep = dragStep * 10,
+        scale = "linear",
+        centerValue = undefined,
         gradientStartColor = "#4d4d4d",
         gradientEndColor = "#ffffff",
         onCommit = (_old: number, _new: number) => {},
@@ -28,6 +30,8 @@
         sliderStep?: number;
         dragStep?: number;
         keyboardStep?: number;
+        scale?: "linear" | "reciprocal";
+        centerValue?: number;
         gradientStartColor?: string;
         gradientEndColor?: string;
         onCommit?: (oldValue: number, newValue: number) => void;
@@ -74,6 +78,8 @@
             min={min}
             max={max}
             step={sliderStep}
+            scale={scale}
+            centerValue={centerValue}
             gradientStartColor={gradientStartColor}
             gradientEndColor={gradientEndColor}
             onCommit={handleCommit}

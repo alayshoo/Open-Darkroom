@@ -54,7 +54,7 @@ const PLANCKIAN_LOCUS: [(f32, f64, f64); 15] = [
 ];
 
 /// The temperature range the UI actually offers.
-const UI_TEMP_RANGE: (f32, f32) = (2200.0, 8800.0);
+const UI_TEMP_RANGE: (f32, f32) = (2700.0, 12000.0);
 
 /// Chromaticity slack against the table above.
 ///

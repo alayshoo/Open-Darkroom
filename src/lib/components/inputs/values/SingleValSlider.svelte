@@ -9,6 +9,8 @@
         min = 0,
         max = 100,
         step = 1,
+        scale = "linear",
+        centerValue = undefined,
         gradientStartColor = "#4d4d4d",
         gradientEndColor = "#e6e6e6",
         onCommit = () => {},
@@ -19,14 +21,47 @@
         min?: number;
         max?: number;
         step?: number;
+        scale?: "linear" | "reciprocal";
+        centerValue?: number;
         gradientStartColor?: string;
         gradientEndColor?: string;
         onCommit?: () => void;
         onInteractionStart?: () => void;
     } = $props();
 
+    // Track position mapping. `reciprocal` spaces the track by 1/value, for
+    // quantities whose effect scales with the reciprocal rather than the value
+    // itself. Each half is mapped independently so `centerValue` lands on the
+    // midpoint even when the two rails are not equidistant from it.
+    const center = $derived(centerValue ?? (min + max) / 2);
 
-    let bar_percentage = $derived(((value - min) / (max - min)) * 100);
+    function warp(v: number) {
+        return scale === "reciprocal" ? 1 / v : v;
+    }
+
+    function valueToFraction(v: number) {
+        const wc = warp(center);
+        if (v <= center) {
+            const w0 = warp(min);
+            return w0 === wc ? 0.5 : 0.5 * ((warp(v) - w0) / (wc - w0));
+        }
+        const w1 = warp(max);
+        return w1 === wc ? 0.5 : 0.5 + 0.5 * ((warp(v) - wc) / (w1 - wc));
+    }
+
+    function fractionToValue(f: number) {
+        const wc = warp(center);
+        const w =
+            f <= 0.5
+                ? warp(min) + (wc - warp(min)) * (f / 0.5)
+                : wc + (warp(max) - wc) * ((f - 0.5) / 0.5);
+        return scale === "reciprocal" ? 1 / w : w;
+    }
+
+    const clampValue = (v: number) => Math.max(min, Math.min(max, v));
+    const clampFraction = (f: number) => Math.max(0, Math.min(1, f));
+
+    let bar_percentage = $derived(valueToFraction(value) * 100);
 
     let isDragging = $state(false)
     
@@ -40,20 +75,19 @@
         const pointerCenter = (bar_percentage / 100) * rect.width;
         const clickX = e.clientX - rect.left;
         const threshold = 20; // pixels from pointer center
-        const initialValue = value;
+        const initialFraction = valueToFraction(value);
         const initialPointerX = e.clientX;
-        
+
         function updateValue(clientX: number) {
             const percent = (clientX - rect.left) / rect.width;
-            value = Math.max(min, Math.min(max, 
-                percent * (max - min) + min
-            ));
+            value = clampValue(fractionToValue(clampFraction(percent)));
         }
 
         function updateValueRelative(clientX: number) {
-            const delta = clientX - initialPointerX;
-            const deltaPercent = (delta / rect.width) * (max - min);
-            value = Math.max(min, Math.min(max, initialValue + deltaPercent));
+            const delta = (clientX - initialPointerX) / rect.width;
+            value = clampValue(
+                fractionToValue(clampFraction(initialFraction + delta))
+            );
         }
 
         const isNearpointer = Math.abs(clickX - pointerCenter) <= threshold;
@@ -85,10 +119,10 @@
         
         if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
             e.preventDefault();
-            value = Math.min(max, value + step);
+            value = clampValue(value + step);
         } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
             e.preventDefault();
-            value = Math.max(min, value - step);
+            value = clampValue(value - step);
         }
     }
 
