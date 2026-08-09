@@ -309,7 +309,10 @@
             </div>
         </div>
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
-            <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5">
+            <div
+                class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5"
+                class:dimmed={exportMenuOpen}
+            >
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 <!-- Stays mounted and fades. It is the last item in a
                      left-aligned row, so holding its width costs no layout —
@@ -1091,6 +1094,7 @@
 
     .quick-actions {
         overflow: hidden;
+        transition: opacity 0.2s ease;
     }
 
     .tools-panel {
@@ -1106,7 +1110,7 @@
         transition: opacity 0.2s ease;
     }
 
-    .controls-section.dimmed {
+    .dimmed {
         opacity: 0.25;
         pointer-events: none;
     }

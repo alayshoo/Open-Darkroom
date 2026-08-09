@@ -7,3 +7,6 @@ The image data follows this path:
 The file is input on the rust side and is decoded into a 16 bit buffer since the maximum input image precision even in RAW images is 16 bit. A pyramid structure is created (number of levels and tile size). The top level tiles are fed to the frontend along with the structure of the pyramid and a special overall texture with lower resolution to be used on the calculations of the histogram. The frontend loads the image to the GPU with 32 bit precision and creates a canvas do display it. At every slider update re-render the image through the ImgDev shader. On Export the backend uses the buffer to make the transformations necessary through a copy of the ImgDev shader WGSL file. After transformations image is encoded and output as a file.
 
 Don't build things without permission to do so, don't be too eager to build that you do so without asking the user first.
+
+Do not litter the codebase with massive comment blocks. A comment larger than 3 lines in the middle of a file is way too much.
+Comments should be generic, not based on your reasoning when solving a specific issue.

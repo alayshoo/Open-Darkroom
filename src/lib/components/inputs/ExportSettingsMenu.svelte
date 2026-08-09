@@ -15,39 +15,7 @@
     });
 </script>
 
-<div class="menu absolute flex flex-col gap-3 h-40.5 rounded-[8px] p-3 mr-4 ml-2 z-100" role="menu" aria-label="Export settings">
-    <div class="format-row flex flex-row gap-2">
-        <button
-            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-            class:active={settings.format === "webp"}
-            onclick={() => (settings.format = "webp")}
-        >
-            WebP
-        </button>
-        <button
-            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-            class:active={settings.format === "png"}
-            onclick={() => (settings.format = "png")}
-        >
-            PNG
-        </button>
-        <button
-            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-            class:active={settings.format === "jpeg"}
-            onclick={() => (settings.format = "jpeg")}
-            >JPEG
-        </button>
-        <button
-            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-            class:active={settings.format === "tiff"}
-            onclick={() => (settings.format = "tiff")}
-        >
-            TIFF
-        </button>
-    </div>
-
-    <div></div>
-
+<div class="menu absolute flex flex-col gap-3 rounded-[8px] p-3 mr-4 ml-2 z-100" role="menu" aria-label="Export settings">
     {#if settings.format === "png"}
         <div class="setting flex flex-col gap-1.5">
             <div class="setting-header flex justify-between items-baseline">
@@ -170,11 +138,43 @@
             </div>
         </div>
     {/if}
+
+    <div class="rule h-0.25 shrink-0"></div>
+
+    <div class="format-row flex flex-row gap-2">
+        <button
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+            class:active={settings.format === "webp"}
+            onclick={() => (settings.format = "webp")}
+        >
+            WebP
+        </button>
+        <button
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+            class:active={settings.format === "png"}
+            onclick={() => (settings.format = "png")}
+        >
+            PNG
+        </button>
+        <button
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+            class:active={settings.format === "jpeg"}
+            onclick={() => (settings.format = "jpeg")}
+            >JPEG
+        </button>
+        <button
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+            class:active={settings.format === "tiff"}
+            onclick={() => (settings.format = "tiff")}
+        >
+            TIFF
+        </button>
+    </div>
 </div>
 
 <style>
     .menu {
-        bottom: calc(100% + 8px);
+        bottom: calc(100% + 22px);
         left: 0;
         right: 0;
 
@@ -196,6 +196,10 @@
         }
     }
 
+    .rule {
+        background: var(--bg5);
+    }
+
     .pill {
         font-size: 13px;
 
@@ -214,6 +218,7 @@
     .pill.active {
         background: var(--color1);
         color: var(--bg1);
+        font-weight: 600;
     }
 
     .setting-label {
@@ -232,5 +237,10 @@
     .setting-hints {
         font-size: 10px;
         color: var(--color3);
+    }
+
+    .setting :global(.slider .left-bar),
+    .setting :global(.slider .right-bar) {
+        background: var(--sliderTrack);
     }
 </style>
