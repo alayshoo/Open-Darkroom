@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 108 Rust tests, 10 TypeScript, 10 in-browser.
+Nothing is `#[ignore]`d. 115 Rust tests, 10 TypeScript, 10 in-browser.
 
 ---
 
@@ -61,6 +61,40 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
+
+## L2 — `colorimetry.rs` (7)
+
+The colorimetric constants and the Planckian locus in `calcParams.wgsl`, measured
+against published values. Everything else in the white-balance suite is
+directional — warmer looks warmer, the R/B ratio rises — which passes for a
+transposed matrix or a mistyped coefficient as long as the ordering survives.
+These pin the numbers.
+
+Both entry points are probes appended to the shipped shader source, so what is
+measured is the constant the pipeline compiles, not a copy kept in the test.
+
+| Test | Asserts |
+|---|---|
+| `the_bradford_matrices_are_a_true_inverse_pair` | `M_BRADFORD_INV · M_BRADFORD` = I |
+| `the_xyz_and_rgb_matrices_are_a_true_inverse_pair` | `M_XYZ_TO_RGB · M_RGB_TO_XYZ` = I |
+| `the_rgb_to_xyz_matrix_maps_white_to_d65` | primaries sum to D65, identifying the matrix as sRGB's |
+| `the_luminance_coefficients_are_bt709` | the matrix Y row and the `LR`/`LG`/`LB` constants both match BT.709 |
+| `the_locus_matches_published_blackbody_chromaticities` | 15 temperatures vs tabulated CIE 1931 values |
+| `the_locus_is_continuous_across_its_branch_boundaries` | no step at 2222 K or 4000 K |
+| `the_locus_runs_monotonically_across_the_slider_range` | 133 points over 2200–8800 K |
+
+### The branch these tests were written to find
+
+`cct_to_xyz` had two `y(x)` branches where Kim et al. publish three, so the
+1667–2222 K polynomial was being used all the way to 4000 K. That put a 3.4e-3
+step in y at exactly 4000 K and up to 3.5e-3 of chromaticity error across
+3000–4000 K — the tungsten range. Above 4500 K the shader was already accurate
+to ~1e-4, which is why every directional test passed.
+
+The tolerances are split at 4000 K because the fit itself is: ~1.6e-4 above,
+~5e-4 toward the bottom of the slider. `y` is only checked for monotonicity
+above 2500 K — the locus genuinely peaks near 2250 K and falls away on both
+sides, so `x` carries the ordering below that.
 
 ## L2 — `develop_gpu.rs` (17)
 

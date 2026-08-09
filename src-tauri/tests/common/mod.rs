@@ -272,7 +272,7 @@ pub fn device() -> &'static (wgpu::Device, wgpu::Queue) {
 }
 
 /// Block until the GPU has drained, then read a buffer back to the CPU.
-fn read_buffer(device: &wgpu::Device, staging: &wgpu::Buffer) -> Vec<u8> {
+pub fn read_buffer(device: &wgpu::Device, staging: &wgpu::Buffer) -> Vec<u8> {
     let (tx, rx) = std::sync::mpsc::channel();
     staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
         let _ = tx.send(r);

@@ -156,12 +156,19 @@ fn cct_to_xyz(temp_raw: f32) -> vec3f {
           + 0.24039;
     }
 
+    // y has its own three-way split, and the middle branch does not share the
+    // 4000 K boundary that x switches on.
     var y: f32;
-    if (T <= 4000.0) {
+    if (T <= 2222.0) {
         y = -1.1063814 * x * x * x
           - 1.3481102 * x * x
           + 2.1855583 * x
           - 0.2021968;
+    } else if (T <= 4000.0) {
+        y = -0.9549476 * x * x * x
+          - 1.3741859 * x * x
+          + 2.0913702 * x
+          - 0.1674887;
     } else {
         y =  3.081758  * x * x * x
           - 5.8733867 * x * x
