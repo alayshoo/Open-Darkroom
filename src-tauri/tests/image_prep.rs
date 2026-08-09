@@ -212,6 +212,28 @@ fn prepare_reports_both_resolutions() {
 
 // ── Payload framing ───────────────────────────────────────────────────────────
 
+/// The header carries both resolutions so the frontend can tell how far the
+/// preview sits from full size. A slider measured in image pixels needs that
+/// ratio, and the preview buffer alone cannot supply it.
+#[test]
+fn payload_header_carries_the_full_resolution_of_a_downscaled_preview() {
+    let img = gray_ramp(3000, 1500);
+    let prepared = prepare_image(&img);
+    let payload = build_payload(&prepared);
+
+    let preview_width = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+    let preview_height = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+    let full_width = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    let full_height = u32::from_le_bytes(payload[12..16].try_into().unwrap());
+
+    assert_eq!((preview_width, preview_height), (2048, 1024));
+    assert_eq!((full_width, full_height), (3000, 1500));
+    assert_ne!(
+        preview_width, full_width,
+        "this fixture is only meaningful while the preview is downscaled"
+    );
+}
+
 #[test]
 fn payload_round_trips_through_the_frontend_layout() {
     let img = rgb_ramp(9, 5);
@@ -223,7 +245,10 @@ fn payload_round_trips_through_the_frontend_layout() {
     // Parse exactly the way openImage.ts does.
     let width = u32::from_le_bytes(payload[0..4].try_into().unwrap());
     let height = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+    let full_width = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    let full_height = u32::from_le_bytes(payload[12..16].try_into().unwrap());
     assert_eq!((width, height), (9, 5));
+    assert_eq!((full_width, full_height), (9, 5));
 
     let pixel_bytes = width as usize * height as usize * LINEAR_BYTES_PER_PIXEL;
     assert_eq!(

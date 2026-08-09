@@ -13,7 +13,7 @@ mod common;
 use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL};
 
 use open_darkroom_lib::export_rendering::{
-    CALC_PARAMS_WGSL, DEVELOP_WGSL, PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
+    CALC_PARAMS_WGSL, DEVELOP_WGSL, PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
 };
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
@@ -181,11 +181,16 @@ fn typescript_slider_packing_matches_the_wgsl_struct() {
 
 #[test]
 fn typescript_declares_the_same_buffer_sizes_as_rust() {
-    let number_after = |needle: &str| -> usize {
+    // The constants are aligned on their `=`, so the spacing around it varies.
+    let number_after = |name: &str| -> usize {
         let at = CALC_PARAMS_PIPELINE_TS
-            .find(needle)
-            .unwrap_or_else(|| panic!("{needle} not found in calcParamsPipeline.ts"));
-        CALC_PARAMS_PIPELINE_TS[at + needle.len()..]
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} not found in calcParamsPipeline.ts"));
+        let rest = &CALC_PARAMS_PIPELINE_TS[at + name.len()..];
+        let eq = rest
+            .find('=')
+            .unwrap_or_else(|| panic!("{name} is not an assignment"));
+        rest[eq + 1..]
             .split(';')
             .next()
             .unwrap()
@@ -195,14 +200,41 @@ fn typescript_declares_the_same_buffer_sizes_as_rust() {
     };
 
     assert_eq!(
-        number_after("SLIDERS_BUFFER_SIZE = "),
+        number_after("SLIDERS_BUFFER_SIZE"),
         SLIDERS_BYTES,
         "SLIDERS_BUFFER_SIZE in TypeScript disagrees with Rust"
     );
     assert_eq!(
-        number_after("PARAMS_BUFFER_SIZE  = "),
+        number_after("PARAMS_BUFFER_SIZE"),
         PARAMS_BYTES as usize,
         "PARAMS_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+    assert_eq!(
+        number_after("VIEW_BUFFER_SIZE"),
+        VIEW_BYTES,
+        "VIEW_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+}
+
+/// The view is bound to calcParams as a uniform, so it carries the same 16-byte
+/// alignment rule the sliders do.
+#[test]
+fn view_struct_is_all_f32_and_matches_the_declared_size() {
+    let fields = wgsl_struct(CALC_PARAMS_WGSL, "View");
+
+    assert!(
+        fields.iter().all(|f| f.ty == "f32"),
+        "every View field must be an f32 — the CPU packers write a flat f32 array"
+    );
+    assert_eq!(
+        struct_size(&fields).next_multiple_of(16),
+        VIEW_BYTES,
+        "VIEW_BYTES disagrees with the WGSL View struct"
+    );
+    assert_eq!(
+        fields.first().map(|f| f.name.as_str()),
+        Some("render_scale"),
+        "render_scale must be the first field — it is the only one the packers write"
     );
 }
 

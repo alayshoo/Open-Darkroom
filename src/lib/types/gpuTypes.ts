@@ -36,6 +36,7 @@ import type { Sliders } from "./imgParameters";
 export interface Renderer {
     loadImage: (image: GPUImage) => void;
     setSliders: (sliders: Sliders) => void;
+    setRenderScale: (renderScale: number) => void;
     render: () => void;
     destroy: () => void;
 }

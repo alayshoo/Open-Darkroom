@@ -8,10 +8,12 @@ import shaderSource from "../shaders/calcParams.wgsl?raw";
 // struct is bound at.
 export const SLIDERS_BUFFER_SIZE = 128;
 export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
+export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
     updateSliders: (sliders: Sliders) => void;
+    updateView: (renderScale: number) => void;
     recordCalcParams: (encoder: GPUCommandEncoder) => void;
     destroy: () => void;
 }
@@ -39,6 +41,13 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         usage: GPUBufferUsage.STORAGE,
     });
 
+    // View uniform buffer — where this render sits relative to the full image
+    const viewBuffer = device.createBuffer({
+        label: "View Uniform Buffer",
+        size: VIEW_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
     const bindGroupLayout = device.createBindGroupLayout({
         label: "Calc Params Bind Group Layout",
         entries: [
@@ -51,6 +60,11 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
                 binding: 1,
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "storage" },
+            },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
             },
         ],
     });
@@ -72,12 +86,18 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         entries: [
             { binding: 0, resource: { buffer: slidersBuffer } },
             { binding: 1, resource: { buffer: paramsBuffer } },
+            { binding: 2, resource: { buffer: viewBuffer } },
         ],
     });
 
     function updateSliders(sliders: Sliders) {
         const data = slidersToArray(sliders);
         device.queue.writeBuffer(slidersBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
+    }
+
+    function updateView(renderScale: number) {
+        const data = new Float32Array([renderScale, 0, 0, 0]);
+        device.queue.writeBuffer(viewBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
     function recordCalcParams(encoder: GPUCommandEncoder) {
@@ -91,9 +111,13 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
     function destroy() {
         slidersBuffer.destroy();
         paramsBuffer.destroy();
+        viewBuffer.destroy();
     }
 
-    return { paramsBuffer, updateSliders, recordCalcParams, destroy };
+    // A render is full resolution until something says otherwise.
+    updateView(1);
+
+    return { paramsBuffer, updateSliders, updateView, recordCalcParams, destroy };
 }
 
 // Packs raw slider values into a Float32Array matching the WGSL Sliders struct

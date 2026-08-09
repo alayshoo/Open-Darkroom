@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const { openImage } = await import("$lib/utils/openImage");
 
 const HIST_BINS = 256;
+const HEADER = 16;
 
 /** Build a payload exactly as `build_payload` does in image_opening.rs. */
 function payload(
@@ -20,18 +21,21 @@ function payload(
   height: number,
   fillPixel: (i: number) => number,
   histSeed = 0,
+  full: [number, number] = [width, height],
 ): ArrayBuffer {
   const pixelBytes = width * height * 8;
-  const buffer = new ArrayBuffer(8 + pixelBytes + 3 * HIST_BINS * 4);
+  const buffer = new ArrayBuffer(HEADER + pixelBytes + 3 * HIST_BINS * 4);
   const view = new DataView(buffer);
 
   view.setUint32(0, width, true);
   view.setUint32(4, height, true);
+  view.setUint32(8, full[0], true);
+  view.setUint32(12, full[1], true);
 
-  const pixels = new Uint8Array(buffer, 8, pixelBytes);
+  const pixels = new Uint8Array(buffer, HEADER, pixelBytes);
   for (let i = 0; i < pixelBytes; i++) pixels[i] = fillPixel(i);
 
-  const histOffset = 8 + pixelBytes;
+  const histOffset = HEADER + pixelBytes;
   for (let channel = 0; channel < 3; channel++) {
     for (let bin = 0; bin < HIST_BINS; bin++) {
       const at = histOffset + (channel * HIST_BINS + bin) * 4;
@@ -53,6 +57,28 @@ describe("openImage", () => {
     expect(invoke).toHaveBeenCalledWith("open_image_file");
     expect(image.width).toBe(9);
     expect(image.height).toBe(5);
+  });
+
+  it("reads the full resolution the preview was downscaled from", async () => {
+    // The ratio between the two is what anchors a slider measured in image
+    // pixels to a preview that is smaller than the image.
+    invoke.mockResolvedValue(payload(2048, 1024, () => 0, 0, [3000, 1500]));
+
+    const image = await openImage();
+
+    expect(image.width).toBe(2048);
+    expect(image.fullWidth).toBe(3000);
+    expect(image.fullHeight).toBe(1500);
+    expect(image.width / image.fullWidth).toBeCloseTo(2048 / 3000);
+  });
+
+  it("reports the full resolution as the preview when nothing was downscaled", async () => {
+    invoke.mockResolvedValue(payload(9, 5, () => 0));
+
+    const image = await openImage();
+
+    expect(image.fullWidth).toBe(9);
+    expect(image.fullHeight).toBe(5);
   });
 
   it("slices the pixels at eight bytes per pixel", async () => {

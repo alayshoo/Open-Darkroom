@@ -31,6 +31,10 @@ pub const SLIDERS_BYTES: usize = 128;
 /// Number of f32 fields in the `Sliders` struct, ahead of the tail padding.
 pub const SLIDER_COUNT: usize = 30;
 
+/// Size of the `View` uniform consumed by calcParams.wgsl. One f32 of payload,
+/// padded to the 16 bytes a uniform struct binds at.
+pub const VIEW_BYTES: usize = 16;
+
 /// Rows rendered per GPU pass. Bounds peak VRAM for very large images.
 pub const CHUNK_ROWS: u32 = 512;
 
@@ -153,6 +157,35 @@ pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
     for (i, v) in values.iter().enumerate() {
         bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }
+    bytes
+}
+
+// ── View payload ──────────────────────────────────────────────────────────────
+
+/// Where a render sits relative to the full-resolution image.
+///
+/// Sliders measured in image pixels — the unsharp mask radius — mean
+/// full-resolution pixels, so a render working on a downscaled surface has to
+/// scale them. This is separate from `SlidersPayload` because it tracks the view
+/// rather than an edit: it changes on zoom, not when a slider moves.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewPayload {
+    /// Rendered pixels per full-resolution image pixel. Below 1 for a
+    /// downscaled preview, exactly 1 for an export.
+    pub render_scale: f32,
+}
+
+impl Default for ViewPayload {
+    /// Full resolution — the export path never renders anywhere else.
+    fn default() -> Self {
+        Self { render_scale: 1.0 }
+    }
+}
+
+/// Pack the view into the uniform buffer matching the WGSL `View` struct.
+pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
+    let mut bytes = [0u8; VIEW_BYTES];
+    bytes[0..4].copy_from_slice(&v.render_scale.to_le_bytes());
     bytes
 }
 
@@ -293,6 +326,16 @@ pub async fn render_image_with_chunk_rows(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -313,6 +356,13 @@ pub async fn render_image_with_chunk_rows(
             cache: None,
         });
 
+    // Export renders at full resolution, so the view is the default 1.0.
+    let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("view_buf"),
+        contents: &view_to_bytes(&ViewPayload::default()),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let calc_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("calc_bg"),
         layout: &calc_bgl,
@@ -324,6 +374,10 @@ pub async fn render_image_with_chunk_rows(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: view_buf.as_entire_binding(),
             },
         ],
     });

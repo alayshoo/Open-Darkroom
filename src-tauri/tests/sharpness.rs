@@ -16,7 +16,8 @@ mod common;
 use common::{develop, mixed_ramp, run_calc_params};
 
 use open_darkroom_lib::export_rendering::{
-    sliders_to_bytes, SlidersPayload, SLIDERS_BYTES, SLIDER_COUNT,
+    sliders_to_bytes, view_to_bytes, SlidersPayload, ViewPayload, SLIDERS_BYTES, SLIDER_COUNT,
+    VIEW_BYTES,
 };
 
 /// Lane index of each sharpness field in the packed uniform. These are the tail
@@ -186,5 +187,44 @@ fn sharpness_does_not_change_a_rendered_image() {
     assert_eq!(
         neutral, maxed,
         "the develop chain does not read the sharpness sliders yet, so the render must be identical"
+    );
+}
+
+// ── View ──────────────────────────────────────────────────────────────────────
+//
+// The radius is specified in full-resolution image pixels, so a render working
+// on a downscaled surface has to scale it. The ratio rides in its own uniform
+// rather than in `Sliders`, because it tracks the view and not an edit — it
+// changes on zoom, while the sliders change only when the user moves one.
+
+#[test]
+fn the_view_defaults_to_full_resolution() {
+    // The export renders the whole image at native size, so it never scales.
+    assert_eq!(ViewPayload::default().render_scale, 1.0);
+}
+
+#[test]
+fn the_view_packs_the_render_scale_into_the_first_lane() {
+    let bytes = view_to_bytes(&ViewPayload {
+        render_scale: 0.25,
+    });
+
+    assert_eq!(f32::from_le_bytes(bytes[0..4].try_into().unwrap()), 0.25);
+}
+
+#[test]
+fn the_view_zeroes_its_tail_padding() {
+    // The struct is one f32 rounded up to the 16 bytes a uniform binds at. The
+    // padding is never read, but leaving it undefined would make byte-for-byte
+    // comparisons of the uniform meaningless.
+    let bytes = view_to_bytes(&ViewPayload {
+        render_scale: 0.5,
+    });
+
+    assert_eq!(bytes.len(), VIEW_BYTES);
+    assert!(
+        bytes[4..].iter().all(|&b| b == 0),
+        "tail padding must be zeroed, got {:?}",
+        &bytes[4..]
     );
 }

@@ -48,6 +48,12 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         calcParams.updateSliders(sliders);
     }
 
+    // Rendered pixels per full-resolution image pixel — 1 when the surface is
+    // the full image, below 1 for a downscaled preview.
+    function setRenderScale(renderScale: number) {
+        calcParams.updateView(renderScale);
+    }
+
     function render() {
         if (!bindGroup || !currentImage) return;
 
@@ -97,5 +103,5 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // Initialize with default sliders
     setSliders( defaultSlidersRGB );
 
-    return { loadImage, setSliders, render, destroy };
+    return { loadImage, setSliders, setRenderScale, render, destroy };
 }

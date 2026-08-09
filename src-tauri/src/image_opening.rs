@@ -22,8 +22,10 @@ pub const PREVIEW_MAX_EDGE: u32 = 2048;
 /// Bins in each per-channel histogram.
 pub const HIST_BINS: usize = 256;
 
-/// Bytes preceding the pixel data in the frontend payload: width + height, u32 LE.
-pub const PAYLOAD_HEADER_BYTES: usize = 8;
+/// Bytes preceding the pixel data in the frontend payload: preview width and
+/// height, then full-resolution width and height, u32 LE. The full dimensions
+/// are what anchors a slider specified in image pixels to a downscaled preview.
+pub const PAYLOAD_HEADER_BYTES: usize = 16;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -196,6 +198,8 @@ pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
 
     payload.extend_from_slice(&prepared.preview_width.to_le_bytes());
     payload.extend_from_slice(&prepared.preview_height.to_le_bytes());
+    payload.extend_from_slice(&prepared.full_width.to_le_bytes());
+    payload.extend_from_slice(&prepared.full_height.to_le_bytes());
     payload.extend_from_slice(&prepared.preview_pixels);
 
     let h = &prepared.histograms;

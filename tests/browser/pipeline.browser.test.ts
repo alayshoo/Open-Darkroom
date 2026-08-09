@@ -18,6 +18,7 @@ import {
   createCalcParamsPipeline,
   PARAMS_BUFFER_SIZE,
   SLIDERS_BUFFER_SIZE,
+  VIEW_BUFFER_SIZE,
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
@@ -96,7 +97,11 @@ beforeAll(async () => {
  * Drive the real frontend pipelines over `rgb` and read the result back.
  * Mirrors `renderer.ts`: calcParams compute pass, then the develop render pass.
  */
-async function develop(rgb: Uint8Array, sliders: Sliders): Promise<Uint8Array> {
+async function develop(
+  rgb: Uint8Array,
+  sliders: Sliders,
+  renderScale?: number,
+): Promise<Uint8Array> {
   const calcParams = createCalcParamsPipeline(gpu);
   const imgDev = createImgDevPipeline(gpu);
 
@@ -124,6 +129,7 @@ async function develop(rgb: Uint8Array, sliders: Sliders): Promise<Uint8Array> {
   });
 
   calcParams.updateSliders(sliders);
+  if (renderScale !== undefined) calcParams.updateView(renderScale);
 
   const encoder = gpu.device.createCommandEncoder();
   calcParams.recordCalcParams(encoder);
@@ -208,6 +214,8 @@ describe("pipeline construction", () => {
     expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
     expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(30 * 4);
     expect(PARAMS_BUFFER_SIZE).toBe(256);
+    // One f32, rounded up to the 16-byte alignment of a uniform struct.
+    expect(VIEW_BUFFER_SIZE).toBe(16);
   });
 
   it("accepts a params bind group built the way renderer.ts builds it", () => {
@@ -321,5 +329,33 @@ describe("develop chain through the frontend pipelines", () => {
 
     const expected = throughLinear(128, (l) => l * 2);
     expect(Math.abs(out[0] - expected)).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("the view uniform", () => {
+  // The bind group gained a third entry, which is the kind of thing that fails
+  // at pipeline creation rather than in the numbers — only a real device says.
+  it("renders identically at any render scale", async () => {
+    const source = new Uint8Array(WIDTH * HEIGHT * 3).fill(128);
+    const sliders = { ...defaultSlidersRGB, exposure: 1, usmRadius: 8 };
+
+    const full = await develop(source, sliders, 1);
+    const quarter = await develop(source, sliders, 0.25);
+
+    // Nothing reads render_scale yet, so it must not reach a pixel. When the
+    // blur lands this is the test that has to start telling them apart.
+    expect([...quarter]).toEqual([...full]);
+  });
+
+  it("renders the same whether or not the view was ever written", async () => {
+    const source = new Uint8Array(WIDTH * HEIGHT * 3).fill(200);
+    const sliders = { ...defaultSlidersRGB, contrast: 40 };
+
+    const untouched = await develop(source, sliders);
+    const explicit = await develop(source, sliders, 1);
+
+    // The pipeline seeds the buffer at construction, so leaving it alone and
+    // setting it to full resolution are the same thing.
+    expect([...untouched]).toEqual([...explicit]);
   });
 });

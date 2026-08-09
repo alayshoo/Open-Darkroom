@@ -40,6 +40,17 @@ struct Sliders {
 }                                // 120 bytes of fields; a uniform struct is
                                  // 16-aligned, so the binding is 128.
 
+// Where this render sits relative to the full-resolution image. Sharpness radii
+// are specified in full-resolution pixels, so anything working in texture space
+// has to scale them. Carried separately from Sliders because it changes with the
+// view rather than with an edit.
+struct View {
+    render_scale: f32,   //  0
+    _pad0:        f32,   //  4
+    _pad1:        f32,   //  8
+    _pad2:        f32,   // 12
+}                        // total: 16 bytes
+
 struct Params {
     dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
     red_gamma:      f32,          //  64
@@ -68,6 +79,7 @@ struct Params {
 
 @group(0) @binding(0) var<uniform> sliders: Sliders;
 @group(0) @binding(1) var<storage, read_write> params: Params;
+@group(0) @binding(2) var<uniform> view: View;
 
 
 // ── Constants ────────────────────────────────────────────────────────────────
