@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "icon": "node scripts/generate-icons.js"
   },
   "license": "MIT",
   "dependencies": {
