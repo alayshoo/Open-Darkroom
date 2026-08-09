@@ -1,6 +1,6 @@
 <!-- lib/components/MenuButton.svelte -->
 <script lang="ts">
-    import "$lib/styles/palette.css"
+    import "$lib/styles/palette.css";
     import { onMount, onDestroy } from "svelte";
     import { blur } from "svelte/transition";
 
@@ -113,11 +113,11 @@
         display: inline-flex;
         justify-content: center;
         align-items: center;
-        height: 28px;
-        padding: 0 10px;
+        height: 22px;
+        padding: 0 6px;
         border-radius: 6px;
         border: none;
-        background: var(--bg3);
+        background: transparent;
         color: var(--color2);
         font-family: "Figtree", sans-serif;
         font-size: 14px;
@@ -131,8 +131,7 @@
 
     .menu-button:hover,
     .menu-button.active {
-        background: var(--bg5);
-        border-radius: 8px;
+        background: var(--bg3);
     }
 
     /* ── Dropdown ── */

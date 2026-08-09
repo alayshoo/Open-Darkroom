@@ -90,7 +90,7 @@
     <div class="window-controls">
         <button onclick={() => appWindow.minimize()} title="Minimize">
             <svg
-                width="12"
+                width="16"
                 height="1.4"
                 viewBox="0 0 12 2"
                 fill="none"
@@ -109,8 +109,8 @@
             {#if isMaximized}
                 <!-- Restore icon: overlapping squares -->
                 <svg
-                    width="16"
-                    height="16"
+                    width="18"
+                    height="18"
                     viewBox="0 0 24 24"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
@@ -123,8 +123,8 @@
             {:else}
                 <!-- Maximize icon: single square -->
                 <svg
-                    width="14"
-                    height="14"
+                    width="15"
+                    height="15"
                     viewBox="0 0 24 24"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
@@ -144,8 +144,8 @@
         </button>
         <button onclick={() => appWindow.close()} title="Close">
             <svg
-                width="16"
-                height="16"
+                width="18"
+                height="18"
                 viewBox="0 0 24 24"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -169,7 +169,7 @@
 
 <style>
     .titlebar {
-        height: 48px;
+        height: 32px;
         position: fixed;
         top: 0;
         left: 0;
@@ -190,8 +190,8 @@
         display: flex;
         position: absolute;
         aspect-ratio: 1 / 1;
-        height: 28px;
-        left: 12px;
+        height: 22px;
+        left: 5px;
         z-index: -2;
     }
 
@@ -199,7 +199,7 @@
         display: inline-flex;
         justify-content: center;
         align-items: center;
-        height: 28px;
+        height: 22px;
         border-radius: 6px;
         z-index: 2;
         border: none;
@@ -210,22 +210,22 @@
 
     .titlebar > .menu-buttons {
         position: fixed;
-        top: 10px;
-        left: 58px;
+        top: 3px;
+        left: 36px;
         display: flex;
-        gap: 16px;
+        gap: 8px;
     }
 
     .titlebar > .window-controls {
         position: fixed;
-        top: 10px;
-        right: 10px;
+        top: 3px;
+        right: 3px;
         display: flex;
-        gap: 6px;
+        gap: 4px;
         align-items: center;
     }
     .window-controls button {
-        width: 35px;
+        width: 32px;
         background: transparent;
         color: var(--color2);
         transition:
@@ -282,6 +282,6 @@
     .drag {
         position: fixed;
         width: 100%;
-        height: 48px;
+        height: 32px;
     }
 </style>
