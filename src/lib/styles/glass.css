@@ -1,0 +1,83 @@
+/* styles/glass.css */
+
+/*
+ * The frosted material every floating surface shares: the side panels, the
+ * toolbar, and the title bar's chips. A surface opts in with `class="glass"`
+ * and tunes itself through the custom properties below — the lighting angle
+ * and the four rim stops are the only things that legitimately differ between
+ * a 26px chip and a 680px panel. Drop shadows stay with the individual
+ * surfaces, since they depend on how much mass there is to lift.
+ *
+ * This lives in the `components` layer so Tailwind utilities in the markup
+ * (radii, sizing) still win over it, while Svelte's scoped rules — which are
+ * unlayered, and so beat every layer regardless of specificity — can override
+ * anything here.
+ */
+@layer components {
+    .glass {
+        --panel-noise: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'140'%20height%3D'140'%3E%3Cfilter%20id%3D'n'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.75'%20numOctaves%3D'3'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D'140'%20height%3D'140'%20filter%3D'url(%23n)'%20opacity%3D'0.05'%2F%3E%3C%2Fsvg%3E");
+        /* lighting angle — the rim and the gloss are lit from the same side */
+        --panel-angle: 142deg;
+        /* Rim stops. The lit corner used to spike to 0.42 and fall off within
+           40%, which read as a hotspot with a dead rim everywhere else; the
+           peak is lower now and the shaded half carries more of it. */
+        --rim-hi: 0.22;
+        --rim-mid: 0.1;
+        --rim-lo: 0.07;
+        --rim-end: 0.12;
+        --panel-tint: rgba(0, 0, 0, 0.3);
+        --panel-blur: 16px;
+
+        background: var(--panel-noise), var(--panel-tint);
+        backdrop-filter: blur(var(--panel-blur)) saturate(80%) brightness(108%);
+        -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(80%)
+            brightness(108%);
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+    }
+
+    /* beveled rim — gradient border, lit from the same angle */
+    .glass::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(
+            var(--panel-angle),
+            rgba(255, 255, 255, var(--rim-hi)),
+            rgba(255, 255, 255, var(--rim-mid)) 30%,
+            rgba(255, 255, 255, var(--rim-lo)) 62%,
+            rgba(255, 255, 255, var(--rim-end))
+        );
+        -webkit-mask:
+            linear-gradient(#000 0 0) content-box,
+            linear-gradient(#000 0 0);
+        mask:
+            linear-gradient(#000 0 0) content-box,
+            linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+        /* above the surface's content, which lifts itself to z-index 1/2 while
+           paging */
+        z-index: 5;
+    }
+
+    /* gloss */
+    .glass::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+            var(--panel-angle),
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0) 33%,
+            rgba(255, 255, 255, 0) 55%
+        );
+        pointer-events: none;
+        z-index: 5;
+    }
+}

@@ -3,6 +3,7 @@
   import "$lib/styles/tailwind.css";
   import "$lib/styles/global.css";
   import "$lib/styles/palette.css";
+  import "$lib/styles/glass.css";
 
   import "$lib/components/window/TitleBar.svelte"
 

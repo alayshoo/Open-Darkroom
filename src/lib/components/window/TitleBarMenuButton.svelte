@@ -72,7 +72,7 @@
 <div class="menu-button-wrapper relative">
     <button
         bind:this={buttonEl}
-        class="menu-button relative inline-flex justify-center items-center h-5.5 px-1.5 py-0 rounded-[6px] border-0 cursor-app"
+        class="menu-button relative inline-flex justify-center items-center h-7 px-2 py-0 rounded-[7px] border-0 cursor-app"
         class:active={isOpen}
         onclick={() => menuBar.toggle(id)}
         onmouseenter={() => menuBar.hover(id)}
@@ -112,15 +112,26 @@
         background: transparent;
         color: var(--color2);
         font-family: "Figtree", sans-serif;
-        font-size: 14px;
+        font-size: 15px;
+        /* The label sits straight on the title bar's gradient with nothing
+           behind it, so it carries its own separation from bright pixels. The
+           dropdown below has an opaque backing and deliberately does not. */
+        text-shadow:
+            0 1px 3px rgba(0, 0, 0, 0.75),
+            0 0 10px rgba(0, 0, 0, 0.45);
         transition:
+            color 0.2s ease,
             background 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
 
+    /* Matches the window controls: the fill lifts to --bg5 and the label to
+       --color1, since against the title bar's scrim the fill on its own barely
+       registered. */
     .menu-button:hover,
     .menu-button.active {
-        background: var(--bg3);
+        background: var(--bg5);
+        color: var(--color1);
     }
 
     /* ── Dropdown ── */

@@ -258,19 +258,19 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="toolbar shrink-0 w-8 rounded-[8px]"></div>
+    <div class="toolbar glass shrink-0 w-8 rounded-[8px]"></div>
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
     </div>
     <div class="side-bar flex w-[23%] flex-col gap-3">
-        <div class="histogram-panel shrink-0 rounded-[12px]">
+        <div class="histogram-panel glass shrink-0 rounded-[12px]">
             <div class="histogram-container m-1.25">
                 <Histogram {sliders} {imagePayload} />
             </div>
         </div>
-        <div class="tools-panel flex rounded-[12px] flex-1 flex-col">
+        <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
             <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 {#if isDarkroom}
@@ -898,7 +898,7 @@
                 </div>
             </div>
         </div>
-        <div class="side-panel-footer flex relative justify-center items-center h-12 rounded-[12px] shrink-0" bind:this={footerEl}>
+        <div class="side-panel-footer glass flex relative justify-center items-center h-12 rounded-[12px] shrink-0" bind:this={footerEl}>
             {#if exportMenuOpen}
                 <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
             {/if}
@@ -988,15 +988,61 @@
         pointer-events: auto;
     }
 
+    /* ===== Glass panels =====
+       The material itself lives in styles/glass.css, shared with the title
+       bar's chips; each panel opts in with `class="glass"` in the markup. Only
+       the drop shadow and the lighting angle change with panel size, so those
+       are all that is left here. */
+
+    /* small panels — the shadow colour is near-black rather than #1f1f1f, which
+       was only a hair darker than the #262626 backdrop and so read as nothing */
+    .histogram-panel,
+    .side-panel-footer {
+        box-shadow:
+            6px 10px 22px -2px rgba(0, 0, 0, 0.47),
+            2px 3px 8px -1px rgba(0, 0, 0, 0.34),
+            inset 16px 21px 50px -38px rgba(255, 255, 255, 0.16);
+    }
+
+    /* the export settings menu opens upward, out of the footer's own box */
+    .side-panel-footer {
+        overflow: visible;
+    }
+
+    /* large panel — only the one holding the sliders. Its inset highlight is
+       pulled right back: at full strength the smear across the top-left of a
+       680px-tall panel fought with the sliders sitting on top of it. */
+    .tools-panel {
+        --panel-angle: 146deg;
+        box-shadow:
+            10px 16px 38px -4px rgba(0, 0, 0, 0.51),
+            3px 5px 12px -2px rgba(0, 0, 0, 0.36),
+            inset 20px 30px 60px -42px rgba(255, 255, 255, 0.17);
+    }
+
+    /* The toolbar is a 42px strip, so the same rim reads twice as bright per
+       unit of width as it does on the wide panels. Its shadow is mirrored to
+       cast left, away from the canvas, and sits lighter than the right-hand
+       panels' since there is far less panel to lift.
+
+       Mirroring the shadow puts this panel's light source in the upper right,
+       where every other panel's is in the upper left, so both highlights have
+       to mirror with it or the strip ends up lit from two directions at once:
+       the rim gradient flips about the vertical axis (360 - 142) and the inset
+       smear moves to the top-right corner. */
     .toolbar {
+        --panel-angle: 218deg;
+        --rim-hi: 0.13;
+        --rim-mid: 0.07;
+        --rim-lo: 0.05;
+        --rim-end: 0.08;
+        box-shadow:
+            -6px 10px 22px -2px rgba(0, 0, 0, 0.33),
+            -2px 3px 8px -1px rgba(0, 0, 0, 0.24),
+            inset -16px 21px 50px -38px rgba(255, 255, 255, 0.16);
         min-width: 42px;
-        position: relative;
         z-index: 10;
         pointer-events: auto;
-        background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
-            var(--panelInnerShadow);
-        overflow: hidden;
     }
 
     .side-bar {
@@ -1010,19 +1056,8 @@
         overflow: hidden;
     }
 
-    .histogram-panel {
-        background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
-            var(--panelInnerShadow);
-        overflow: hidden;
-    }
-
     .tools-panel {
-        background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
-            var(--panelInnerShadow);
         min-height: 0; /* allows it to shrink below content size */
-        overflow: hidden;
     }
     .tools-panel::-webkit-scrollbar {
         display: none;
@@ -1051,6 +1086,28 @@
         scroll-snap-type: x mandatory;
         scrollbar-width: none;
         backface-visibility: hidden;
+
+        /* Side fades, mirroring the top/bottom ones on .controls-page. The mask
+           sits on the scroll frame rather than the content, so it stays pinned
+           to the panel's edges while the pages travel underneath it.
+
+           The ramps stop where the page's own side margins do — 16px (ml-4) and
+           12px (mr-3) — so a snapped page is untouched and only content in
+           transit passes through the gradient. */
+        mask-image: linear-gradient(
+            to right,
+            transparent 0,
+            black 16px,
+            black calc(100% - 12px),
+            transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+            to right,
+            transparent 0,
+            black 16px,
+            black calc(100% - 12px),
+            transparent 100%
+        );
     }
     .controls-pager.outgoing {
         z-index: 2;
@@ -1094,12 +1151,6 @@
 
     .sliders-separator {
         background: var(--color5);
-    }
-
-    .side-panel-footer {
-        background: var(--bg4);
-        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
-            var(--panelInnerShadow);
     }
 
     .page-dots-wrapper {

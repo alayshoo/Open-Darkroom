@@ -49,53 +49,93 @@
     });
 </script>
 
-<div class="titlebar h-8 fixed z-999 flex items-center justify-center">
-    <div data-tauri-drag-region class="drag fixed w-full h-8"></div>
-    <div class="icon flex absolute aspect-square h-5.5 -z-2">
-        <img src="favicon.png" alt= "Darkroom Icon" aria-label="Darkroom Icon">
+<!-- The only thing the bar paints. Every control sits directly on this
+     gradient, so it carries all of the legibility once an image is zoomed far
+     enough to spill up here. It ends exactly on the panel line (44px, matching
+     .app-shell's top inset) and is fully transparent there, so it never dims
+     the panels' top rim. -->
+<div class="titlebar-scrim"></div>
+
+<!-- The bar itself is a drag region and a positioning context, nothing more:
+     no fill, no border, no boxes around the controls. Without a bounding box
+     to sit in, everything here runs a size up from the panel controls below. -->
+<div class="titlebar flex items-center justify-center">
+    <div data-tauri-drag-region class="drag absolute inset-0"></div>
+
+    <!-- Leading group. Left edge on 12px, the same column the toolbar strip
+         below it occupies. The groups sit above the drag layer, so the gaps
+         between their elements and the icon opt back into dragging; Tauri
+         matches the attribute on the event target itself, so the buttons
+         inside are unaffected. -->
+    <div
+        data-tauri-drag-region
+        class="chrome chrome-leading flex items-center gap-2.5"
+    >
+        <img
+            data-tauri-drag-region
+            class="app-icon h-5.5 w-5.5"
+            src="favicon.png"
+            alt=""
+            aria-hidden="true"
+        />
+        <div class="menu-buttons flex gap-1">
+            <MenuButton
+                label="File"
+                items={[
+                    { label: "Open…", shortcut: "Ctrl+O", action: open },
+                    { separator: true },
+                    { label: "Export…", shortcut: "Ctrl+Shift+E" },
+                    { separator: true },
+                    { label: "Settings", shortcut: "Ctrl+," },
+                ]}
+            />
+            <MenuButton
+                label="Edit"
+                items={[
+                    { label: "Undo", shortcut: "Ctrl+Z", action: undo },
+                    { label: "Redo", shortcut: "Ctrl+Shift+Z", action: redo },
+                    { separator: true },
+                    { label: "Copy Adjustments", shortcut: "Ctrl+C" },
+                    { label: "Paste Adjustments", shortcut: "Ctrl+V" },
+                    { label: "Reset Adjustments" },
+                ]}
+            />
+            <MenuButton
+                label="Help"
+                items={[
+                    { label: "Documentation" },
+                    { label: "Keyboard Shortcuts", shortcut: "Ctrl+/" },
+                    { separator: true },
+                    { label: "Report a Bug…" },
+                    { label: "About Open Darkroom" },
+                ]}
+            />
+        </div>
     </div>
-    <div class="menu-buttons fixed flex gap-2">
-        <MenuButton
-            label="File"
-            items={[
-                { label: "Open…", shortcut: "Ctrl+O", action: open},
-                { separator: true },
-                { label: "Export…", shortcut: "Ctrl+Shift+E" },
-                { separator: true },
-                { label: "Settings", shortcut: "Ctrl+," },
-            ]}
-        />
-        <MenuButton
-            label="Edit"
-            items={[
-                { label: "Undo", shortcut: "Ctrl+Z", action: undo},
-                { label: "Redo", shortcut: "Ctrl+Shift+Z", action: redo},
-                { separator: true },
-                { label: "Copy Adjustments", shortcut: "Ctrl+C" },
-                { label: "Paste Adjustments", shortcut: "Ctrl+V" },
-                { label: "Reset Adjustments" },
-            ]}
-        />
-        <MenuButton
-            label="Help"
-            items={[
-                { label: "Documentation" },
-                { label: "Keyboard Shortcuts", shortcut: "Ctrl+/" },
-                { separator: true },
-                { label: "Report a Bug…" },
-                { label: "About Open Darkroom" },
-            ]}
-        />
-    </div>
-    <div class="window-controls fixed flex gap-1 items-center">
+
+    <!-- A text-shadow does the work the scrim can't when the pixels underneath
+         are bright. The fill on hover/focus only ever shows while editable. -->
+    <input
+        bind:value={title}
+        readonly={!editable}
+        class="window-title h-6.5 rounded-[6px] px-2.5 py-1 border-2 border-transparent"
+        style="pointer-events: {editable ? 'auto' : 'none'}"
+    />
+
+    <!-- Trailing group. The buttons' hover fills end on 12px, matching the
+         side bar's right edge. -->
+    <div
+        data-tauri-drag-region
+        class="chrome chrome-trailing flex items-center gap-0.5"
+    >
         <button
-            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
             onclick={() => appWindow.minimize()}
             title="Minimize"
         >
             <svg
-                width="16"
-                height="1.4"
+                width="18"
+                height="1.6"
                 viewBox="0 0 12 2"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -107,15 +147,15 @@
             </svg>
         </button>
         <button
-            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
             onclick={handleToggleMaximize}
             title={isMaximized ? "Restore" : "Maximize"}
         >
             {#if isMaximized}
                 <!-- Restore icon: overlapping squares -->
                 <svg
-                    width="18"
-                    height="18"
+                    width="20"
+                    height="20"
                     viewBox="0 0 24 24"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
@@ -128,8 +168,8 @@
             {:else}
                 <!-- Maximize icon: single square -->
                 <svg
-                    width="15"
-                    height="15"
+                    width="17"
+                    height="17"
                     viewBox="0 0 24 24"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
@@ -148,13 +188,13 @@
             {/if}
         </button>
         <button
-            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
             onclick={() => appWindow.close()}
             title="Close"
         >
             <svg
-                width="18"
-                height="18"
+                width="20"
+                height="20"
                 viewBox="0 0 24 24"
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -166,42 +206,76 @@
             </svg>
         </button>
     </div>
-    <input
-        bind:value={title}
-        readonly={!editable}
-        class="window-title h-5.5 rounded-[6px] px-2 py-1 border-2 border-transparent"
-        class:z-2={editable}
-        class:z-0={!editable}
-        style="pointer-events: {editable ? 'auto' : 'none'}"
-    />
 </div>
 
 <style>
-    .titlebar {
+    .titlebar-scrim {
+        position: fixed;
         top: 0;
         left: 0;
         right: 0;
+        height: 44px;
+        /* Stronger than it needs to be over the #262626 backdrop, where it is
+           all but invisible; this is sized for a blown-out sky sitting under
+           the controls. The midpoint is pushed past halfway so the band stays
+           dense across the controls themselves and does the fading below
+           them, rather than thinning out where the glyphs are. */
+        background: linear-gradient(
+            to bottom,
+            rgba(0, 0, 0, 0.55),
+            rgba(0, 0, 0, 0.34) 55%,
+            rgba(0, 0, 0, 0)
+        );
+        pointer-events: none;
+        /* Above .app-shell (z-index 1) so it covers image overflow, below the
+           bar itself. */
+        z-index: 998;
+    }
 
-        background: black;
+    .titlebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 38px;
+        z-index: 999;
 
         font-family: "Figtree", sans-serif;
         font-size: 16px;
+
+        /* Only the drag layer and the two control groups take the pointer; the
+           rest of the band is inert. */
+        pointer-events: none;
     }
 
-    .icon {
-        left: 5px;
+    .drag {
+        pointer-events: auto;
     }
 
-    .titlebar > .menu-buttons {
-        top: 3px;
-        left: 36px;
+    /* 28px controls centred in the 38px band, so they end on 33px and clear
+       the panel line at 44px by 11px — near enough the 12px rhythm the panels
+       keep between themselves. */
+    .chrome {
+        position: absolute;
+        top: 5px;
+        pointer-events: auto;
     }
 
-    .titlebar > .window-controls {
-        top: 3px;
-        right: 3px;
+    .chrome-leading {
+        left: 12px;
     }
-    .window-controls button {
+
+    .chrome-trailing {
+        right: 12px;
+    }
+
+    .app-icon {
+        /* The artwork is its own silhouette; a plain shadow separates it from
+           bright pixels the way the text-shadows do for everything else. */
+        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+    }
+
+    .chrome-trailing button {
         background: transparent;
         color: var(--color2);
         transition:
@@ -209,22 +283,41 @@
             background 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
-    .window-controls button svg path,
-    .window-controls button svg rect {
-        transition: fill 0.5s ease, stroke 0.35s ease;
+    .chrome-trailing button svg {
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
     }
-    .window-controls button:hover {
-        background: var(--bg3);
+    .chrome-trailing button svg path,
+    .chrome-trailing button svg rect {
+        transition:
+            fill 0.2s ease,
+            stroke 0.2s ease;
+    }
+    /* The fill alone was near-invisible against the scrim, so the hover also
+       takes the glyph from --color2 up to --color1. Both ends stay on the
+       palette, so darkroom mode brightens to red rather than to grey. CSS
+       beats the fill/stroke presentation attributes on the SVGs. */
+    .chrome-trailing button:hover {
+        background: var(--bg5);
+    }
+    .chrome-trailing button:hover svg path {
+        fill: var(--color1);
+    }
+    .chrome-trailing button:hover svg rect {
+        stroke: var(--color1);
     }
 
     .window-title {
-        font-size: 14px;
+        font-size: 15px;
         color: var(--color1);
         background: transparent;
         outline: none;
 
         text-align: center;
         pointer-events: auto;
+        /* Carries its own legibility where the scrim runs out. */
+        text-shadow:
+            0 1px 3px rgba(0, 0, 0, 0.75),
+            0 0 10px rgba(0, 0, 0, 0.45);
         transition:
             color 0.5s ease,
             border-color 0.2s cubic-bezier(0.2, 0, 0, 1),
@@ -233,21 +326,19 @@
             background 0.2s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .window-title:hover {
-        background-color: var(--bg2);
+    .window-title:hover,
+    .window-title:focus {
+        background: var(--bg3);
     }
 
     .window-title:focus {
-        height: 20px;
-        background-color: var(--bg2);
+        height: 24px;
         border-radius: 8px;
-        /* or whatever color you prefer */
     }
 
     /* Change text selection color */
     .window-title::selection {
-        background: var(--bg5); 
-        color: var(--color1); 
+        background: var(--bg5);
+        color: var(--color1);
     }
-
 </style>
