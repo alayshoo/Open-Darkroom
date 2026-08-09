@@ -253,19 +253,19 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <TitleBar {undo} {redo} open={handleOpenImage}></TitleBar>
-<div class="container">
+<div class="app-shell flex absolute flex-row gap-3">
     <div class="toolbar"></div>
-    <div class="image-panel">
-        <div class="preview-container">
+    <div class="image-panel flex items-center justify-center rounded-[6px] flex-1">
+        <div class="preview-container flex items-center justify-center w-[calc(100%-72px)] h-[calc(100%-72px)] rounded-[8px] m-9">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
     </div>
-    <div class="side-bar">
-        <div class="side-panel">
-            <div class="histogram-container">
+    <div class="side-bar flex w-[23%] flex-col gap-3">
+        <div class="side-panel flex rounded-[12px] flex-1 flex-col">
+            <div class="histogram-container m-1.25">
                 <Histogram {sliders} {imagePayload} />
             </div>
-            <div class="quick-actions">
+            <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-1.5">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 {#if isDarkroom}
                     <div transition:slide={{ axis: 'x', duration: 250 }}>
@@ -273,11 +273,11 @@
                     </div>
                 {/if}
             </div>
-            <div class="controls-section" class:dimmed={exportMenuOpen}>
-                <div class="controls-pager-wrapper">
+            <div class="controls-section flex relative flex-1 flex-col" class:dimmed={exportMenuOpen}>
+                <div class="controls-pager-wrapper relative flex-1">
                     {#if !isDarkroom}
                         <div
-                            class="controls-pager"
+                            class="controls-pager absolute flex z-1"
                             class:outgoing={outgoingPager === "normal"}
                             bind:this={pagerElNormal}
                             onscroll={handleNormalPagerScroll}
@@ -289,8 +289,8 @@
                         >
                             <!-- Sharpness Panel -->
                             <div class="controls-page">
-                                <div class="slider-section">
-                                    <span class="section-title">Sharpness</span>
+                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                    <span class="section-title pb-1.5">Sharpness</span>
                                     <SingleValSliderGroup
                                         bind:value={sliders.exposure}
                                         name="Clarity"
@@ -325,14 +325,15 @@
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
-                                <div class="slider-section">
-                                    <span class="section-title"
+                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                    <span class="section-title pb-1.5"
                                         >Unsharp Mask</span
                                     >
                                     <div
-                                        style="display:flex; width: 100%; aspect-ratio: 1.3 / 1; background: black; border-radius: 6px;"
+                                        class="flex w-full aspect-[1.3/1] rounded-[6px]"
+                                        style="background: black;"
                                     ></div>
-                                    <div class="sliders-separator"></div>
+                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.exposure}
                                         name="Amount"
@@ -400,16 +401,16 @@
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
-                                <div style="display: flex; height:30px;"></div>
+                                <div class="flex h-7.5"></div>
                             </div>
                             <!-- Light & Color Panel -->
                             <div class="controls-page">
                                 {#if isRgb}
                                     <div
-                                        class="slider-section"
+                                        class="slider-section flex flex-col mt-4 ml-4 mr-3"
                                         transition:slide={{ duration: 200 }}
                                     >
-                                        <span class="section-title"
+                                        <span class="section-title pb-1.5"
                                             >White Balance</span
                                         >
                                         <SingleValSliderGroup
@@ -455,8 +456,8 @@
                                         ></SingleValSliderGroup>
                                     </div>
                                 {/if}
-                                <div class="slider-section">
-                                    <span class="section-title">
+                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                    <span class="section-title pb-1.5">
                                         {isRgb ? "Light & Colour" : "Light"}
                                     </span>
                                     <SingleValSliderGroup
@@ -519,7 +520,7 @@
                                             transition:slide={{ duration: 200 }}
                                         >
                                             <div
-                                                class="sliders-separator"
+                                                class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"
                                             ></div>
                                             <SingleValSliderGroup
                                                 bind:value={sliders.vibrance}
@@ -561,7 +562,7 @@
                                             ></SingleValSliderGroup>
                                         </div>
                                     {/if}
-                                    <div class="sliders-separator"></div>
+                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.highlights}
                                         defaultValue={0}
@@ -644,16 +645,17 @@
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
-                                <div style="display: flex; height:30px;"></div>
+                                <div class="flex h-7.5"></div>
                             </div>
                             <!-- Curves Panel -->
                             <div class="controls-page">
-                                <div class="slider-section">
-                                    <span class="section-title">Curves</span>
+                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                    <span class="section-title pb-1.5">Curves</span>
                                     <div
-                                        style="display:flex; width: 100%; aspect-ratio: 1 / 1; background: black; border-radius: 6px;"
+                                        class="flex w-full aspect-square rounded-[6px]"
+                                        style="background: black;"
                                     ></div>
-                                    <div class="sliders-separator"></div>
+                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.highlights}
                                         defaultValue={0}
@@ -735,13 +737,13 @@
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
-                                <div style="display: flex; height:30px;"></div>
+                                <div class="flex h-7.5"></div>
                             </div>
                             <!-- HSL Panel -->
                             {#if isRgb}
                                 <div class="controls-page">
-                                    <div class="slider-section">
-                                        <span class="section-title">HSL</span>
+                                    <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                        <span class="section-title pb-1.5">HSL</span>
                                         <SingleValSliderGroup
                                             bind:value={sliders.hue}
                                             defaultValue={0}
@@ -799,16 +801,16 @@
                                                     newValue: newVal,
                                                 })}
                                         ></SingleValSliderGroup>
-                                        <div class="sliders-separator"></div>
+                                        <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     </div>
                                 </div>
-                                <div style="display: flex; height:30px;"></div>
+                                <div class="flex h-7.5"></div>
                             {/if}
                         </div>
                     {/if}
                     {#if isDarkroom}
                         <div
-                            class="controls-pager"
+                            class="controls-pager absolute flex z-1"
                             class:outgoing={outgoingPager === "darkroom"}
                             bind:this={pagerElDarkroom}
                             onscroll={handleDarkroomPagerScroll}
@@ -819,7 +821,7 @@
                             transition:blur={{ duration: 500, amount: 30 }}
                         >
                             <div class="controls-page">
-                                <div class="slider-section">
+                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <TripleValSliderHistGroup
                                         name="Red Input"
                                         bind:valueA={sliders.redBlackPoint}
@@ -883,24 +885,24 @@
                                         outerColor={"#000000"}
                                     ></DoubleValSliderGroup>
                                 </div>
-                                <div style="display: flex; height:30px;"></div>
+                                <div class="flex h-7.5"></div>
                             </div>
                         </div>
                     {/if}
                 </div>
             </div>
         </div>
-        <div class="side-panel-footer" bind:this={footerEl}>
+        <div class="side-panel-footer flex relative justify-center items-center h-12 rounded-[12px] shrink-0" bind:this={footerEl}>
             {#if exportMenuOpen}
                 <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
             {/if}
-            <div style="position:absolute; left: 10px;">
+            <div class="absolute" style="left: 10px;">
                 <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>
             </div>
-            <div class="page-dots-wrapper">
+            <div class="page-dots-wrapper relative flex justify-center items-center">
                 {#if !isDarkroom}
                     <div
-                        class="page-dots"
+                        class="page-dots absolute z-1 flex justify-center items-center gap-3"
                         class:outgoing={outgoingDots === "normal"}
                         onoutrostart={() => (outgoingDots = "normal")}
                         onoutroend={() => (outgoingDots = null)}
@@ -908,7 +910,7 @@
                     >
                         {#each Array(isRgb ? 4 : 3) as _, i}
                             <button
-                                class="dot"
+                                class="dot size-1.5 rounded-full border-0 cursor-pointer p-0"
                                 class:active={activePageNormal === i}
                                 onclick={() => scrollToPage(i)}
                                 aria-label="Go to page {i + 1}"
@@ -921,21 +923,21 @@
                 {/if}
                 {#if isDarkroom}
                     <div
-                        class="page-dots"
+                        class="page-dots absolute z-1 flex justify-center items-center gap-3"
                         class:outgoing={outgoingDots === "darkroom"}
                         onoutrostart={() => (outgoingDots = "darkroom")}
                         onoutroend={() => (outgoingDots = null)}
                         transition:blur={{ duration: 500, amount: 30 }}
                     >
                         <button
-                            class="dot active"
+                            class="dot active size-1.5 rounded-full border-0 cursor-pointer p-0"
                             aria-label="Darkroom page"
                             aria-current="step"
                         ></button>
                     </div>
                 {/if}
             </div>
-            <div style="position: absolute; right: 10px;">
+            <div class="absolute" style="right: 10px;">
                 <ModeToggle bind:isDarkroom onModeToggle={handleModeToggle}
                 ></ModeToggle>
             </div>
@@ -946,11 +948,7 @@
 <ExportModal visible={showExportModal}></ExportModal>
 
 <style>
-    .container {
-        display: flex;
-        flex-direction: row;
-        gap: 12px;
-        position: absolute;
+    .app-shell {
         top: 48px;
         bottom: 12px;
         left: 12px;
@@ -963,48 +961,22 @@
 
     .image-panel {
         background: #262626;
-        flex: 1;
-        border-radius: 6px;
         overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         min-width: 0;
         min-height: 0;
     }
 
     .preview-container {
-        margin: 36px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: calc(100% - 72px);
-        height: calc(100% - 72px);
         max-width: calc(100% - 72px);
         max-height: calc(100% - 72px);
         overflow: hidden;
     }
 
     .side-bar {
-        display: flex;
-        flex-direction: column;
-        width: 23%;
-        gap: 12px;
         min-width: 300px;
     }
 
-    .histogram-container {
-        margin: 5px;
-    }
-
     .quick-actions {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        margin-left: 12px;
-        margin-top: 6px;
         overflow: hidden;
     }
 
@@ -1012,10 +984,6 @@
         background: var(--bg4);
         box-shadow: inset 0 0 var(--panelInnerShadowSpread)
             var(--panelInnerShadow);
-        flex: 1;
-        border-radius: 12px;
-        display: flex;
-        flex-direction: column;
         min-height: 0; /* allows it to shrink below content size */
         overflow: hidden;
     }
@@ -1025,11 +993,7 @@
 
     .controls-section {
         min-height: 0;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
         overflow: hidden;
-        position: relative;
         transition: opacity 0.2s ease;
     }
 
@@ -1039,21 +1003,16 @@
     }
 
     .controls-pager-wrapper {
-        position: relative;
-        flex: 1;
         min-height: 0;
         overflow: hidden;
     }
 
     .controls-pager {
-        position: absolute;
         inset: 0;
-        display: flex;
         overflow-x: auto;
         overflow-y: hidden;
         scroll-snap-type: x mandatory;
         scrollbar-width: none;
-        z-index: 1;
         backface-visibility: hidden;
     }
     .controls-pager.outgoing {
@@ -1089,76 +1048,39 @@
         display: none;
     }
 
-    .slider-section {
-        display: flex;
-        flex-direction: column;
-        margin-top: 16px;
-        margin-left: 16px;
-        margin-right: 12px;
-    }
-
     .section-title {
         font-family: "Figtree", sans-serif;
         font-size: 18px;
         font-weight: 600;
         color: var(--color1);
-        padding-bottom: 6px;
     }
 
     .sliders-separator {
-        height: 2px;
-        border-radius: 1px;
-        margin-top: 12px;
-        margin-bottom: 8px;
-        margin-right: 6px;
         background: var(--color5);
     }
 
     .side-panel-footer {
-        display: flex;
-        position: relative;
-        flex-shrink: 0;
-        justify-content: center;
-        align-items: center;
-        height: 48px;
-        border-radius: 12px;
         background: var(--bg4);
         box-shadow: inset 0 0 var(--panelInnerShadowSpread)
             var(--panelInnerShadow);
     }
 
     .page-dots-wrapper {
-        position: relative;
-        display: flex;
-        justify-content: center;
-        align-items: center;
         min-width: 72px; /* fit up to 4 dots + gaps */
     }
 
     .page-dots-wrapper .page-dots {
-        position: absolute;
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        z-index: 1;
         backface-visibility: hidden;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 12px;
     }
     .page-dots-wrapper .page-dots.outgoing {
         z-index: 2;
     }
 
     .dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        border: none;
-        padding: 0;
         background: var(--color5);
-        cursor: pointer;
         transition:
             background 0.2s,
             transform 0.2s;

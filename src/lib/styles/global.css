@@ -1,80 +1,89 @@
 /* styles/global.css */
-:root {
-    font-family: 'Figtree', sans-serif;
-    font-size: 16px;
-    line-height: 24px;
-    font-weight: 400;
 
-    color: #B3B3B3;
-    background-color: #000;
+/*
+ * Wrapped in Tailwind's `base` layer so utility classes take precedence over
+ * these element-level defaults. Unlayered CSS always beats layered CSS
+ * regardless of specificity, so without this a `cursor-pointer` in markup would
+ * silently lose to the `a, button` cursor rule below. Component-scoped Svelte
+ * styles remain unlayered and still override everything here.
+ */
+@layer base {
+    :root {
+        font-family: 'Figtree', sans-serif;
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 400;
 
-    font-synthesis: none;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    -webkit-text-size-adjust: 100%;
+        color: #B3B3B3;
+        background-color: #000;
 
-    /* Prevent text selection */
-    user-select: none;
-    -webkit-user-select: none;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        -webkit-text-size-adjust: 100%;
 
-    /* Disable the context menu on mobile/touch */
-    -webkit-touch-callout: none;
+        /* Prevent text selection */
+        user-select: none;
+        -webkit-user-select: none;
 
-    /*change cursor to custom icon*/
-    cursor: url("/cursors/cursor32x32.png") 7 7, auto;
+        /* Disable the context menu on mobile/touch */
+        -webkit-touch-callout: none;
+
+        /*change cursor to custom icon*/
+        cursor: url("/cursors/cursor32x32.png") 7 7, auto;
+    }
+
+    /*Prevent scrolling on trackpads*/
+    html,
+    body {
+        overflow: hidden;
+        overscroll-behavior: none;
+        margin: 0px;
+    }
+
+    /* Re-enable selection for inputs and specifically marked content */
+    input,
+    textarea,
+    [contenteditable="true"],
+    .selectable {
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: auto;
+    }
+
+    /* Text selection cursor (I-beam) */
+    input,
+    textarea,
+    [contenteditable="true"],
+    .selectable {
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: url("/cursors/cursor32x32.png") 7 7, text;
+    }
+
+    /* Pointer cursor (for links, buttons) */
+    a,
+    button,
+    [role="button"] {
+        cursor: url("/cursors/cursor32x32.png") 7 7, pointer;
+    }
+
+    /* Grab cursor (for draggable elements) */
+    .draggable {
+        cursor: url("/cursors/cursor32x32.png") 7 7, grab;
+    }
+
+    .draggable:active {
+        cursor: url("/cursors/cursor32x32.png") 7 7, grabbing;
+    }
+
+    /* Resize cursors */
+    .resize-horizontal {
+        cursor: url("/cursors/cursor32x32.png") 7 7, ew-resize;
+    }
+
+    .resize-vertical {
+        cursor: url("/cursors/cursor32x32.png") 7 7, ns-resize;
+    }
 }
-
-/*Prevent scrolling on trackpads*/
-html,
-body {
-    overflow: hidden;
-    overscroll-behavior: none;
-    margin: 0px;
-}
-
-/* Re-enable selection for inputs and specifically marked content */
-input,
-textarea,
-[contenteditable="true"],
-.selectable {
-    user-select: text;
-    -webkit-user-select: text;
-    cursor: auto;
-}
-
-/* Text selection cursor (I-beam) */
-input,
-textarea,
-[contenteditable="true"],
-.selectable {
-    user-select: text;
-    -webkit-user-select: text;
-    cursor: url("/cursors/cursor32x32.png") 7 7, text;
-}
-
-/* Pointer cursor (for links, buttons) */
-a,
-button,
-[role="button"] {
-    cursor: url("/cursors/cursor32x32.png") 7 7, pointer;
-}
-
-/* Grab cursor (for draggable elements) */
-.draggable {
-    cursor: url("/cursors/cursor32x32.png") 7 7, grab;
-}
-
-.draggable:active {
-    cursor: url("/cursors/cursor32x32.png") 7 7, grabbing;
-}
-
-/* Resize cursors */
-.resize-horizontal {
-    cursor: url("/cursors/cursor32x32.png") 7 7, ew-resize;
-}
-
-.resize-vertical {
-    cursor: url("/cursors/cursor32x32.png") 7 7, ns-resize;
-}
-

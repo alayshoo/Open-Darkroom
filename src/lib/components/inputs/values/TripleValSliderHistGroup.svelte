@@ -110,15 +110,15 @@
     }
 </script>
 
-<div class="container">
-    <div class="text-container">
+<div class="flex flex-col mb-1">
+    <div class="text-container flex flex-row items-baseline justify-between w-full">
         <span class="name">{name}</span>
     </div>
     <StaticHistogram 
         data={histogramData}
         channel={histogramChannel}
     ></StaticHistogram>
-    <div class="slider-container">
+    <div class="slider-container pr-1.5">
         <TripleValSlider
             bind:valueA
             bind:valueB
@@ -138,8 +138,8 @@
             onInteractionStart={handleSliderInteractionStart}
         ></TripleValSlider>
     </div>
-    <div class="vals-container">
-        <div class="val-wrap val-wrap--left">
+    <div class="vals-container flex flex-row w-[102%] -ml-1.5">
+        <div class="val-wrap val-wrap--left flex-1 flex justify-start">
             <PrecisionVal
                 bind:value={valueA}
                 defaultValue={defaultValueA}
@@ -153,7 +153,7 @@
                 onInteractionStart={handleInteractionStartA}
             ></PrecisionVal>
         </div>
-        <div class="val-wrap val-wrap--center">
+        <div class="val-wrap val-wrap--center flex-1 flex justify-center">
             <PrecisionVal
                 bind:value={valueB}
                 defaultValue={defaultValueB}
@@ -167,7 +167,7 @@
                 onInteractionStart={handleInteractionStartB}
             ></PrecisionVal>
         </div>
-        <div class="val-wrap val-wrap--right">
+        <div class="val-wrap val-wrap--right flex-1 flex justify-end">
             <PrecisionVal
                 bind:value={valueC}
                 defaultValue={defaultValueC}
@@ -185,20 +185,6 @@
 </div>
 
 <style>
-    .container {
-        display: flex;
-        flex-direction: column;
-        margin-bottom: 4px;
-    }
-
-    .text-container {
-        display: flex;
-        flex-direction: row;
-        align-items: baseline;
-        justify-content: space-between;
-        width: 100%;
-    }
-
     .name {
         font-family: "Figtree", sans-serif;
         color: var(--color2);
@@ -206,29 +192,4 @@
         font-weight: 400;
     }
 
-    .vals-container {
-        display: flex;
-        flex-direction: row;
-        width: 102%;
-        margin-left: -6px;
-    }
-
-    .val-wrap {
-        flex: 1;
-        display: flex;
-    }
-
-    .val-wrap--left {
-        justify-content: flex-start;
-    }
-    .val-wrap--center {
-        justify-content: center;
-    }
-    .val-wrap--right {
-        justify-content: flex-end;
-    }
-
-    .slider-container {
-        padding-right: 6px;
-    }
 </style>

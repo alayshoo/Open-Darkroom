@@ -163,7 +163,7 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <div
-    class="value-input"
+    class="value-input relative inline-flex items-center p-[0.35rem] border-0 rounded-[4px] cursor-ew-resize"
     class:editing={isEditing}
     role="textbox"
     tabindex="0"
@@ -184,20 +184,13 @@
         type="text"
         onblur={handleBlur}
         onkeydown={handleKeydownInput}
-        class="value value-input-box"
-        class:hidden={!isEditing}
+        class="value value-input-box absolute border-0 p-[0.35rem] pt-[0.3rem]"
+        class:is-hidden={!isEditing}
     />
 </div>
 
 <style>
     .value-input {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        padding: 0.35rem 0.35rem;
-        border: none;
-        border-radius: 4px;
-        cursor: ew-resize;
         user-select: none;
 
         background: transparent;
@@ -232,26 +225,22 @@
     }
 
     input.value {
-        border: none;
         outline: none;
         background: transparent;
         font: inherit;
         color: var(--color1s);
-        padding: 0;
         min-width: 0;
-        position: absolute;
         inset: 0;
-        padding: 0.35rem;
-        padding-top: 0.3rem;
     }
 
     .invisible {
         visibility: hidden;
     }
 
-    .hidden {
+    /* Named `is-hidden`, not `hidden`, to avoid Tailwind's `.hidden`
+       (display: none) also matching this element. */
+    .is-hidden {
         visibility: hidden;
-        position: absolute;
         pointer-events: none;
     }
 </style>

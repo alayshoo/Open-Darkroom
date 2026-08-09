@@ -14,7 +14,7 @@
 </script>
 
 <button
-	class="bg"
+	class="bg relative flex w-15 h-7 border-0 rounded-[10px] p-0"
 	onclick={toggle}
 	role="switch"
 	aria-checked={isInverted}
@@ -24,28 +24,20 @@
 		<circle cx="15" cy="14" r="6" fill="white" />
 		<circle cx="45" cy="14" r="6" fill="none" stroke="white" stroke-width="2" />
 	</svg>
-	<div class="toggle" class:toggle-active={isInverted}></div>
+	<div
+		class="toggle absolute w-7.5 h-7 rounded-[10px]"
+		class:toggle-active={isInverted}
+	></div>
 </button>
 
 <style>
 	.bg {
-		position: relative;
-		display: flex;
-		width: 60px;
-		height: 28px;
-		border: none;
-		border-radius: 10px;
 		background: var(--bg1);
-		padding: 0;
 	}
 
 	.toggle {
-		position: absolute;
 		top: 0;
 		left: 0;
-		width: 30px;
-		height: 28px;
-		border-radius: 10px;
 		box-sizing: border-box;
 		box-shadow: inset 0 0 3px 1px var(--color2);
 		transition: left 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), width 0.2s cubic-bezier(0.2, 0.0, 0, 1.0);

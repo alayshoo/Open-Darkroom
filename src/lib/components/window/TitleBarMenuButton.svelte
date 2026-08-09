@@ -70,10 +70,10 @@
     });
 </script>
 
-<div class="menu-button-wrapper">
+<div class="menu-button-wrapper relative">
     <button
         bind:this={buttonEl}
-        class="menu-button"
+        class="menu-button relative inline-flex justify-center items-center h-5.5 px-1.5 py-0 rounded-[6px] border-0 cursor-app"
         class:active={isOpen}
         onclick={toggle}
     >
@@ -81,18 +81,21 @@
     </button>
 
     {#if isOpen}
-        <div bind:this={menuEl} class="menu-dropdown">
+        <div
+            bind:this={menuEl}
+            class="menu-dropdown absolute p-1 rounded-[10px] border border-bg5 z-100 flex flex-col"
+        >
             {#each items as item}
                 {#if "separator" in item && item.separator}
-                    <div class="menu-separator"></div>
+                    <div class="menu-separator h-0.25 mx-2 my-1"></div>
                 {:else}
                     <button
-                        class="menu-item"
+                        class="menu-item flex items-center justify-between w-full h-7.5 px-2.5 py-0 border-0 rounded-[8px] cursor-app"
                         onclick={() => handleItemClick(item)}
                     >
-                        <span class="menu-item-label">{item.label}</span>
+                        <span class="menu-item-label flex-1">{item.label}</span>
                         {#if item.shortcut}
-                            <span class="menu-item-shortcut"
+                            <span class="menu-item-shortcut ml-6"
                                 >{item.shortcut}</span
                             >
                         {/if}
@@ -104,26 +107,11 @@
 </div>
 
 <style>
-    .menu-button-wrapper {
-        position: relative;
-    }
-
     .menu-button {
-        position: relative;
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        height: 22px;
-        padding: 0 6px;
-        border-radius: 6px;
-        border: none;
         background: transparent;
         color: var(--color2);
         font-family: "Figtree", sans-serif;
         font-size: 14px;
-        cursor:
-            url("/cursors/cursor32x32.png") 7 7,
-            auto;
         transition:
             background 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1);
@@ -136,18 +124,11 @@
 
     /* ── Dropdown ── */
     .menu-dropdown {
-        position: absolute;
         top: calc(100% + 6px);
         left: 0;
         min-width: 210px;
-        padding: 4px;
-        border-radius: 10px;
         background: var(--bg3);
-        border: 1px solid var(--bg5);
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-        z-index: 100;
-        display: flex;
-        flex-direction: column;
 
         animation: menuFadeIn 0.15s cubic-bezier(0.2, 0, 0, 1) forwards;
     }
@@ -165,22 +146,11 @@
 
     /* ── Menu items ── */
     .menu-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-        height: 30px;
-        padding: 0 10px;
-        border: none;
-        border-radius: 8px;
         background: transparent;
         color: var(--color2);
         font-family: "Figtree", sans-serif;
         font-size: 13px;
         text-align: left;
-        cursor:
-            url("/cursors/cursor32x32.png") 7 7,
-            auto;
         transition: background 0.12s ease;
     }
 
@@ -189,12 +159,7 @@
         color: var(--color1);
     }
 
-    .menu-item-label {
-        flex: 1;
-    }
-
     .menu-item-shortcut {
-        margin-left: 24px;
         font-size: 11px;
         opacity: 0.5;
         white-space: nowrap;
@@ -202,8 +167,6 @@
 
     /* ── Separator ── */
     .menu-separator {
-        height: 1px;
-        margin: 4px 8px;
         background: var(--bg5);
     }
 </style>

@@ -121,7 +121,7 @@
 </script>
 
 <div 
-    class="slider-container" 
+    class="slider-container relative h-5.5 justify-center"
     role="slider"
     aria-valuemin={min}
     aria-valuemax={max}
@@ -132,60 +132,42 @@
     onkeydown={handleKeyDown}
     ondblclick={handleDoubleClick}
 >
-    <div class="slider" style= " --color-start: {gradientStartColor}; --color-mid: {midColor}; --color-end: {gradientEndColor};">
-        <div class="left-bar" style="width: calc({bar_percentage}% - 12px);"></div>
-        <div class="right-bar" style="left: calc({bar_percentage}% + 12px);"></div>
+    <div class="slider absolute h-1 flex flex-row gap-6" style= " --color-start: {gradientStartColor}; --color-mid: {midColor}; --color-end: {gradientEndColor};">
+        <div class="left-bar absolute h-1 rounded-[1px]" style="width: calc({bar_percentage}% - 12px);"></div>
+        <div class="right-bar absolute h-1 rounded-[1px]" style="left: calc({bar_percentage}% + 12px);"></div>
     </div>
-    <div class="pointer" class:dragging={isDragging} style="left: calc({bar_percentage / 100} * (100% - 4px) + 2px)"></div>
+    <div class="pointer absolute w-1 h-4 rounded-[5px]" class:dragging={isDragging} style="left: calc({bar_percentage / 100} * (100% - 4px) + 2px)"></div>
     
 </div>
 
 <style>
     .slider-container {
-        position: relative;
-        height: 22px;
         user-select: none;
-        justify-content: center;
         filter: drop-shadow(0 0 12px #00000040);
     }
-  
+
     .slider {
-        position: absolute;
         top: 50%;
         left: 0;
         right: 0;
-        height: 4px;
-        display: flex;
-        flex-direction: row;
-        gap: 24px;
         background: transparent;
         background-size: 100% 100%;
         transform: translateY(-50%);
     }
-  
+
     .left-bar {
-        position: absolute;
         left: 0;
-        height: 4px;
-        border-radius: 1px;
         background: linear-gradient(to right, var(--color-start), var(--color-mid));
     }
 
     .right-bar {
-        position: absolute;
         right: 0;
-        height: 4px;
-        border-radius: 1px;
         background: linear-gradient(to right, var(--color-mid), var(--color-end));
     }
-  
+
     .pointer {
-        position: absolute;
         top: 50%;
-        width: 4px;
-        height: 16px;
         background: var(--color1);
-        border-radius: 5px;
         transform: translate(-50%, -50%);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         transition: width 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), height 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), background 0.6s cubic-bezier(0.2, 0.0, 0, 1.0);

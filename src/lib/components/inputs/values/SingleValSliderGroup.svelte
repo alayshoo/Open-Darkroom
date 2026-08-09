@@ -51,8 +51,8 @@
 
 </script>
 
-<div class="container">
-    <div class="text-container">
+<div class="flex flex-col -mt-0.75">
+    <div class="text-container flex flex-row items-baseline justify-between w-full -mb-1.5">
         <span class="name">{name}</span>
         <PrecisionVal
             bind:value
@@ -67,7 +67,7 @@
             onInteractionStart={handleInteractionStart}
         ></PrecisionVal>
     </div>
-    <div class="slider-container">
+    <div class="slider-container pr-1.5">
         <SingleValSlider
             bind:value
             defaultValue={defaultValue}
@@ -83,29 +83,10 @@
 </div>
 
 <style>
-    .container {
-        display: flex;
-        flex-direction: column;
-        margin-top: -3px;
-    }
-
-    .text-container {
-        display: flex;
-        flex-direction: row;
-        align-items: baseline;
-        justify-content: space-between;
-        width: 100%;
-        margin-bottom: -6px;
-    }
-
     .name {
         font-family: "Figtree", sans-serif;
         color: var(--color2);
         font-size: 12px;
         font-weight: 400;
-    }
-
-    .slider-container {
-        padding-right: 6px;
     }
 </style>

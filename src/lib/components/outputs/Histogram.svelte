@@ -248,16 +248,13 @@
     }
 </script>
 
-<canvas bind:this={canvas}></canvas>
+<canvas
+    class="w-full aspect-[2/1] rounded-b-[4px] rounded-t-[8px]"
+    bind:this={canvas}
+></canvas>
 
 <style>
     canvas {
-        width: 100%;
-        aspect-ratio: 2 / 1;
-        border-bottom-left-radius: 4px;
-        border-bottom-right-radius: 4px;
-        border-top-right-radius: 8px;
-        border-top-left-radius: 8px;
         background: var(--bg1);
     }
 </style>

@@ -31,12 +31,16 @@
     }
 </script>
 
-<div class="container">
-    <button class="export-button" onclick={handleExport} disabled={isExporting}>
+<div class="wrapper relative flex flex-row h-7 gap-0.25">
+    <button
+        class="export-button flex w-15.75 h-7 justify-center items-center border-0 rounded-l-[6px] rounded-r-[3px]"
+        onclick={handleExport}
+        disabled={isExporting}
+    >
         Export
     </button>
     <button
-        class="arrow-button"
+        class="arrow-button flex w-6.75 h-7 justify-center items-center border-0 cursor-pointer rounded-l-[3px] rounded-r-[6px]"
         class:open={menuOpen}
         onclick={toggleMenu}
         aria-label="Export settings"
@@ -52,32 +56,12 @@
 </div>
 
 <style>
-    .container {
-        position: relative;
-        display: flex;
-        flex-direction: row;
-        height: 28px;
-        gap: 1px;
-    }
-
     .export-button {
-        display: flex;
-        width: 63px;
-        height: 28px;
-        justify-content: center;
-        align-items: center;
-
         background: var(--bg2);
         color: var(--color2);
-        border: none;
 
         font-size: 16px;
         font-weight: 500;
-
-        border-top-left-radius: 6px;
-        border-bottom-left-radius: 6px;
-        border-top-right-radius: 3px;
-        border-bottom-right-radius: 3px;
 
         transition: opacity 0.2s ease;
     }
@@ -87,25 +71,11 @@
     }
 
     .arrow-button {
-        display: flex;
-        width: 27px;
-        height: 28px;
-        justify-content: center;
-        align-items: center;
-
         background: var(--bg2);
         color: var(--color2);
 
-        border: none;
-        cursor: pointer;
-
         font-size: 16px;
         font-weight: 500;
-
-        border-top-left-radius: 3px;
-        border-bottom-left-radius: 3px;
-        border-top-right-radius: 6px;
-        border-bottom-right-radius: 6px;
 
         transition:
             color 0.2s ease,

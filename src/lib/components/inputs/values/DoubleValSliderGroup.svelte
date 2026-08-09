@@ -74,11 +74,11 @@
     }
 </script>
 
-<div class="container">
-    <div class="text-container">
+<div class="flex flex-col -mt-0.75">
+    <div class="text-container flex flex-row items-baseline justify-between w-full">
         <span class="name">{name}</span>
     </div>
-    <div class="slider-container">
+    <div class="slider-container pr-1.5">
         <DoubleValSlider
             bind:valueA
             bind:valueB
@@ -93,8 +93,8 @@
             onInteractionStart={handleSliderInteractionStart}
         ></DoubleValSlider>
     </div>
-    <div class="vals-container">
-        <div class="val-wrap val-wrap--left">
+    <div class="vals-container flex flex-row w-[102%] -ml-1.5">
+        <div class="val-wrap val-wrap--left flex-1 flex justify-start">
             <PrecisionVal
                 bind:value={valueA}
                 defaultValue={defaultValueA}
@@ -108,7 +108,7 @@
                 onInteractionStart={handleInteractionStartA}
             ></PrecisionVal>
         </div>
-        <div class="val-wrap val-wrap--right">
+        <div class="val-wrap val-wrap--right flex-1 flex justify-end">
             <PrecisionVal
                 bind:value={valueB}
                 defaultValue={defaultValueB}
@@ -126,20 +126,6 @@
 </div>
 
 <style>
-    .container {
-        display: flex;
-        flex-direction: column;
-        margin-top: -3px;
-    }
-
-    .text-container {
-        display: flex;
-        flex-direction: row;
-        align-items: baseline;
-        justify-content: space-between;
-        width: 100%;
-    }
-
     .name {
         font-family: "Figtree", sans-serif;
         color: var(--color2);
@@ -147,26 +133,4 @@
         font-weight: 400;
     }
 
-    .vals-container {
-        display: flex;
-        flex-direction: row;
-        width: 102%;
-        margin-left: -6px;
-    }
-
-    .val-wrap {
-        flex: 1;
-        display: flex;
-    }
-
-    .val-wrap--left {
-        justify-content: flex-start;
-    }
-    .val-wrap--right {
-        justify-content: flex-end;
-    }
-
-    .slider-container {
-        padding-right: 6px;
-    }
 </style>

@@ -15,30 +15,30 @@
     });
 </script>
 
-<div class="menu" role="menu" aria-label="Export settings">
-    <div class="format-row">
+<div class="menu absolute flex flex-col gap-3 h-40.5 rounded-[8px] p-3 mr-4 ml-2 z-100" role="menu" aria-label="Export settings">
+    <div class="format-row flex flex-row gap-2">
         <button
-            class="pill"
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
             class:active={settings.format === "webp"}
             onclick={() => (settings.format = "webp")}
         >
             WebP
         </button>
         <button
-            class="pill"
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
             class:active={settings.format === "png"}
             onclick={() => (settings.format = "png")}
         >
             PNG
         </button>
         <button
-            class="pill"
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
             class:active={settings.format === "jpeg"}
             onclick={() => (settings.format = "jpeg")}
             >JPEG
         </button>
         <button
-            class="pill"
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
             class:active={settings.format === "tiff"}
             onclick={() => (settings.format = "tiff")}
         >
@@ -49,8 +49,8 @@
     <div></div>
 
     {#if settings.format === "png"}
-        <div class="setting">
-            <div class="setting-header">
+        <div class="setting flex flex-col gap-1.5">
+            <div class="setting-header flex justify-between items-baseline">
                 <span class="setting-label">Compression</span>
                 <span class="setting-value">{settings.pngCompression}</span>
             </div>
@@ -61,7 +61,7 @@
                 defaultValue={6}
                 bind:value={settings.pngCompression}
                 ></SingleValSliderInt>
-            <div class="setting-hints">
+            <div class="setting-hints flex justify-between -mt-2">
                 <span>Fast</span>
                 <span>Small</span>
             </div>
@@ -69,8 +69,8 @@
     {/if}
 
     {#if settings.format === "jpeg"}
-        <div class="setting">
-            <div class="setting-header">
+        <div class="setting flex flex-col gap-1.5">
+            <div class="setting-header flex justify-between items-baseline">
                 <span class="setting-label">Quality</span>
                 <span class="setting-value">{settings.jpegQuality}</span>
             </div>
@@ -83,7 +83,7 @@
                 stepAnimation={false}
                 springy={false}
                 ></SingleValSliderInt>
-            <div class="setting-hints">
+            <div class="setting-hints flex justify-between -mt-2">
                 <span>Low</span>
                 <span>High</span>
             </div>
@@ -91,17 +91,17 @@
     {/if}
 
     {#if settings.format === "webp"}
-        <div class="setting">
-            <div class="format-row">
+        <div class="setting flex flex-col gap-1.5">
+            <div class="format-row flex flex-row gap-2">
                 <button
-                    class="pill"
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
                     class:active={settings.webpLossless}
                     onclick={() => (settings.webpLossless = true)}
                 >
                     Lossless
                 </button>
                 <button
-                    class="pill"
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
                     class:active={!settings.webpLossless}
                     onclick={() => (settings.webpLossless = false)}
                 >
@@ -110,8 +110,8 @@
             </div>
         </div>
         {#if settings.webpLossless}
-            <div class="setting">
-                <div class="setting-header">
+            <div class="setting flex flex-col gap-1.5">
+                <div class="setting-header flex justify-between items-baseline">
                     <span class="setting-label">Compression</span>
                     <span class="setting-value">{settings.webpCompression}</span>
                 </div>
@@ -122,14 +122,14 @@
                     defaultValue={6}
                     bind:value={settings.webpCompression}
                     ></SingleValSliderInt>
-                <div class="setting-hints">
+                <div class="setting-hints flex justify-between -mt-2">
                     <span>Fast</span>
                     <span>Small</span>
                 </div>
             </div>
         {:else}
-            <div class="setting">
-                <div class="setting-header">
+            <div class="setting flex flex-col gap-1.5">
+                <div class="setting-header flex justify-between items-baseline">
                     <span class="setting-label">Quality</span>
                     <span class="setting-value">{settings.webpQuality}</span>
                 </div>
@@ -142,7 +142,7 @@
                     stepAnimation={false}
                     springy={false}
                     ></SingleValSliderInt>
-                <div class="setting-hints">
+                <div class="setting-hints flex justify-between -mt-2">
                     <span>Low</span>
                     <span>High</span>
                 </div>
@@ -151,17 +151,17 @@
     {/if}
 
     {#if settings.format === "tiff"}
-        <div class="setting">
-            <div class="format-row">
+        <div class="setting flex flex-col gap-1.5">
+            <div class="format-row flex flex-row gap-2">
                 <button
-                    class="pill"
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
                     class:active={settings.tiffBitDepth === 8}
                     onclick={() => (settings.tiffBitDepth = 8)}
                 >
                     {isRgb ? "RGB" : "Greyscale"} 8-bit
                 </button>
                 <button
-                    class="pill"
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
                     class:active={settings.tiffBitDepth === 16}
                     onclick={() => (settings.tiffBitDepth = 16)}
                 >
@@ -174,27 +174,13 @@
 
 <style>
     .menu {
-        position: absolute;
         bottom: calc(100% + 8px);
         left: 0;
         right: 0;
 
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-
-        height: 162px;
-
         background: var(--bg3);
-        border-radius: 8px;
-        padding: 12px;
-
-        margin-right: 16px;
-        margin-left: 8px;
 
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-
-        z-index: 100;
 
         animation: menuFadeIn 0.15s cubic-bezier(0.2, 0, 0, 1) forwards;
     }
@@ -210,17 +196,7 @@
         }
     }
 
-    .format-row {
-        display: flex;
-        flex-direction: row;
-        gap: 8px;
-    }
-
     .pill {
-        flex: 1;
-        padding: 5px 0;
-        border: none;
-        border-radius: 6px;
         font-size: 13px;
 
         background: var(--bg4);
@@ -240,18 +216,6 @@
         color: var(--bg1);
     }
 
-    .setting {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-
-    .setting-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-    }
-
     .setting-label {
         font-size: 12px;
         font-weight: 500;
@@ -266,9 +230,6 @@
     }
 
     .setting-hints {
-        display: flex;
-        justify-content: space-between;
-        margin-top: -8px;
         font-size: 10px;
         color: var(--color3);
     }

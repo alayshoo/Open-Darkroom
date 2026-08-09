@@ -137,19 +137,19 @@
     The outer div is a presentation container (no ARIA role).
     Each pointer is an individually focusable ARIA slider.
 -->
-<div class="slider-container">
-    <div class="slider" aria-hidden="true">
+<div class="slider-container relative h-5.5">
+    <div class="slider absolute h-1" aria-hidden="true">
         <!-- Segment: left of A -->
-        <div class="segment" style="left:0; width:calc({pctA}% - 12px); background:{outerColor};"></div>
+        <div class="segment absolute h-1 rounded-[1px]" style="left:0; width:calc({pctA}% - 12px); background:{outerColor};"></div>
         <!-- Segment: A to B -->
-        <div class="segment" style="left:calc({pctA}% + 12px); width:calc({pctB - pctA}% - 24px); background:{innerColor};"></div>
+        <div class="segment absolute h-1 rounded-[1px]" style="left:calc({pctA}% + 12px); width:calc({pctB - pctA}% - 24px); background:{innerColor};"></div>
         <!-- Segment: right of B -->
-        <div class="segment" style="left:calc({pctB}% + 12px); right:0; background:{outerColor};"></div>
+        <div class="segment absolute h-1 rounded-[1px]" style="left:calc({pctB}% + 12px); right:0; background:{outerColor};"></div>
     </div>
 
     <!-- Pointer A (left extreme) -->
     <div
-        class="pointer"
+        class="pointer absolute w-1 h-4 rounded-[5px]"
         class:dragging={dragging === "A"}
         style="left:{pointerPos(pctA)}"
         role="slider"
@@ -166,7 +166,7 @@
 
     <!-- Pointer B (right extreme) -->
     <div
-        class="pointer"
+        class="pointer absolute w-1 h-4 rounded-[5px]"
         class:dragging={dragging === "B"}
         style="left:{pointerPos(pctB)}"
         role="slider"
@@ -184,35 +184,24 @@
 
 <style>
     .slider-container {
-        position: relative;
-        height: 22px;
         user-select: none;
         filter: drop-shadow(0 0 12px #00000040);
     }
 
     .slider {
-        position: absolute;
         top: 50%;
         left: 0;
         right: 0;
-        height: 4px;
         transform: translateY(-50%);
     }
 
     .segment {
-        position: absolute;
-        height: 4px;
-        border-radius: 1px;
         min-width: 0;
     }
 
     .pointer {
-        position: absolute;
         top: 50%;
-        width: 4px;
-        height: 16px;
         background: var(--color1);
-        border-radius: 5px;
         transform: translate(-50%, -50%);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         transition:

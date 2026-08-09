@@ -49,12 +49,12 @@
     });
 </script>
 
-<div class="titlebar">
-    <div data-tauri-drag-region class="drag"></div>
-    <div class="icon">
+<div class="titlebar h-8 fixed z-999 flex items-center justify-center">
+    <div data-tauri-drag-region class="drag fixed w-full h-8"></div>
+    <div class="icon flex absolute aspect-square h-5.5 -z-2">
         <img src="favicon.png" alt= "Darkroom Icon" aria-label="Darkroom Icon">
     </div>
-    <div class="menu-buttons">
+    <div class="menu-buttons fixed flex gap-2">
         <MenuButton
             label="File"
             items={[
@@ -87,8 +87,12 @@
             ]}
         />
     </div>
-    <div class="window-controls">
-        <button onclick={() => appWindow.minimize()} title="Minimize">
+    <div class="window-controls fixed flex gap-1 items-center">
+        <button
+            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
+            onclick={() => appWindow.minimize()}
+            title="Minimize"
+        >
             <svg
                 width="16"
                 height="1.4"
@@ -103,6 +107,7 @@
             </svg>
         </button>
         <button
+            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
             onclick={handleToggleMaximize}
             title={isMaximized ? "Restore" : "Maximize"}
         >
@@ -142,7 +147,11 @@
                 </svg>
             {/if}
         </button>
-        <button onclick={() => appWindow.close()} title="Close">
+        <button
+            class="inline-flex justify-center items-center h-5.5 w-8 rounded-[6px] z-2 border-0 cursor-app"
+            onclick={() => appWindow.close()}
+            title="Close"
+        >
             <svg
                 width="18"
                 height="18"
@@ -160,72 +169,39 @@
     <input
         bind:value={title}
         readonly={!editable}
-        class="window-title"
-        style="z-index: {editable ? 2 : 0}; pointer-events: {editable
-            ? 'auto'
-            : 'none'}"
+        class="window-title h-5.5 rounded-[6px] px-2 py-1 border-2 border-transparent"
+        class:z-2={editable}
+        class:z-0={!editable}
+        style="pointer-events: {editable ? 'auto' : 'none'}"
     />
 </div>
 
 <style>
     .titlebar {
-        height: 32px;
-        position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        z-index: 999;
-
-        display: flex;
-        align-items: center;
-        justify-content: center;
 
         background: black;
 
         font-family: "Figtree", sans-serif;
         font-size: 16px;
     }
-    
-    .icon {
-        display: flex;
-        position: absolute;
-        aspect-ratio: 1 / 1;
-        height: 22px;
-        left: 5px;
-        z-index: -2;
-    }
 
-    .titlebar button {
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        height: 22px;
-        border-radius: 6px;
-        z-index: 2;
-        border: none;
-        cursor:
-            url("/cursors/cursor32x32.png") 7 7,
-            auto;
+    .icon {
+        left: 5px;
     }
 
     .titlebar > .menu-buttons {
-        position: fixed;
         top: 3px;
         left: 36px;
-        display: flex;
-        gap: 8px;
     }
 
     .titlebar > .window-controls {
-        position: fixed;
         top: 3px;
         right: 3px;
-        display: flex;
-        gap: 4px;
-        align-items: center;
     }
     .window-controls button {
-        width: 32px;
         background: transparent;
         color: var(--color2);
         transition:
@@ -242,14 +218,9 @@
     }
 
     .window-title {
-        height: 22px;
-        border-radius: 6px;
-        padding: 0.25rem 0.5rem;
-
         font-size: 14px;
         color: var(--color1);
         background: transparent;
-        border: 2px solid transparent;
         outline: none;
 
         text-align: center;
@@ -279,9 +250,4 @@
         color: var(--color1); 
     }
 
-    .drag {
-        position: fixed;
-        width: 100%;
-        height: 32px;
-    }
 </style>

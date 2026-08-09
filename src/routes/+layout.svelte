@@ -1,5 +1,6 @@
 <!-- routes/+layout.svelte -->
 <script lang="ts">
+  import "$lib/styles/tailwind.css";
   import "$lib/styles/global.css";
   import "$lib/styles/palette.css";
 
@@ -35,16 +36,14 @@
   {@render children()}
 {:else}
   <TitleBar></TitleBar>
-  <div class= "init-div"><p>Initializing GPU…</p></div>
+  <div class="init-div flex w-full items-center justify-center">
+    <p>Initializing GPU…</p>
+  </div>
 {/if}
 
 
 <style>
   .init-div {
-    display: flex;
-    width: 100%;
     min-height: 100vh;
-    align-items: center;
-    justify-content: center;
   }
 </style>
