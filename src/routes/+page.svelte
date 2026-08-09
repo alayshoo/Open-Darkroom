@@ -253,19 +253,25 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <TitleBar {undo} {redo} open={handleOpenImage}></TitleBar>
+<!-- Full-window canvas background. The image is centred on .canvas-slot but is
+     free to spill out of it in every direction once zoomed; the toolbar and
+     side bar sit on a higher layer and simply paint over the overflow. -->
+<div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="toolbar"></div>
-    <div class="image-panel flex items-center justify-center rounded-[6px] flex-1">
-        <div class="preview-container flex items-center justify-center w-[calc(100%-72px)] h-[calc(100%-72px)] rounded-[8px] m-9">
+    <div class="toolbar shrink-0 w-8 rounded-[8px]"></div>
+    <div class="canvas-slot relative flex-1">
+        <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
     </div>
     <div class="side-bar flex w-[23%] flex-col gap-3">
-        <div class="side-panel flex rounded-[12px] flex-1 flex-col">
+        <div class="histogram-panel shrink-0 rounded-[12px]">
             <div class="histogram-container m-1.25">
                 <Histogram {sliders} {imagePayload} />
             </div>
-            <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-1.5">
+        </div>
+        <div class="tools-panel flex rounded-[12px] flex-1 flex-col">
+            <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 {#if isDarkroom}
                     <div transition:slide={{ axis: 'x', duration: 250 }}>
@@ -948,46 +954,77 @@
 <ExportModal visible={showExportModal}></ExportModal>
 
 <style>
+    .canvas-backdrop {
+        position: fixed;
+        inset: 0;
+        background: #262626;
+        z-index: 0;
+    }
+
     .app-shell {
-        top: 48px;
+        /* 32px title bar + the same 12px inset used on the other three sides */
+        top: 44px;
         bottom: 12px;
         left: 12px;
         right: 12px;
+        z-index: 1;
+        /* The shell only reserves space; clicks fall through to whatever layer
+           each child opts back into. */
+        pointer-events: none;
+    }
+
+    /* The flex row still defines where the image is centred, but the slot never
+       clips: overflow spills across the whole window and is occluded by the
+       panels, which are painted later and lifted above it. */
+    .canvas-slot {
+        min-width: 0;
+        min-height: 0;
+        overflow: visible;
+    }
+
+    .canvas-center {
+        inset: 36px; /* breathing room so a fitted image never touches the panels */
+        overflow: visible;
+        pointer-events: auto;
     }
 
     .toolbar {
-        min-width: 28px;
-    }
-
-    .image-panel {
-        background: #262626;
-        overflow: hidden;
-        min-width: 0;
-        min-height: 0;
-    }
-
-    .preview-container {
-        max-width: calc(100% - 72px);
-        max-height: calc(100% - 72px);
+        min-width: 42px;
+        position: relative;
+        z-index: 10;
+        pointer-events: auto;
+        background: var(--bg4);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
+            var(--panelInnerShadow);
         overflow: hidden;
     }
 
     .side-bar {
         min-width: 300px;
+        position: relative;
+        z-index: 10;
+        pointer-events: auto;
     }
 
     .quick-actions {
         overflow: hidden;
     }
 
-    .side-panel {
+    .histogram-panel {
+        background: var(--bg4);
+        box-shadow: inset 0 0 var(--panelInnerShadowSpread)
+            var(--panelInnerShadow);
+        overflow: hidden;
+    }
+
+    .tools-panel {
         background: var(--bg4);
         box-shadow: inset 0 0 var(--panelInnerShadowSpread)
             var(--panelInnerShadow);
         min-height: 0; /* allows it to shrink below content size */
         overflow: hidden;
     }
-    .side-panel::-webkit-scrollbar {
+    .tools-panel::-webkit-scrollbar {
         display: none;
     } /* Chrome/Safari/Edge */
 

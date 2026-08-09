@@ -249,7 +249,7 @@
 </script>
 
 <canvas
-    class="w-full aspect-[2/1] rounded-b-[4px] rounded-t-[8px]"
+    class="w-full aspect-[2/1] rounded-[7px]"
     bind:this={canvas}
 ></canvas>
 
