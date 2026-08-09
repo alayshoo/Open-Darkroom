@@ -3,6 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { slide, blur } from "svelte/transition";
+    import { cubicInOut } from "svelte/easing";
     import { tick } from "svelte";
 
     import TitleBar from "$lib/components/window/TitleBar.svelte";
@@ -42,8 +43,26 @@
     // ===== Control Modes =====
 
     let isDarkroom = $state(false);
-    let outgoingPager: "normal" | "darkroom" | null = $state(null);
     let outgoingDots: "normal" | "darkroom" | null = $state(null);
+
+    /* The two control pagers sit side by side on an imaginary strip: the normal
+       one to the left, the darkroom one to the right. Each always enters from
+       and leaves towards its own side, so switching modes reads as the strip
+       sliding across rather than as two pagers swapping places. The travel is
+       expressed in percent of the pager's own width, which `fly` cannot do
+       since it only takes pixels, and .controls-pager-wrapper clips whatever
+       hangs outside. */
+    function slideX(
+        node: Element,
+        { direction = 1, duration = 500 }: { direction?: number; duration?: number } = {},
+    ) {
+        return {
+            duration,
+            easing: cubicInOut,
+            css: (_t: number, u: number) =>
+                `transform: translateX(${direction * u * 100}%);`,
+        };
+    }
 
     $effect(() => {
         document.documentElement.dataset.theme = isDarkroom ? "darkroom" : "";
@@ -284,14 +303,11 @@
                     {#if !isDarkroom}
                         <div
                             class="controls-pager absolute flex z-1"
-                            class:outgoing={outgoingPager === "normal"}
                             bind:this={pagerElNormal}
                             onscroll={handleNormalPagerScroll}
                             onwheel={handlePagerWheel}
                             onwheelcapture={handlePagerWheel}
-                            onoutrostart={() => (outgoingPager = "normal")}
-                            onoutroend={() => (outgoingPager = null)}
-                            transition:blur={{ duration: 500, amount: 30 }}
+                            transition:slideX={{ direction: -1 }}
                         >
                             <!-- Sharpness Panel -->
                             <div class="controls-page">
@@ -817,14 +833,11 @@
                     {#if isDarkroom}
                         <div
                             class="controls-pager absolute flex z-1"
-                            class:outgoing={outgoingPager === "darkroom"}
                             bind:this={pagerElDarkroom}
                             onscroll={handleDarkroomPagerScroll}
                             onwheel={handlePagerWheel}
                             onwheelcapture={handlePagerWheel}
-                            onoutrostart={() => (outgoingPager = "darkroom")}
-                            onoutroend={() => (outgoingPager = null)}
-                            transition:blur={{ duration: 500, amount: 30 }}
+                            transition:slideX={{ direction: 1 }}
                         >
                             <div class="controls-page">
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
@@ -912,7 +925,7 @@
                         class:outgoing={outgoingDots === "normal"}
                         onoutrostart={() => (outgoingDots = "normal")}
                         onoutroend={() => (outgoingDots = null)}
-                        transition:blur={{ duration: 500, amount: 30 }}
+                        transition:blur={{ duration: 500, amount: 8 }}
                     >
                         {#each Array(isRgb ? 4 : 3) as _, i}
                             <button
@@ -933,7 +946,7 @@
                         class:outgoing={outgoingDots === "darkroom"}
                         onoutrostart={() => (outgoingDots = "darkroom")}
                         onoutroend={() => (outgoingDots = null)}
-                        transition:blur={{ duration: 500, amount: 30 }}
+                        transition:blur={{ duration: 500, amount: 8 }}
                     >
                         <button
                             class="dot active size-1.5 rounded-full border-0 cursor-pointer p-0"
@@ -1108,9 +1121,6 @@
             black calc(100% - 12px),
             transparent 100%
         );
-    }
-    .controls-pager.outgoing {
-        z-index: 2;
     }
     .controls-pager::-webkit-scrollbar {
         display: none;
