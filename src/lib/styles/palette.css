@@ -12,6 +12,39 @@
     --color5: #303030;
     --panelInnerShadow: #000000aa;
     --panelInnerShadowSpread: 4px;
+
+    /* The field the image is centred on. Stays neutral grey in both themes —
+       it is what the eye reads colour against, so a cast here would throw off
+       every judgement made on the image. Darkroom only takes it down a step. */
+    --canvasBackdrop: #262626;
+
+    /*
+     * The glass material (styles/glass.css). Only --glassTint varies with the
+     * theme, and it varies in alpha alone: darkroom darkens the panels, it
+     * does not colour them.
+     *
+     * That is a performance contract as much as a look. A theme swap animates
+     * exactly one thing on a glass surface — background-color, which
+     * composites against an already-blurred layer for nothing. Everything else
+     * here is theme-invariant on purpose:
+     *
+     *   --glassRim         feeds the rim and gloss *gradients*. background-image
+     *                      is not animatable, so varying this would mean either
+     *                      a visible snap or a per-frame gradient repaint on
+     *                      every panel (each rim is a masked offscreen surface).
+     *   --glassSaturate    feed backdrop-filter. A backdrop-filter whose
+     *   --glassBrightness  computed value never changes is blurred once and
+     *                      cached forever; the moment it varies with the theme,
+     *                      every frame of the swap re-runs a 16px blur across
+     *                      every panel at once.
+     *
+     * The panels' inset highlight smears in +page.svelte are pinned to a
+     * literal white for the same reason — see the note there.
+     */
+    --glassRim: #ffffff;
+    --glassTint: rgba(0, 0, 0, 0.3);
+    --glassSaturate: 80%;
+    --glassBrightness: 108%;
 }
 
 :root[data-theme="darkroom"] {
@@ -26,9 +59,19 @@
     --color3: #FF9999;
     --panelInnerShadow: #430000ff;
     --panelInnerShadowSpread: 16px;
+
+    --canvasBackdrop: #1f1f1f;
+
+    /* Alpha only — same black, more of it. Over the darkroom backdrop this
+       takes the panels from about #171717 to #0c0c0c. The red in this mode
+       comes from the text and the --bg* fills; the glass just gets out of
+       the way. */
+    --glassTint: rgba(0, 0, 0, 0.65);
 }
 
-/* Smooth theme transition (matches pager blur duration) */
+/* Smooth theme transition (matches pager blur duration).
+   Nothing here varies backdrop-filter or any gradient, so this list stays
+   confined to properties that composite cheaply. */
 :root,
 :root * {
     transition:

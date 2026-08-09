@@ -169,7 +169,9 @@
         font-family: "Figtree", sans-serif;
         font-size: 13px;
         text-align: left;
-        transition: background 0.12s ease;
+        transition:
+            background 0.12s ease,
+            color 0.5s ease;
     }
 
     .menu-item:hover {

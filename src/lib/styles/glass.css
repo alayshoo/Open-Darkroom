@@ -25,13 +25,14 @@
         --rim-mid: 0.1;
         --rim-lo: 0.07;
         --rim-end: 0.12;
-        --panel-tint: rgba(0, 0, 0, 0.3);
+        --panel-tint: var(--glassTint);
         --panel-blur: 16px;
 
         background: var(--panel-noise), var(--panel-tint);
-        backdrop-filter: blur(var(--panel-blur)) saturate(80%) brightness(108%);
-        -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(80%)
-            brightness(108%);
+        backdrop-filter: blur(var(--panel-blur)) saturate(var(--glassSaturate))
+            brightness(var(--glassBrightness));
+        -webkit-backdrop-filter: blur(var(--panel-blur))
+            saturate(var(--glassSaturate)) brightness(var(--glassBrightness));
         position: relative;
         isolation: isolate;
         overflow: hidden;
@@ -44,12 +45,35 @@
         inset: 0;
         border-radius: inherit;
         padding: 1px;
+        /* The four stops are alphas applied to --glassRim; color-mix is how a
+           bare number gets to be an alpha on a colour held in a variable.
+           --glassRim is theme-invariant, so these resolve once at style time
+           and cost nothing per frame — it is a single knob for every highlight
+           in the app, not an animation hook. */
         background: linear-gradient(
             var(--panel-angle),
-            rgba(255, 255, 255, var(--rim-hi)),
-            rgba(255, 255, 255, var(--rim-mid)) 30%,
-            rgba(255, 255, 255, var(--rim-lo)) 62%,
-            rgba(255, 255, 255, var(--rim-end))
+            color-mix(
+                in srgb,
+                var(--glassRim) calc(var(--rim-hi) * 100%),
+                transparent
+            ),
+            color-mix(
+                    in srgb,
+                    var(--glassRim) calc(var(--rim-mid) * 100%),
+                    transparent
+                )
+                30%,
+            color-mix(
+                    in srgb,
+                    var(--glassRim) calc(var(--rim-lo) * 100%),
+                    transparent
+                )
+                62%,
+            color-mix(
+                in srgb,
+                var(--glassRim) calc(var(--rim-end) * 100%),
+                transparent
+            )
         );
         -webkit-mask:
             linear-gradient(#000 0 0) content-box,
@@ -73,9 +97,9 @@
         border-radius: inherit;
         background: linear-gradient(
             var(--panel-angle),
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0) 33%,
-            rgba(255, 255, 255, 0) 55%
+            color-mix(in srgb, var(--glassRim) 0%, transparent) 0%,
+            color-mix(in srgb, var(--glassRim) 0%, transparent) 33%,
+            color-mix(in srgb, var(--glassRim) 0%, transparent) 55%
         );
         pointer-events: none;
         z-index: 5;

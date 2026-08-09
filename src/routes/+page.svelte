@@ -2,7 +2,7 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
-    import { slide, blur } from "svelte/transition";
+    import { slide } from "svelte/transition";
     import { cubicInOut } from "svelte/easing";
     import { tick } from "svelte";
 
@@ -43,7 +43,6 @@
     // ===== Control Modes =====
 
     let isDarkroom = $state(false);
-    let outgoingDots: "normal" | "darkroom" | null = $state(null);
 
     /* The two control pagers sit side by side on an imaginary strip: the normal
        one to the left, the darkroom one to the right. Each always enters from
@@ -68,8 +67,28 @@
         document.documentElement.dataset.theme = isDarkroom ? "darkroom" : "";
     });
 
+    /* Both pager masks are suspended while the strip is in transit. Each
+       mask-image forces its own offscreen render surface — .controls-page's
+       inside .controls-pager's — and the whole stack lives inside a
+       backdrop-filtered panel, so translating it means recompositing two
+       nested masked surfaces per frame and re-blurring the panel behind them.
+       Dropping the masks for the duration leaves a plain transform.
+
+       Must match slideX's duration; the strip is only mid-flight for that
+       long, and re-masking early would pop the fades back mid-slide. */
+    const MODE_SLIDE_MS = 500;
+    let isModeSliding = $state(false);
+    let modeSlideTimer: ReturnType<typeof setTimeout> | null = null;
+
     function handleModeToggle() {
         isDarkroom = !isDarkroom;
+
+        isModeSliding = true;
+        if (modeSlideTimer) clearTimeout(modeSlideTimer);
+        modeSlideTimer = setTimeout(() => {
+            isModeSliding = false;
+            modeSlideTimer = null;
+        }, MODE_SLIDE_MS);
     }
 
     // ===== Control Pages =====
@@ -292,14 +311,20 @@
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
             <div class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5">
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
-                {#if isDarkroom}
-                    <div transition:slide={{ axis: 'x', duration: 250 }}>
-                        <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
-                    </div>
-                {/if}
+                <!-- Stays mounted and fades. It is the last item in a
+                     left-aligned row, so holding its width costs no layout —
+                     and a plain opacity crossfade never touches layout at all,
+                     where `slide` animated width/padding/margin and reflowed
+                     the row on every frame. -->
+                <div class="invert-slot" class:shown={isDarkroom}>
+                    <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
+                </div>
             </div>
             <div class="controls-section flex relative flex-1 flex-col" class:dimmed={exportMenuOpen}>
-                <div class="controls-pager-wrapper relative flex-1">
+                <div
+                    class="controls-pager-wrapper relative flex-1"
+                    class:sliding={isModeSliding}
+                >
                     {#if !isDarkroom}
                         <div
                             class="controls-pager absolute flex z-1"
@@ -919,13 +944,16 @@
                 <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>
             </div>
             <div class="page-dots-wrapper relative flex justify-center items-center">
-                {#if !isDarkroom}
+                    <!-- Both groups stay mounted and crossfade on opacity
+                         alone. `blur` animated filter: blur(), and these sit
+                         inside .side-panel-footer — a backdrop-filter surface,
+                         which had to re-run its own blur on every frame the
+                         dots were damaging it. Staying mounted also retires
+                         the outgoing/z-index bookkeeping the outro needed. -->
                     <div
                         class="page-dots absolute z-1 flex justify-center items-center gap-3"
-                        class:outgoing={outgoingDots === "normal"}
-                        onoutrostart={() => (outgoingDots = "normal")}
-                        onoutroend={() => (outgoingDots = null)}
-                        transition:blur={{ duration: 500, amount: 8 }}
+                        class:shown={!isDarkroom}
+                        aria-hidden={isDarkroom}
                     >
                         {#each Array(isRgb ? 4 : 3) as _, i}
                             <button
@@ -939,14 +967,10 @@
                             ></button>
                         {/each}
                     </div>
-                {/if}
-                {#if isDarkroom}
                     <div
                         class="page-dots absolute z-1 flex justify-center items-center gap-3"
-                        class:outgoing={outgoingDots === "darkroom"}
-                        onoutrostart={() => (outgoingDots = "darkroom")}
-                        onoutroend={() => (outgoingDots = null)}
-                        transition:blur={{ duration: 500, amount: 8 }}
+                        class:shown={isDarkroom}
+                        aria-hidden={!isDarkroom}
                     >
                         <button
                             class="dot active size-1.5 rounded-full border-0 cursor-pointer p-0"
@@ -954,7 +978,6 @@
                             aria-current="step"
                         ></button>
                     </div>
-                {/if}
             </div>
             <div class="absolute" style="right: 10px;">
                 <ModeToggle bind:isDarkroom onModeToggle={handleModeToggle}
@@ -970,7 +993,8 @@
     .canvas-backdrop {
         position: fixed;
         inset: 0;
-        background: #262626;
+        background: var(--canvasBackdrop);
+        transition: background-color 0.12s ease;
         z-index: 0;
     }
 
@@ -1008,7 +1032,7 @@
        are all that is left here. */
 
     /* small panels — the shadow colour is near-black rather than #1f1f1f, which
-       was only a hair darker than the #262626 backdrop and so read as nothing */
+       was only a hair darker than the #262626 backdrop and so read as nothing
     .histogram-panel,
     .side-panel-footer {
         box-shadow:
@@ -1092,6 +1116,17 @@
         overflow: hidden;
     }
 
+    /* Held only for the length of the slide (see MODE_SLIDE_MS). Both masks go
+       at once: each is an offscreen surface, and they are nested, so leaving
+       either in place keeps the compositing chain the suspension exists to
+       break. The wrapper's own `overflow: hidden` still clips the strip, so
+       what is lost is the softness of the cut, not the cut itself. */
+    .controls-pager-wrapper.sliding .controls-pager,
+    .controls-pager-wrapper.sliding .controls-page {
+        mask-image: none;
+        -webkit-mask-image: none;
+    }
+
     .controls-pager {
         inset: 0;
         overflow-x: auto;
@@ -1167,14 +1202,43 @@
         min-width: 72px; /* fit up to 4 dots + gaps */
     }
 
+    /* Both groups are always mounted, stacked on the same centre, and only
+       opacity separates them. `visibility` steps at the far end of the fade so
+       the hidden group stops taking clicks and leaves the tab order, without
+       being display:none — which would kill the transition outright. */
     .page-dots-wrapper .page-dots {
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
         backface-visibility: hidden;
+        opacity: 0;
+        visibility: hidden;
+        transition:
+            opacity 0.5s ease,
+            visibility 0s linear 0.5s;
     }
-    .page-dots-wrapper .page-dots.outgoing {
-        z-index: 2;
+    .page-dots-wrapper .page-dots.shown {
+        opacity: 1;
+        visibility: visible;
+        transition:
+            opacity 0.5s ease,
+            visibility 0s linear 0s;
+    }
+
+    /* Same crossfade, quicker, matching the 250ms the slide used to take. */
+    .invert-slot {
+        opacity: 0;
+        visibility: hidden;
+        transition:
+            opacity 0.25s ease,
+            visibility 0s linear 0.25s;
+    }
+    .invert-slot.shown {
+        opacity: 1;
+        visibility: visible;
+        transition:
+            opacity 0.25s ease,
+            visibility 0s linear 0s;
     }
 
     .dot {

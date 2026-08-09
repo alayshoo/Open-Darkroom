@@ -63,7 +63,16 @@
         font-size: 16px;
         font-weight: 500;
 
-        transition: opacity 0.2s ease;
+        /* The theme's 0.5s colour fade comes from a `:root *` rule in
+           palette.css, and this scoped declaration replaces it wholesale
+           rather than adding to it — so listing only `opacity` here left the
+           label snapping from grey to red. Anything that names a transition
+           has to re-state the two theme properties. Neither colour has a
+           hover state to stay quick for; only the disabled fade does. */
+        transition:
+            opacity 0.2s ease,
+            color 0.5s ease,
+            background-color 0.5s ease;
     }
 
     .export-button:disabled {
@@ -77,9 +86,11 @@
         font-size: 16px;
         font-weight: 500;
 
+        /* Matches the label it is welded to — at 0.2s the arrow finished its
+           swing to red while "Export" was still mid-fade beside it. */
         transition:
-            color 0.2s ease,
-            background 0.2s ease;
+            color 0.5s ease,
+            background-color 0.5s ease;
     }
 
     .arrow-button svg {

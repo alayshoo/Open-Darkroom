@@ -201,7 +201,12 @@
         font-size: 14px;
         line-height: 100%;
 
-        transition: background 0.2s cubic-bezier(0.2, 0, 0, 1);
+        /* Background stays quick — it is a hover fill. Colour has to be
+           re-stated at the theme's 0.5s, since this declaration replaces the
+           inherited one from palette.css rather than extending it. */
+        transition:
+            background 0.2s cubic-bezier(0.2, 0, 0, 1),
+            color 0.5s ease;
     }
 
     .value-input:hover {

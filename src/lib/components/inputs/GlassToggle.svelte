@@ -62,7 +62,7 @@
 		background: var(--bg1);
 		box-shadow:
 			inset 0 1px 2px rgba(0, 0, 0, 0.9),
-			inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+			inset 0 0 0 1px color-mix(in srgb, var(--glassRim) 4%, transparent);
 		transition: transform 0.12s ease;
 	}
 
@@ -77,7 +77,7 @@
 	   the tint and the rim carry the material on their own. */
 	.toggle {
 		--panel-angle: 137deg;
-		--panel-tint: rgba(255, 255, 255, 0.07);
+		--panel-tint: color-mix(in srgb, var(--glassRim) 7%, transparent);
 		--rim-hi: 0.5;
 		--rim-mid: 0.14;
 		--rim-lo: 0.05;
@@ -111,9 +111,9 @@
 	.toggle::after {
 		background: linear-gradient(
 			var(--panel-angle),
-			rgba(255, 255, 255, 0.3) 0%,
-			rgba(255, 255, 255, 0.1) 33%,
-			rgba(255, 255, 255, 0) 55%
+			color-mix(in srgb, var(--glassRim) 30%, transparent) 0%,
+			color-mix(in srgb, var(--glassRim) 10%, transparent) 33%,
+			color-mix(in srgb, var(--glassRim) 0%, transparent) 55%
 		);
 	}
 </style>
