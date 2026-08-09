@@ -396,6 +396,8 @@
                                         unit="%"
                                         min={0}
                                         max={300}
+                                        allowOverflow
+                                        hardMin={-100}
                                         decimalPlaces={0}
                                         dragStep={1}
                                         sliderStep={1}
@@ -413,7 +415,7 @@
                                         defaultValue={1}
                                         name="Radius"
                                         unit="px"
-                                        min={0.1}
+                                        min={0.5}
                                         max={10}
                                         decimalPlaces={2}
                                         dragStep={0.01}

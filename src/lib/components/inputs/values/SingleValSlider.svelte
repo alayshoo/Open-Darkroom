@@ -61,7 +61,9 @@
     const clampValue = (v: number) => Math.max(min, Math.min(max, v));
     const clampFraction = (f: number) => Math.max(0, Math.min(1, f));
 
-    let bar_percentage = $derived(valueToFraction(value) * 100);
+    // Pinned to the rails: a value past them leaves the head at the end of the
+    // track rather than off it. Only reachable when the group allows overflow.
+    let bar_percentage = $derived(clampFraction(valueToFraction(value)) * 100);
 
     let isDragging = $state(false)
     
@@ -157,8 +159,8 @@
 <div 
     class="slider-container relative h-5.5 justify-center"
     role="slider"
-    aria-valuemin={min}
-    aria-valuemax={max}
+    aria-valuemin={Math.min(min, value)}
+    aria-valuemax={Math.max(max, value)}
     aria-valuenow={value}
     aria-orientation="horizontal"
     tabindex="0"

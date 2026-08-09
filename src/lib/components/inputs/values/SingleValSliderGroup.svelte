@@ -10,6 +10,9 @@
         unit = "",
         min = 0,
         max = 100,
+        allowOverflow = false,
+        hardMin = undefined,
+        hardMax = undefined,
         decimalPlaces = 2,
         sliderStep = 1,
         dragStep = 0.01,
@@ -26,6 +29,9 @@
         unit?: string;
         min?: number;
         max?: number;
+        allowOverflow?: boolean;
+        hardMin?: number;
+        hardMax?: number;
         decimalPlaces?: number;
         sliderStep?: number;
         dragStep?: number;
@@ -36,6 +42,11 @@
         gradientEndColor?: string;
         onCommit?: (oldValue: number, newValue: number) => void;
     } = $props();
+
+    // `min`/`max` are the track rails. With overflow the typed and dragged
+    // number may run past them, stopping only at the hard limits.
+    const valueMin = $derived(allowOverflow ? (hardMin ?? -Infinity) : min);
+    const valueMax = $derived(allowOverflow ? (hardMax ?? Infinity) : max);
 
     let committedValue = $state(value);
     let interacting = $state(false);
@@ -61,8 +72,8 @@
         <PrecisionVal
             bind:value
             defaultValue={defaultValue}
-            min={min}
-            max={max}
+            min={valueMin}
+            max={valueMax}
             unit={unit}
             step={dragStep}
             keyboardStep={keyboardStep}
