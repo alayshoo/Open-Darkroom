@@ -1,4 +1,6 @@
 <script lang="ts">
+	import GlassToggle from "./GlassToggle.svelte";
+
 	let {
 		isRgb = $bindable(true),
 		onToggle,
@@ -13,41 +15,20 @@
 	}
 </script>
 
-<button
-	class="bg relative flex w-16 h-7 border-0 rounded-[10px] p-0"
+<!-- Reads inverted: the thumb travels when RGB is *off*. The active stop is
+     narrower because the RGB triad is 18px wide and the lone white circle
+     only 12px. -->
+<GlassToggle
+	checked={!isRgb}
+	label="Toggle between RGB and composite color mode"
+	width={54}
+	thumb={{ off: { x: 3, w: 24 }, on: { x: 27, w: 24 } }}
 	onclick={toggle}
-	role="switch"
-	aria-checked={isRgb}
-	aria-label="Toggle between RGB and composite color mode"
 >
 	<svg width="64" height="28">
-		<circle cx="17" cy="12" r="6" fill="#ff0000" style="mix-blend-mode: screen" />
-		<circle cx="14" cy="17" r="6" fill="#00ff00" style="mix-blend-mode: screen" />
-		<circle cx="20" cy="17" r="6" fill="#0000ff" style="mix-blend-mode: screen" />
-		<circle cx="49" cy="14" r="6" fill="white" />
+		<circle cx="15" cy="12" r="4" fill="#ff0000" style="mix-blend-mode: screen" />
+		<circle cx="13" cy="16" r="4" fill="#00ff00" style="mix-blend-mode: screen" />
+		<circle cx="17" cy="16" r="4" fill="#0000ff" style="mix-blend-mode: screen" />
+		<circle cx="39" cy="14" r="6" fill="white" />
 	</svg>
-	<div
-		class="toggle absolute w-8.75 h-7 rounded-[10px]"
-		class:toggle-active={!isRgb}
-	></div>
-</button>
-
-<style>
-	.bg {
-		background: var(--bg1);
-	}
-
-	.toggle {
-		top: 0;
-		left: 0;
-		box-sizing: border-box;
-		box-shadow: inset 0 0 3px 1px var(--color2);
-		transition: left 0.2s cubic-bezier(0.2, 0.0, 0, 1.0), width 0.2s cubic-bezier(0.2, 0.0, 0, 1.0);
-		pointer-events: none;
-	}
-
-	.toggle-active {
-		left: 34px;
-		width: 30px;
-	}
-</style>
+</GlassToggle>
