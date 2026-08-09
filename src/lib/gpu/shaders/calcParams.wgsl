@@ -29,7 +29,16 @@ struct Sliders {
     saturation:        f32,   // 84
     vibrance:          f32,   // 88
     hue:               f32,   // 92
-}                             // total: 96 bytes
+    // Sharpness. Carried through the uniform so the three CPU packers stay one
+    // struct, but no step of the develop chain reads them yet.
+    clarity:              f32,   //  96
+    texture:              f32,   // 100
+    usm_amount:           f32,   // 104
+    usm_radius:           f32,   // 108
+    usm_luma_threshold:   f32,   // 112
+    usm_detail_threshold: f32,   // 116
+}                                // 120 bytes of fields; a uniform struct is
+                                 // 16-aligned, so the binding is 128.
 
 struct Params {
     dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes

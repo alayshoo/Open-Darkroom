@@ -4,7 +4,9 @@ import type { Sliders } from "$lib/types/imgParameters";
 import type { GPUSession } from "$lib/types/gpuTypes";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
 
-export const SLIDERS_BUFFER_SIZE = 96;   // 24 f32 fields × 4 bytes
+// 30 f32 fields = 120 bytes, rounded up to the 16-byte alignment a uniform
+// struct is bound at.
+export const SLIDERS_BUFFER_SIZE = 128;
 export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
 
 export interface CalcParamsPipeline {
@@ -121,5 +123,11 @@ function slidersToArray(s: Sliders): Float32Array {
         s.saturation,
         s.vibrance,
         s.hue,
+        s.clarity,
+        s.texture,
+        s.usmAmount,
+        s.usmRadius,
+        s.usmLumaThreshold,
+        s.usmDetailThreshold,
     ]);
 }

@@ -26,6 +26,12 @@ export interface Sliders {
     saturation: number;
     vibrance: number;
     hue: number;
+    clarity: number;
+    texture: number;
+    usmAmount: number;
+    usmRadius: number;
+    usmLumaThreshold: number;
+    usmDetailThreshold: number;
 }
 
 // These are the default values of the slider values in RGB mode
@@ -54,6 +60,14 @@ export const defaultSlidersRGB: Sliders = {
     hue: 0,
     saturation: 0,
     vibrance: 0,
+    clarity: 0,
+    texture: 0,
+    usmAmount: 0,
+    // Radius has no neutral value of its own — the mask is switched off by
+    // amount 0, so this is simply the starting kernel width.
+    usmRadius: 1.0,
+    usmLumaThreshold: 0,
+    usmDetailThreshold: 0,
 };
 
 // These are the default values of the slider values in BW mode
@@ -82,6 +96,12 @@ export const defaultSlidersBW: Sliders = {
     hue: 0,
     saturation: -100,
     vibrance: 0,
+    clarity: 0,
+    texture: 0,
+    usmAmount: 0,
+    usmRadius: 1.0,
+    usmLumaThreshold: 0,
+    usmDetailThreshold: 0,
 };
 
 export const overridesBW: Partial<Sliders> = {

@@ -13,7 +13,7 @@ mod common;
 use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL};
 
 use open_darkroom_lib::export_rendering::{
-    CALC_PARAMS_WGSL, DEVELOP_WGSL, PARAMS_BYTES, SLIDERS_BYTES,
+    CALC_PARAMS_WGSL, DEVELOP_WGSL, PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
 };
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ fn accessed_fields(source: &str, after: &str, open: char, close: char) -> Vec<St
     let anchor = source
         .find(after)
         .unwrap_or_else(|| panic!("anchor {after:?} not found"));
-    // Search past the anchor itself — `let values: [f32; 24]` contains a `[`.
+    // Search past the anchor itself — `let values: [f32; N]` contains a `[`.
     let anchor_end = anchor + after.len();
     let start = anchor_end
         + source[anchor_end..]
@@ -126,14 +126,22 @@ fn camel_to_snake(name: &str) -> String {
 fn sliders_struct_is_all_f32_and_matches_the_declared_size() {
     let fields = wgsl_struct(CALC_PARAMS_WGSL, "Sliders");
 
-    assert_eq!(fields.len(), 24, "unexpected slider count: {fields:#?}");
+    assert_eq!(
+        fields.len(),
+        SLIDER_COUNT,
+        "unexpected slider count: {fields:#?}"
+    );
     assert!(
         fields.iter().all(|f| f.ty == "f32"),
         "every slider must be an f32 — the CPU packers write a flat f32 array"
     );
+
+    // A struct in the uniform address space is 16-aligned, so its size rounds up
+    // to a multiple of 16 and the buffer has to be allocated at that size even
+    // though the packers only ever write the fields.
+    let padded = struct_size(&fields).next_multiple_of(16);
     assert_eq!(
-        struct_size(&fields),
-        SLIDERS_BYTES,
+        padded, SLIDERS_BYTES,
         "SLIDERS_BYTES disagrees with the WGSL Sliders struct"
     );
 }
@@ -145,7 +153,7 @@ fn rust_slider_packing_matches_the_wgsl_struct() {
         .map(|f| f.name)
         .collect();
 
-    let rust = accessed_fields(EXPORT_RENDERING_RS, "let values: [f32; 24]", '[', ']');
+    let rust = accessed_fields(EXPORT_RENDERING_RS, "let values: [f32; SLIDER_COUNT]", '[', ']');
 
     assert_eq!(
         rust, wgsl,
@@ -225,7 +233,12 @@ fn rust_default_sliders_match_the_frontend_defaults() {
         };
         from_ts.insert(camel_to_snake(name.trim()), value);
     }
-    assert_eq!(from_ts.len(), 24, "parsed {} defaults, expected 24", from_ts.len());
+    assert_eq!(
+        from_ts.len(),
+        SLIDER_COUNT,
+        "parsed {} defaults, expected {SLIDER_COUNT}",
+        from_ts.len()
+    );
 
     let packed = open_darkroom_lib::export_rendering::sliders_to_bytes(&Default::default());
     let fields = wgsl_struct(CALC_PARAMS_WGSL, "Sliders");
