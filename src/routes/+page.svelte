@@ -1035,7 +1035,7 @@
        are all that is left here. */
 
     /* small panels — the shadow colour is near-black rather than #1f1f1f, which
-       was only a hair darker than the #262626 backdrop and so read as nothing
+       was only a hair darker than the #262626 backdrop and so read as nothing */
     .histogram-panel,
     .side-panel-footer {
         box-shadow:
