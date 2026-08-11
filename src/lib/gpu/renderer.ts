@@ -36,8 +36,14 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // Bind groups connect actual resources to the layout slots, and the
     // intermediate textures are sized to the image. Neither exists until an
     // image is loaded, so both start null.
+    //
+    // The views are held alongside the textures rather than made per frame: they
+    // only change when the image does, and a slider drag would otherwise build
+    // two of them on every frame for nothing.
     let developTexture: GPUTexture | null = null;
     let compositeTexture: GPUTexture | null = null;
+    let developView: GPUTextureView | null = null;
+    let compositeView: GPUTextureView | null = null;
     let developBindGroup: GPUBindGroup | null = null;
     let compositeBindGroup: GPUBindGroup | null = null;
     let encodeBindGroup: GPUBindGroup | null = null;
@@ -61,6 +67,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         compositeTexture?.destroy();
         developTexture = createIntermediate("Developed Image", image);
         compositeTexture = createIntermediate("Composited Image", image);
+        developView = developTexture.createView();
+        compositeView = compositeTexture.createView();
 
         developBindGroup = createStageBindGroup(gpu, develop, [
             { binding: 0, resource: image.texture.createView() },
@@ -69,11 +77,11 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         ]);
 
         compositeBindGroup = createStageBindGroup(gpu, composite, [
-            { binding: 0, resource: developTexture.createView() },
+            { binding: 0, resource: developView },
         ]);
 
         encodeBindGroup = createStageBindGroup(gpu, colorSpaceEncode, [
-            { binding: 0, resource: compositeTexture.createView() },
+            { binding: 0, resource: compositeView },
         ]);
     }
 
@@ -88,7 +96,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     }
 
     function render() {
-        if (!currentImage || !developTexture || !compositeTexture) return;
+        if (!currentImage || !developView || !compositeView) return;
         if (!developBindGroup || !compositeBindGroup || !encodeBindGroup) return;
 
         // Step 1: Get the current canvas texture to render into.
@@ -109,8 +117,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         // Step 4: The chain. Each stage reads the previous one's target, so they
         // cannot be collapsed: a fragment can only read a texture it is not
         // currently writing.
-        recordFullScreenPass(encoder, develop, developTexture.createView(), developBindGroup);
-        recordFullScreenPass(encoder, composite, compositeTexture.createView(), compositeBindGroup);
+        recordFullScreenPass(encoder, develop, developView, developBindGroup);
+        recordFullScreenPass(encoder, composite, compositeView, compositeBindGroup);
         recordFullScreenPass(encoder, colorSpaceEncode, targetView, encodeBindGroup, {
             r: 0.1,
             g: 0.1,
@@ -122,11 +130,13 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         gpu.device.queue.submit([encoder.finish()]);
     }
 
+    // Releases what the renderer allocated. The source texture is not included:
+    // it is created by the caller and handed in, and the caller destroys it —
+    // both when swapping images and on teardown.
     function destroy() {
         calcParams.destroy();
         developTexture?.destroy();
         compositeTexture?.destroy();
-        currentImage?.texture.destroy();
     }
 
     // Initialize with default sliders
