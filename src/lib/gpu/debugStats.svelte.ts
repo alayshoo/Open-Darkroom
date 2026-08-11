@@ -1,4 +1,4 @@
-// src/lib/gpu/frameStats.svelte.ts
+// src/lib/gpu/debugStats.svelte.ts
 
 /** GPU time for a single named pass, as the timestamp queries measured it. */
 export interface PassTiming {
@@ -29,11 +29,16 @@ const CAPACITY = 180;
 /** A frame older than this means nothing is being rendered right now. */
 export const IDLE_AFTER_MS = 500;
 
-class FrameStats {
+class DebugStats {
     /** Whether the overlay is showing, and so whether the renderer measures at
      *  all — the timestamp queries are not free, so they follow this. */
     enabled = $state(false);
     supportsPassTimings = $state(false);
+
+    /** Diagnostic kill switch for the live histogram. It shares the render
+     *  queue, and turnaround waits on the whole queue rather than on the render
+     *  alone — so telling the two apart means being able to stop one. */
+    histogramEnabled = $state(true);
 
     /** Bumped once per recorded frame. The samples are a plain array so that
      *  reading the history costs one reactive read rather than one per sample. */
@@ -55,4 +60,4 @@ class FrameStats {
     }
 }
 
-export const frameStats = new FrameStats();
+export const debugStats = new DebugStats();

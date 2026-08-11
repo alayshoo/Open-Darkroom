@@ -1,6 +1,6 @@
-<!-- src/lib/components/outputs/FrameStatsOverlay.svelte -->
+<!-- src/lib/components/outputs/DebugStatsOverlay.svelte -->
 <script lang="ts">
-    import { frameStats, IDLE_AFTER_MS } from "$lib/gpu/frameStats.svelte";
+    import { debugStats, IDLE_AFTER_MS } from "$lib/gpu/debugStats.svelte";
 
     // Frames to average the printed figures over. Per-frame numbers flicker
     // faster than they can be read; the graph keeps the detail.
@@ -18,14 +18,14 @@
     // leaves the last reading standing. Say so rather than implying 0 fps.
     $effect(() => {
         const timer = setInterval(() => {
-            idle = performance.now() - frameStats.lastRecordedAt > IDLE_AFTER_MS;
+            idle = performance.now() - debugStats.lastRecordedAt > IDLE_AFTER_MS;
         }, 250);
         return () => clearInterval(timer);
     });
 
     let summary = $derived.by(() => {
-        frameStats.version;
-        const recent = frameStats.samples.slice(-WINDOW);
+        debugStats.version;
+        const recent = debugStats.samples.slice(-WINDOW);
         if (recent.length === 0) return null;
 
         const mean = (pick: (s: (typeof recent)[number]) => number) =>
@@ -81,7 +81,7 @@
     // Redraw the sparkline whenever a frame lands. A canvas keeps this off the
     // DOM — 180 elements rebuilt at frame rate would cost more than it measures.
     $effect(() => {
-        frameStats.version;
+        debugStats.version;
 
         const ctx = graph?.getContext("2d");
         if (!ctx || !graph) return;
@@ -92,7 +92,7 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, GRAPH_WIDTH, GRAPH_HEIGHT);
 
-        const samples = frameStats.samples;
+        const samples = debugStats.samples;
         if (samples.length === 0) return;
 
         // Scale to the worst frame on screen, never tighter than the budget, so
@@ -122,7 +122,7 @@
     }
 </script>
 
-<div class="frame-stats">
+<div class="debug-stats">
     <div class="headline">
         <span class="fps" class:idle>
             {idle || !summary ? "idle" : `${summary.fps.toFixed(0)} fps`}
@@ -147,14 +147,14 @@
 
         {#if summary.passes.length > 0}
             <dl class="rows passes">
-                <dt class="total">passes</dt>
+                <dt class="total">gpu passes</dt>
                 <dd class="total">{ms(summary.passesMs)}</dd>
                 {#each summary.passes as pass (pass.label)}
                     <dt class="child">{pass.label}</dt>
                     <dd>{ms(pass.ms)}</dd>
                 {/each}
             </dl>
-        {:else if !frameStats.supportsPassTimings}
+        {:else if !debugStats.supportsPassTimings}
             <p class="note">no timestamp-query on this adapter</p>
         {/if}
     {:else}
@@ -163,7 +163,7 @@
 </div>
 
 <style>
-    .frame-stats {
+    .debug-stats {
         position: absolute;
         top: 0.5rem;
         left: 0.5rem;

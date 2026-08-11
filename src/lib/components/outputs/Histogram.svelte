@@ -6,6 +6,7 @@
     import { getGPU } from "$lib/gpu/gpuInit";
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
+    import { debugStats } from "$lib/gpu/debugStats.svelte";
     import { type ImagePayload } from "$lib/types/imagePayload";
 
     let {
@@ -144,11 +145,14 @@
         );
     });
 
-    // Re-compute histogram when adjustments change
+    // Re-compute histogram when adjustments change. The debug flag is read here
+    // rather than only inside the update so that switching it back on refreshes
+    // immediately instead of waiting for the next slider move.
     $effect(() => {
         if (!image || !histPipeline) return;
         // Read adjustments to establish Svelte reactivity tracking
         const _ = { ...sliders };
+        if (!debugStats.histogramEnabled) return;
         updateHistogram();
     });
 
@@ -156,7 +160,7 @@
     let pendingUpdate = false;
 
     async function updateHistogram() {
-        if (!image || !histPipeline) return;
+        if (!image || !histPipeline || !debugStats.histogramEnabled) return;
 
         // If a compute is already in flight, flag for re-run when it finishes
         if (computing) {

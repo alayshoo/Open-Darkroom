@@ -10,8 +10,8 @@
 
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
-    import FrameStatsOverlay from "$lib/components/outputs/FrameStatsOverlay.svelte";
-    import { frameStats } from "$lib/gpu/frameStats.svelte";
+    import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
+    import { debugStats } from "$lib/gpu/debugStats.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
@@ -284,7 +284,7 @@
     // Frame stats start visible in a dev run and hidden in a release build, so
     // the numbers are there while working without shipping to a user. F1 flips
     // it either way — a release build still needs to be measurable.
-    frameStats.enabled = import.meta.env.DEV;
+    debugStats.enabled = import.meta.env.DEV;
 
     const handleKeydown = createKeydownHandler({
         undo: undo,
@@ -292,9 +292,15 @@
         movePage: movePage,
         changeMode: handleModeToggle,
         openImage: handleOpenImage,
-        toggleFrameStats: () => {
-            frameStats.enabled = !frameStats.enabled;
-            if (!frameStats.enabled) frameStats.clear();
+        toggleDebugStats: () => {
+            debugStats.enabled = !debugStats.enabled;
+            if (!debugStats.enabled) debugStats.clear();
+        },
+        toggleHistogram: () => {
+            debugStats.histogramEnabled = !debugStats.histogramEnabled;
+            // The point of stopping it is to read the difference, so start the
+            // comparison from a clean window rather than a mixed average.
+            debugStats.clear();
         },
     });
 </script>
@@ -312,12 +318,15 @@
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
-        {#if frameStats.enabled}
-            <FrameStatsOverlay />
+        {#if debugStats.enabled}
+            <DebugStatsOverlay />
         {/if}
     </div>
     <div class="side-bar flex w-[23%] flex-col gap-3">
-        <div class="histogram-panel glass shrink-0 rounded-[12px]">
+        <div
+            class="histogram-panel glass shrink-0 rounded-[12px]"
+            class:dimmed={!debugStats.histogramEnabled}
+        >
             <div class="histogram-container m-1.25">
                 <Histogram {sliders} {imagePayload} />
             </div>

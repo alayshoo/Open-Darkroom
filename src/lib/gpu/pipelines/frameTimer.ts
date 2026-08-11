@@ -7,7 +7,7 @@
 // the blur simply produces a shorter list rather than a gap.
 
 import type { GPUSession } from "$lib/types/gpuTypes";
-import type { PassTiming } from "../frameStats.svelte";
+import type { PassTiming } from "../debugStats.svelte";
 
 /** Enough for the develop chain with room to grow. Two timestamps each. */
 const MAX_PASSES = 12;

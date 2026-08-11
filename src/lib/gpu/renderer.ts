@@ -26,7 +26,7 @@ import {
 } from "./pipelines/chainStages";
 import { sharpnessIsVisible } from "./sharpnessVisibility";
 import { createFrameTimer } from "./pipelines/frameTimer";
-import { frameStats } from "./frameStats.svelte";
+import { debugStats } from "./debugStats.svelte";
 
 
 // The backdrop the preview sits on, and the encode stage's options as an
@@ -63,7 +63,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     let destroyed = false;
 
     const frameTimer = createFrameTimer(gpu);
-    frameStats.supportsPassTimings = frameTimer.available;
+    debugStats.supportsPassTimings = frameTimer.available;
     let lastFrameStart = 0;
 
     // Bind groups connect actual resources to the layout slots, and the
@@ -211,7 +211,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         const turnaroundMs = performance.now() - submitEnd;
         const passes = await frameTimer.read();
         if (destroyed) return;
-        frameStats.record({ intervalMs, acquireMs, recordMs, turnaroundMs, passes });
+        debugStats.record({ intervalMs, acquireMs, recordMs, turnaroundMs, passes });
     }
 
     function drawFrame(): boolean {
@@ -222,7 +222,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
         // Measuring is opt-in: timestamp queries are not free, and neither are
         // the clocks around them, so both follow the overlay.
-        measuring = frameStats.enabled;
+        measuring = debugStats.enabled;
         const frameStart = measuring ? performance.now() : 0;
         const intervalMs = measuring && lastFrameStart ? frameStart - lastFrameStart : 0;
         if (measuring) {
