@@ -26,17 +26,17 @@ export interface FrameSample {
 /**
  * What one histogram update cost.
  *
- * The two are reported side by side because they answer different questions.
- * A histogram ends in a GPU→CPU map, and a map is a round trip: the queue has
- * to drain and the callback has to reach JS again. So `gpuMs` is what a faster
- * shader could reduce, and `wallMs - gpuMs` is what only running it less often
- * — or reading it a frame late — can.
+ * Nothing here waits: the bins are drawn on the GPU, so an update records its
+ * passes and submits. That leaves two separate costs rather than one total —
+ * time on the GPU, which the passes report, and time on the CPU recording them,
+ * which finishes before the GPU has started. Adding them would describe no real
+ * duration, so they stay apart.
  */
 export interface HistogramSample {
-    /** The compute pass alone. Zero without timestamp support. */
-    gpuMs: number;
-    /** The whole update, from the call to the readback resolving. */
-    wallMs: number;
+    /** Per-pass GPU times, empty when the adapter has no timestamp support. */
+    passes: PassTiming[];
+    /** Recording the command buffer and submitting it. */
+    recordMs: number;
 }
 
 /** Roughly three seconds of history at 60fps. */

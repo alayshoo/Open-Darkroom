@@ -1,6 +1,27 @@
 <!-- src/lib/components/outputs/DebugStatsOverlay.svelte -->
 <script lang="ts">
-    import { debugStats, IDLE_AFTER_MS } from "$lib/gpu/debugStats.svelte";
+    import {
+        debugStats,
+        IDLE_AFTER_MS,
+        type PassTiming,
+    } from "$lib/gpu/debugStats.svelte";
+
+    // Average each pass across the frames that carried it, in the order the
+    // recorder first reported them — a frame that skipped a pass simply
+    // contributes nothing to it rather than pulling its mean down.
+    function meanPasses(all: PassTiming[]): PassTiming[] {
+        const totals = new Map<string, { total: number; count: number }>();
+        for (const pass of all) {
+            const entry = totals.get(pass.label) ?? { total: 0, count: 0 };
+            entry.total += pass.ms;
+            entry.count += 1;
+            totals.set(pass.label, entry);
+        }
+        return [...totals].map(([label, { total, count }]) => ({
+            label,
+            ms: total / count,
+        }));
+    }
 
     // Frames to average the printed figures over. Per-frame numbers flicker
     // faster than they can be read; the graph keeps the detail.
@@ -38,34 +59,12 @@
             ? intervals.reduce((total, s) => total + s.intervalMs, 0) / intervals.length
             : 0;
 
-        // Pass labels come from the renderer in the order it records them, and
-        // a frame that skipped the blur simply carries fewer.
-        const passLabels: string[] = [];
-        for (const s of recent) {
-            for (const p of s.passes) {
-                if (!passLabels.includes(p.label)) passLabels.push(p.label);
-            }
-        }
-        const passes = passLabels.map((label) => {
-            const timings = recent
-                .flatMap((s) => s.passes)
-                .filter((p) => p.label === label);
-            return {
-                label,
-                ms: timings.reduce((total, p) => total + p.ms, 0) / timings.length,
-            };
-        });
-
         // The real GPU cost of the chain, and the number to watch when tuning a
         // pass. Frames the timer had to skip carry no passes and would drag the
         // mean down, so they are left out rather than counted as zero.
         const timedFrames = recent.filter((s) => s.passes.length > 0);
-        const passesMs = timedFrames.length
-            ? timedFrames.reduce(
-                  (total, s) => total + s.passes.reduce((sum, p) => sum + p.ms, 0),
-                  0,
-              ) / timedFrames.length
-            : 0;
+        const passes = meanPasses(timedFrames.flatMap((s) => s.passes));
+        const passesMs = passes.reduce((total, p) => total + p.ms, 0);
 
         return {
             fps: intervalMs > 0 ? 1000 / intervalMs : 0,
@@ -84,14 +83,15 @@
         const recent = debugStats.histogramSamples.slice(-WINDOW);
         if (recent.length === 0) return null;
 
-        const mean = (pick: (s: (typeof recent)[number]) => number) =>
-            recent.reduce((total, s) => total + pick(s), 0) / recent.length;
+        const recordMs =
+            recent.reduce((total, s) => total + s.recordMs, 0) / recent.length;
 
-        const gpuMs = mean((s) => s.gpuMs);
-        const wallMs = mean((s) => s.wallMs);
-        // What a faster shader cannot reach: the queue draining and the map
-        // callback finding its way back to JS.
-        return { gpuMs, wallMs, roundTripMs: Math.max(wallMs - gpuMs, 0) };
+        const passes = meanPasses(
+            recent.filter((s) => s.passes.length > 0).flatMap((s) => s.passes),
+        );
+        const gpuMs = passes.reduce((total, p) => total + p.ms, 0);
+
+        return { gpuMs, recordMs, passes };
     });
 
     // Redraw the sparkline whenever a frame lands. A canvas keeps this off the
@@ -177,13 +177,18 @@
         {#if !debugStats.histogramEnabled}
             <p class="note">histogram off (F2)</p>
         {:else if histogram}
+            <!-- Two totals rather than one: the GPU passes and the CPU that
+                 records them do not overlap in time, so summing them would
+                 describe no real duration. -->
             <dl class="rows passes">
-                <dt class="total">histogram</dt>
-                <dd class="total">{ms(histogram.wallMs)}</dd>
-                <dt class="child">compute</dt>
-                <dd>{ms(histogram.gpuMs)}</dd>
-                <dt class="child">round trip</dt>
-                <dd>{ms(histogram.roundTripMs)}</dd>
+                <dt class="total">histogram gpu</dt>
+                <dd class="total">{ms(histogram.gpuMs)}</dd>
+                {#each histogram.passes as pass (pass.label)}
+                    <dt class="child">{pass.label}</dt>
+                    <dd>{ms(pass.ms)}</dd>
+                {/each}
+                <dt class="total">histogram cpu</dt>
+                <dd class="total">{ms(histogram.recordMs)}</dd>
             </dl>
         {/if}
     {:else}

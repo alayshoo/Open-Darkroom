@@ -68,10 +68,21 @@ export interface Renderer {
 
 
 export interface HistogramPipeline {
-    computeHistogram: (inputTexture: GPUTexture, sliders: Sliders) => Promise<{
+    // Bins the image, reduces the scale and draws the curves — all on the GPU,
+    // in one submit. Omitting the target bins without drawing.
+    render: (
+        inputTexture: GPUTexture,
+        sliders: Sliders,
+        target?: GPUTextureView,
+    ) => void;
+    // The bins on the CPU, at the cost of the round trip drawing on the GPU
+    // exists to avoid. For tests.
+    readBins: () => Promise<{
         r: Uint32Array;
         g: Uint32Array;
         b: Uint32Array;
+        // What the last render reduced the bins to for normalisation.
+        scale: number;
     }>;
     destroy: () => void;
 }

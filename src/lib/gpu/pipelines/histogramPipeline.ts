@@ -6,21 +6,26 @@ import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE }
 import { createFrameTimer } from "./frameTimer";
 import { debugStats } from "../debugStats.svelte";
 import shaderSource from "../shaders/histogram.wgsl?raw";
+import scaleSource from "../shaders/histogramScale.wgsl?raw";
+import drawSource from "../shaders/histogramDraw.wgsl?raw";
 
 /** Number of bins per channel (matches the shader's array<atomic<u32>, 256>). */
 const NUM_BINS = 256;
 
-/** Size in bytes of one channel's bin buffer (256 × 4 bytes per u32). */
 /** All three channels end to end, as `bins` in histogram.wgsl declares them. */
 const BINS_BUFFER_SIZE = NUM_BINS * 3 * 4;
 
+/** The draw covers only what the curves reach; the panel shows through the rest. */
+const TRANSPARENT: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
+
 /**
- * Creates the histogram compute pipeline.
+ * Bins an image and draws the result, without the bins ever reaching the CPU.
  *
- * Returns an object with:
- *  - `computeHistogram(inputTexture, sliders)` — dispatches the compute
- *     shader, reads back the 3×256 bin arrays from the GPU, and returns them.
- *  - `destroy()` — releases all GPU resources owned by this pipeline.
+ * Reading them back cost a GPU→CPU map — 15-25ms of queue drain and callback
+ * dispatch against a compute pass of 0.6ms, and a fence per update on the queue
+ * the preview renders on. Normalising and drawing on the GPU removes the round
+ * trip rather than making it cheaper or rarer, which is the only thing that
+ * ever reduced it.
  */
 export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     const { device } = gpu;
@@ -87,12 +92,84 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // ── Staging buffer (MAP_READ) for GPU → CPU readback ─────────────
     const staging = device.createBuffer({
         label: "Histogram Staging",
-        size: BINS_BUFFER_SIZE,
+        // The bins, with the reduced scale appended after them.
+        size: BINS_BUFFER_SIZE + 4,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
 
-    // Times the compute pass on its own, so the shader's cost can be told apart
-    // from the readback round trip that follows it.
+    // ── Scale: the tallest bin, reduced on the GPU ───────────────────
+    const scaleBuffer = device.createBuffer({
+        label: "Histogram Scale",
+        size: 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+
+    const scaleLayout = device.createBindGroupLayout({
+        label: "Histogram Scale Bind Group Layout",
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+        ],
+    });
+
+    const scalePipeline = device.createComputePipeline({
+        label: "Histogram Scale Pipeline",
+        layout: device.createPipelineLayout({ bindGroupLayouts: [scaleLayout] }),
+        compute: {
+            module: device.createShaderModule({
+                label: "Histogram Scale Shader",
+                code: scaleSource,
+            }),
+            entryPoint: "main",
+        },
+    });
+
+    // ── Draw: the curves, straight from the bins ─────────────────────
+    const drawLayout = device.createBindGroupLayout({
+        label: "Histogram Draw Bind Group Layout",
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
+        ],
+    });
+
+    const drawModule = device.createShaderModule({
+        label: "Histogram Draw Shader",
+        code: drawSource,
+    });
+
+    const drawPipeline = device.createRenderPipeline({
+        label: "Histogram Draw Pipeline",
+        layout: device.createPipelineLayout({ bindGroupLayouts: [drawLayout] }),
+        vertex: { module: drawModule, entryPoint: "vs_main" },
+        fragment: {
+            module: drawModule,
+            entryPoint: "fs_main",
+            targets: [{ format: gpu.format }],
+        },
+    });
+
+    // Both read the same two buffers for the life of the pipeline, so neither
+    // group ever needs rebuilding.
+    const scaleBindGroup = device.createBindGroup({
+        label: "Histogram Scale Bind Group",
+        layout: scaleLayout,
+        entries: [
+            { binding: 0, resource: { buffer: bins } },
+            { binding: 1, resource: { buffer: scaleBuffer } },
+        ],
+    });
+
+    const drawBindGroup = device.createBindGroup({
+        label: "Histogram Draw Bind Group",
+        layout: drawLayout,
+        entries: [
+            { binding: 0, resource: { buffer: bins } },
+            { binding: 1, resource: { buffer: scaleBuffer } },
+        ],
+    });
+
+    // Times the compute pass on its own, against the whole update.
     const timer = createFrameTimer(gpu);
 
     // The bind group only changes when the image does, so it is kept rather
@@ -117,10 +194,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     // ── Public API ───────────────────────────────────────────────────
 
-    async function computeHistogram(
+    function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
-    ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array }> {
+        target?: GPUTextureView,
+    ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
 
@@ -128,10 +206,8 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         const start = measure ? performance.now() : 0;
         if (measure) timer.beginFrame();
 
-        const bindGroup = bindGroupFor(inputTexture);
-
         const encoder = device.createCommandEncoder({
-            label: "Histogram Compute",
+            label: "Histogram",
         });
 
         // First: compute params from sliders (matrices calculated on GPU)
@@ -143,10 +219,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         // Dispatch histogram compute shader
         const pass = encoder.beginComputePass({
             label: "Histogram Pass",
-            timestampWrites: measure ? timer.passWrites("histogram") : undefined,
+            timestampWrites: measure ? timer.passWrites("bin") : undefined,
         });
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
+        pass.setBindGroup(0, bindGroupFor(inputTexture));
 
         // Workgroups: ceil(width / 16) × ceil(height / 16)
         const workgroupsX = Math.ceil(inputTexture.width / 16);
@@ -154,32 +230,77 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         pass.dispatchWorkgroups(workgroupsX, workgroupsY);
         pass.end();
 
-        // Copy bins → staging for CPU readback
-        encoder.copyBufferToBuffer(bins, 0, staging, 0, BINS_BUFFER_SIZE);
-        if (measure) timer.resolve(encoder);
+        // Reduce the bins to the value the draw normalises against. One group,
+        // and the answer stays in a buffer the draw reads directly.
+        const scalePass = encoder.beginComputePass({
+            label: "Histogram Scale Pass",
+            timestampWrites: measure ? timer.passWrites("scale") : undefined,
+        });
+        scalePass.setPipeline(scalePipeline);
+        scalePass.setBindGroup(0, scaleBindGroup);
+        scalePass.dispatchWorkgroups(1);
+        scalePass.end();
 
+        if (target) {
+            const drawPass = encoder.beginRenderPass({
+                label: "Histogram Draw Pass",
+                colorAttachments: [
+                    {
+                        view: target,
+                        clearValue: TRANSPARENT,
+                        loadOp: "clear",
+                        storeOp: "store",
+                    },
+                ],
+                timestampWrites: measure ? timer.passWrites("draw") : undefined,
+            });
+            drawPass.setPipeline(drawPipeline);
+            drawPass.setBindGroup(0, drawBindGroup);
+            drawPass.draw(6);
+            drawPass.end();
+        }
+
+        if (measure) timer.resolve(encoder);
+        device.queue.submit([encoder.finish()]);
+
+        // Nothing is awaited, so this is the CPU cost of recording and handing
+        // over the work — not how long the work took.
+        if (measure) {
+            const recordMs = performance.now() - start;
+            void timer.read().then((passes) => {
+                debugStats.recordHistogram({ passes, recordMs });
+            });
+        }
+    }
+
+    /**
+     * The bins, on the CPU.
+     *
+     * Nothing in the app calls this — the whole point of drawing on the GPU is
+     * that the round trip is gone. It exists so the tests can still check what
+     * the binning produced, and it costs what it always did, so anything that
+     * needs it in future is choosing to pay that again.
+     */
+    async function readBins(): Promise<{
+        r: Uint32Array;
+        g: Uint32Array;
+        b: Uint32Array;
+        scale: number;
+    }> {
+        const encoder = device.createCommandEncoder({ label: "Histogram Readback" });
+        encoder.copyBufferToBuffer(bins, 0, staging, 0, BINS_BUFFER_SIZE);
+        encoder.copyBufferToBuffer(scaleBuffer, 0, staging, BINS_BUFFER_SIZE, 4);
         device.queue.submit([encoder.finish()]);
 
         await staging.mapAsync(GPUMapMode.READ);
-
-        // Copy the data out (mapAsync gives a temporary ArrayBuffer view)
         const all = new Uint32Array(staging.getMappedRange().slice(0));
         staging.unmap();
-
-        // Stopped here rather than after the timings are read: this is the point
-        // the caller can use the data, and the pass timing is a separate map
-        // that would otherwise be counted as part of the wait.
-        const wallMs = measure ? performance.now() - start : 0;
-        if (measure) {
-            void timer.read().then((passes) => {
-                debugStats.recordHistogram({ gpuMs: passes[0]?.ms ?? 0, wallMs });
-            });
-        }
 
         return {
             r: all.slice(0, NUM_BINS),
             g: all.slice(NUM_BINS, NUM_BINS * 2),
             b: all.slice(NUM_BINS * 2, NUM_BINS * 3),
+            scale: all[NUM_BINS * 3],
         };
     }
 
@@ -187,8 +308,9 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         calcParams.destroy();
         timer.destroy();
         bins.destroy();
+        scaleBuffer.destroy();
         staging.destroy();
     }
 
-    return { computeHistogram, destroy };
+    return { render, readBins, destroy };
 }

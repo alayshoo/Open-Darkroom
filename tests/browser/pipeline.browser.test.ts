@@ -255,11 +255,14 @@ async function develop(
 async function histogram(
   rgb: Uint8Array,
   sliders: Sliders,
-): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array }> {
+): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array; scale: number }> {
   const pipeline = createHistogramPipeline(gpu);
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
   try {
-    return await pipeline.computeHistogram(image.texture, sliders);
+    // No target: the app draws the curves from the bins on the GPU, but what is
+    // under test here is the binning, so this stops at the buffer.
+    pipeline.render(image.texture, sliders);
+    return await pipeline.readBins();
   } finally {
     image.texture.destroy();
     pipeline.destroy();
@@ -620,5 +623,54 @@ describe("histogram compute", () => {
     // Darkest channel lowest, brightest highest.
     expect(centroid(bins.r)).toBeLessThan(centroid(bins.g));
     expect(centroid(bins.g)).toBeLessThan(centroid(bins.b));
+  });
+});
+
+describe("histogram scale reduction", () => {
+  // The value the draw normalises against is reduced on the GPU across all
+  // three channels at once, through a workgroup tree that has to survive its
+  // barriers. A plain scan of the same bins says what it should have found.
+  function tallestBin(bins: {
+    r: Uint32Array;
+    g: Uint32Array;
+    b: Uint32Array;
+  }): number {
+    let best = 0;
+    for (const channel of [bins.r, bins.g, bins.b]) {
+      // Bins 0 and 255 are excluded: a clipped region spikes there far above
+      // everything else, and normalising to it flattens the rest.
+      for (let i = 1; i < 255; i++) best = Math.max(best, channel[i]);
+    }
+    return Math.max(best, 1);
+  }
+
+  it("finds the tallest bin across the three channels", async () => {
+    const bins = await histogram(rampChart(), defaultSlidersRGB);
+    expect(bins.scale).toBe(tallestBin(bins));
+  });
+
+  it("ignores the clipped-black bin", async () => {
+    // Half the chart pure black, the rest spread thinly across the midtones.
+    // The spike in bin 0 is two orders of magnitude above anything in the
+    // interior, so a reduction that counted it would flatten the rest of the
+    // curve onto the baseline.
+    const pixels = WIDTH * HEIGHT;
+    const rgb = new Uint8Array(pixels * 3);
+    for (let i = pixels / 2; i < pixels; i++) {
+      const v = 64 + ((i - pixels / 2) % 128);
+      rgb[i * 3] = v;
+      rgb[i * 3 + 1] = v;
+      rgb[i * 3 + 2] = v;
+    }
+    const bins = await histogram(rgb, defaultSlidersRGB);
+
+    expect(bins.scale).toBe(tallestBin(bins));
+    // The spike was genuinely the tallest bin, and genuinely left out.
+    expect(bins.r[0]).toBeGreaterThan(bins.scale);
+  });
+
+  it("never reports zero, so the draw cannot divide by it", async () => {
+    const bins = await histogram(solid(0, 0, 0), defaultSlidersRGB);
+    expect(bins.scale).toBeGreaterThan(0);
   });
 });

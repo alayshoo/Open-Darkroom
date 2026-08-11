@@ -2,8 +2,9 @@
 <script lang="ts">
     import { untrack } from "svelte";
     import { type Sliders } from "$lib/types/imgParameters";
-    import type { GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
+    import type { GPUCanvasLink, GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
+    import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
@@ -21,52 +22,41 @@
     const gpu = getGPU()!;
 
     let canvas: HTMLCanvasElement;
+    let canvasLink: GPUCanvasLink | null = $state(null);
     let histPipeline: HistogramPipeline | null = $state(null);
     let image: GPUImage | null = $state(null);
 
-    // The last histogram data we received — kept so we can re-draw on resize
-    // without re-running the GPU compute pass.
-    let lastHistData: { r: Uint32Array; g: Uint32Array; b: Uint32Array } | null =
-        $state(null);
+    // The bins are binned, normalised and drawn without ever reaching the CPU,
+    // so a redraw needs nothing kept on this side — not the last data, and not
+    // a canvas context to paint it with.
+    let dirty = false;
+    let frameHandle: number | null = null;
 
-    // ── Animated scale ceiling ──────────────────────────────────────────────
-    // currentCeiling  – what we actually draw with (animates smoothly)
-    // targetCeiling   – where we want to end up (recomputed each histogram)
-    //
-    // Growth:  instant snap (ceiling jumps up so bars never clip)
-    // Decay:   slow lerp  (ceiling drifts down, never chases spikes)
-    let currentCeiling = 1;
-    let targetCeiling = 1;
-    let animFrameId: number | null = null;
-
-    const DECAY_RATE = 0.04;  // fraction of gap closed per frame (~60 fps → ~2 s to halve)
-    const SNAP_RATIO = 1.05;  // snap up instantly if target exceeds current by >5 %
-
-    function tickCeiling() {
-        animFrameId = null;
-        if (!lastHistData) return;
-
-        const gap = targetCeiling - currentCeiling;
-
-        if (targetCeiling > currentCeiling * SNAP_RATIO) {
-            // Hard snap upward so bars are never clipped
-            currentCeiling = targetCeiling;
-        } else {
-            // Smooth exponential decay in either direction
-            currentCeiling += gap * DECAY_RATE;
-        }
-
-        drawHistogram(lastHistData);
-
-        // Keep ticking until settled
-        if (Math.abs(gap) > currentCeiling * 0.001) {
-            animFrameId = requestAnimationFrame(tickCeiling);
-        }
+    function requestRender() {
+        dirty = true;
+        if (frameHandle === null) frameHandle = requestAnimationFrame(onFrame);
     }
 
-    function scheduleCeilingAnimation() {
-        if (animFrameId !== null) return; // already in flight
-        animFrameId = requestAnimationFrame(tickCeiling);
+    function onFrame() {
+        frameHandle = null;
+        if (!dirty) return;
+        // A request made before the canvas or the image was ready outlives the
+        // frame that could not serve it.
+        if (draw()) dirty = false;
+    }
+
+    function draw(): boolean {
+        if (!histPipeline || !image || !canvasLink) return false;
+        if (!debugStats.histogramEnabled) return false;
+        // Nothing to render into until the observer has sized the backing store.
+        if (canvas.width === 0 || canvas.height === 0) return false;
+
+        histPipeline.render(
+            image.texture,
+            sliders,
+            canvasLink.canvasConfig.getCurrentTexture().createView(),
+        );
+        return true;
     }
 
     // ── ResizeObserver: keep canvas backing-store at native device pixels ──
@@ -91,8 +81,9 @@
                 if (canvas.width !== w || canvas.height !== h) {
                     canvas.width = w;
                     canvas.height = h;
-                    // Redraw with existing data (resizing clears the canvas)
-                    if (lastHistData) drawHistogram(lastHistData);
+                    // Resizing drops the swapchain contents, so the curves have
+                    // to be drawn again — but only drawn, not recomputed.
+                    requestRender();
                 }
             }
         });
@@ -107,21 +98,33 @@
         return () => ro.disconnect();
     });
 
-    // Create the histogram pipeline once on mount
+    // Link the canvas and create the pipeline once on mount
     $effect(() => {
         if (!canvas) return;
+
+        let destroyed = false;
         histPipeline = createHistogramPipeline(gpu);
 
+        // Premultiplied so the panel's own background shows through wherever
+        // the curves do not reach, as it did behind the 2D canvas.
+        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
+            if (destroyed) return;
+            canvasLink = link;
+            requestRender();
+        });
+
         return () => {
+            destroyed = true;
             image?.texture.destroy();
             histPipeline?.destroy();
             histPipeline = null;
+            canvasLink = null;
             image = null;
-            // Cancel any in-flight animation
-            if (animFrameId !== null) {
-                cancelAnimationFrame(animFrameId);
-                animFrameId = null;
+            if (frameHandle !== null) {
+                cancelAnimationFrame(frameHandle);
+                frameHandle = null;
             }
+            dirty = false;
         };
     });
 
@@ -132,10 +135,6 @@
         // Clean up previous image (untracked to avoid re-triggering this effect)
         untrack(() => image?.texture.destroy());
 
-        // Reset both ceilings so the new image starts fresh
-        currentCeiling = 1;
-        targetCeiling = 1;
-
         // Upload via the raw pixel path (same as PreviewImageCanvas)
         image = uploadRawPixelsToGPU(
             gpu.device,
@@ -143,113 +142,19 @@
             imagePayload.width,
             imagePayload.height,
         );
+        requestRender();
     });
 
-    // Re-compute histogram when adjustments change. The debug flag is read here
-    // rather than only inside the update so that switching it back on refreshes
-    // immediately instead of waiting for the next slider move.
+    // Re-render when adjustments change. The debug flag is read here rather than
+    // only inside the draw so that switching it back on refreshes immediately
+    // instead of waiting for the next slider move.
     $effect(() => {
         if (!image || !histPipeline) return;
         // Read adjustments to establish Svelte reactivity tracking
         const _ = { ...sliders };
         if (!debugStats.histogramEnabled) return;
-        updateHistogram();
+        requestRender();
     });
-
-    let computing = false;
-    let pendingUpdate = false;
-
-    async function updateHistogram() {
-        if (!image || !histPipeline || !debugStats.histogramEnabled) return;
-
-        // If a compute is already in flight, flag for re-run when it finishes
-        if (computing) {
-            pendingUpdate = true;
-            return;
-        }
-
-        computing = true;
-        try {
-            const data = await histPipeline.computeHistogram(image.texture, sliders);
-
-            // Recompute the target ceiling from the new histogram data.
-            // currentCeiling animates toward it — snapping up, decaying down.
-            targetCeiling = computeCeiling(data);
-
-            lastHistData = data;
-
-            // Draw immediately with the current ceiling (may be mid-animation),
-            // then let the animation loop refine it.
-            drawHistogram(data);
-            scheduleCeilingAnimation();
-        } finally {
-            computing = false;
-        }
-
-        // If another update was requested while we were computing, run again
-        if (pendingUpdate) {
-            pendingUpdate = false;
-            updateHistogram();
-        }
-    }
-
-    /**
-     * Computes a y-axis ceiling from histogram data using the 99.5th
-     * percentile across all three channels (excluding the clipped-black bin 0
-     * and clipped-white bin 255, which are almost always outlier spikes).
-     */
-    function computeCeiling(histograms: {
-        r: Uint32Array;
-        g: Uint32Array;
-        b: Uint32Array;
-    }): number {
-        const allBins = [
-            ...histograms.r.subarray(1, 255),
-            ...histograms.g.subarray(1, 255),
-            ...histograms.b.subarray(1, 255),
-        ].sort((a, b) => a - b);
-
-        const p995 = allBins[Math.floor(allBins.length * 0.995)];
-        return Math.max(p995, 1);
-    }
-
-    /**
-     * Draws the R, G, B histogram curves onto the 2D canvas using
-     * additive blending so overlapping channels produce natural mixes
-     * (R+G = yellow, R+B = magenta, etc.)
-     */
-    function drawHistogram(histograms: {
-        r: Uint32Array;
-        g: Uint32Array;
-        b: Uint32Array;
-    }) {
-        const ctx = canvas.getContext("2d")!;
-        const { width, height } = canvas;
-
-        // Use the live animated ceiling for normalization
-        const norm = (v: number) => Math.min(v, currentCeiling) / currentCeiling;
-
-        ctx.clearRect(0, 0, width, height);
-        ctx.globalCompositeOperation = "lighter"; // additive colour blend
-
-        for (const [bins, color] of [
-            [histograms.r, "rgb(255,0,0)"],
-            [histograms.g, "rgb(0,255,0)"],
-            [histograms.b, "rgb(0,0,255)"],
-        ] as const) {
-            ctx.beginPath();
-            ctx.moveTo(0, height);
-            for (let i = 0; i < 256; i++) {
-                const x = (i / 255) * width;
-                const y = height - norm(bins[i]) * height;
-                ctx.lineTo(x, y);
-            }
-            ctx.lineTo(width, height);
-            ctx.closePath();
-            ctx.fillStyle = color;
-            ctx.fill();
-        }
-    }
 </script>
 
 <canvas
