@@ -45,6 +45,15 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     let currentSliders: Sliders = defaultSlidersRGB;
     let currentRenderScale = 1;
 
+    // Frame scheduling. A submit costs whatever the chain costs, so issuing them
+    // faster than the GPU drains them backs the presentation queue up until
+    // acquiring the next canvas texture blocks the calling thread — which stalls
+    // input handling and the DOM alongside the preview.
+    let dirty = false;
+    let inFlight = false;
+    let frameHandle: number | null = null;
+    let destroyed = false;
+
     // Bind groups connect actual resources to the layout slots, and the
     // intermediate textures are sized to the image. Neither exists until an
     // image is loaded, so both start null.
@@ -142,11 +151,38 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         calcParams.updateView(renderScale, fullWidth, fullHeight);
     }
 
-    function render() {
-        if (!currentImage || !developView || !compositeView) return;
-        if (!sharpHView || !detailView) return;
-        if (!developBindGroup || !compositeBindGroup || !encodeBindGroup) return;
-        if (!sharpHBindGroup || !sharpVBindGroup) return;
+    // Ask for a frame. Repeated calls between two frames collapse into one, and
+    // nothing is submitted while the previous frame is still outstanding, so the
+    // preview redraws at whatever rate the GPU can actually sustain while the
+    // caller stays free to keep handling input.
+    function requestRender() {
+        dirty = true;
+        scheduleFrame();
+    }
+
+    function scheduleFrame() {
+        if (destroyed || inFlight || frameHandle !== null) return;
+        frameHandle = requestAnimationFrame(onFrame);
+    }
+
+    function onFrame() {
+        frameHandle = null;
+        if (destroyed || !dirty) return;
+        // The request outlives a frame that had nothing to draw yet, so an image
+        // arriving later still gets one.
+        if (drawFrame()) dirty = false;
+    }
+
+    function onWorkDone() {
+        inFlight = false;
+        if (dirty) scheduleFrame();
+    }
+
+    function drawFrame(): boolean {
+        if (!currentImage || !developView || !compositeView) return false;
+        if (!sharpHView || !detailView) return false;
+        if (!developBindGroup || !compositeBindGroup || !encodeBindGroup) return false;
+        if (!sharpHBindGroup || !sharpVBindGroup) return false;
 
         // Step 1: Get the current canvas texture to render into.
         // This changes every frame (it's a swapchain texture).
@@ -185,14 +221,24 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             a: 1,
         });
 
-        // Step 5: Submit
+        // Step 5: Submit, and hold the next frame until this one has drained.
         gpu.device.queue.submit([encoder.finish()]);
+
+        inFlight = true;
+        gpu.device.queue.onSubmittedWorkDone().then(onWorkDone);
+
+        return true;
     }
 
     // Releases what the renderer allocated. The source texture is not included:
     // it is created by the caller and handed in, and the caller destroys it —
     // both when swapping images and on teardown.
     function destroy() {
+        destroyed = true;
+        dirty = false;
+        if (frameHandle !== null) cancelAnimationFrame(frameHandle);
+        frameHandle = null;
+
         calcParams.destroy();
         developTexture?.destroy();
         sharpHTexture?.destroy();
@@ -203,5 +249,5 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // Initialize with default sliders
     setSliders( defaultSlidersRGB );
 
-    return { loadImage, setSliders, setView, render, destroy };
+    return { loadImage, setSliders, setView, requestRender, destroy };
 }

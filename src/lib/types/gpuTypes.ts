@@ -57,7 +57,9 @@ export interface Renderer {
     loadImage: (image: GPUImage) => void;
     setSliders: (sliders: Sliders) => void;
     setView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
-    render: () => void;
+    // Marks the preview stale. The frame itself is drawn on the next animation
+    // frame the GPU has capacity for, so this never blocks the caller.
+    requestRender: () => void;
     destroy: () => void;
 }
 

@@ -135,16 +135,17 @@
                 imagePayload.fullWidth,
                 imagePayload.fullHeight,
             );
-            localRenderer.render();
+            localRenderer.requestRender();
         });
     });
 
-    // Re-render on adjustment changes
+    // Re-render on adjustment changes. Both calls are bookkeeping — a buffer
+    // write and a flag — so a drag never waits on the GPU here.
     $effect(() => {
         if (!renderer || !image) return;
         const _ = { ...sliders };
         renderer.setSliders(sliders);
-        renderer.render();
+        renderer.requestRender();
     });
 </script>
 
