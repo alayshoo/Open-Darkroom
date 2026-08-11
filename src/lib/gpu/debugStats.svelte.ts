@@ -23,6 +23,22 @@ export interface FrameSample {
     passes: PassTiming[];
 }
 
+/**
+ * What one histogram update cost.
+ *
+ * The two are reported side by side because they answer different questions.
+ * A histogram ends in a GPU→CPU map, and a map is a round trip: the queue has
+ * to drain and the callback has to reach JS again. So `gpuMs` is what a faster
+ * shader could reduce, and `wallMs - gpuMs` is what only running it less often
+ * — or reading it a frame late — can.
+ */
+export interface HistogramSample {
+    /** The compute pass alone. Zero without timestamp support. */
+    gpuMs: number;
+    /** The whole update, from the call to the readback resolving. */
+    wallMs: number;
+}
+
 /** Roughly three seconds of history at 60fps. */
 const CAPACITY = 180;
 
@@ -47,6 +63,11 @@ class DebugStats {
 
     readonly samples: FrameSample[] = [];
 
+    /** Histogram updates run on their own cadence, so they are kept apart from
+     *  the frame samples rather than folded into whichever frame they landed on. */
+    histogramVersion = $state(0);
+    readonly histogramSamples: HistogramSample[] = [];
+
     record(sample: FrameSample) {
         this.samples.push(sample);
         if (this.samples.length > CAPACITY) this.samples.shift();
@@ -54,9 +75,17 @@ class DebugStats {
         this.version++;
     }
 
+    recordHistogram(sample: HistogramSample) {
+        this.histogramSamples.push(sample);
+        if (this.histogramSamples.length > CAPACITY) this.histogramSamples.shift();
+        this.histogramVersion++;
+    }
+
     clear() {
         this.samples.length = 0;
+        this.histogramSamples.length = 0;
         this.version++;
+        this.histogramVersion++;
     }
 }
 

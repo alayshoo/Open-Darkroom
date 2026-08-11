@@ -3,13 +3,16 @@
 import type { Sliders } from "$lib/types/imgParameters";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
+import { createFrameTimer } from "./frameTimer";
+import { debugStats } from "../debugStats.svelte";
 import shaderSource from "../shaders/histogram.wgsl?raw";
 
 /** Number of bins per channel (matches the shader's array<atomic<u32>, 256>). */
 const NUM_BINS = 256;
 
 /** Size in bytes of one channel's bin buffer (256 × 4 bytes per u32). */
-const BINS_BUFFER_SIZE = NUM_BINS * 4;
+/** All three channels end to end, as `bins` in histogram.wgsl declares them. */
+const BINS_BUFFER_SIZE = NUM_BINS * 3 * 4;
 
 /**
  * Creates the histogram compute pipeline.
@@ -46,17 +49,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 buffer: { type: "read-only-storage" },
             },
             {
-                binding: 2, // bins_r
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "storage" },
-            },
-            {
-                binding: 3, // bins_g
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "storage" },
-            },
-            {
-                binding: 4, // bins_b
+                binding: 2, // bins — all three channels, end to end
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "storage" },
             },
@@ -77,11 +70,13 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         },
     });
 
-    // ── Storage buffers for histogram bins (GPU-side) ────────────────
-    // These are written to atomically by the compute shader and then
-    // copied to staging buffers for CPU readback.
-    const binsR = device.createBuffer({
-        label: "Histogram Bins R",
+    // ── Storage buffer for histogram bins (GPU-side) ─────────────────
+    // Written atomically by the compute shader, then copied to staging for CPU
+    // readback. All three channels share one buffer: they are always produced
+    // and consumed together, so splitting them only multiplies the copies and
+    // the maps.
+    const bins = device.createBuffer({
+        label: "Histogram Bins",
         size: BINS_BUFFER_SIZE,
         usage:
             GPUBufferUsage.STORAGE |
@@ -89,42 +84,36 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             GPUBufferUsage.COPY_DST,  // needed for clearBuffer
     });
 
-    const binsG = device.createBuffer({
-        label: "Histogram Bins G",
-        size: BINS_BUFFER_SIZE,
-        usage:
-            GPUBufferUsage.STORAGE |
-            GPUBufferUsage.COPY_SRC |
-            GPUBufferUsage.COPY_DST,
-    });
-
-    const binsB = device.createBuffer({
-        label: "Histogram Bins B",
-        size: BINS_BUFFER_SIZE,
-        usage:
-            GPUBufferUsage.STORAGE |
-            GPUBufferUsage.COPY_SRC |
-            GPUBufferUsage.COPY_DST,
-    });
-
-    // ── Staging buffers (MAP_READ) for GPU → CPU readback ────────────
-    const stagingR = device.createBuffer({
-        label: "Histogram Staging R",
+    // ── Staging buffer (MAP_READ) for GPU → CPU readback ─────────────
+    const staging = device.createBuffer({
+        label: "Histogram Staging",
         size: BINS_BUFFER_SIZE,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
 
-    const stagingG = device.createBuffer({
-        label: "Histogram Staging G",
-        size: BINS_BUFFER_SIZE,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
+    // Times the compute pass on its own, so the shader's cost can be told apart
+    // from the readback round trip that follows it.
+    const timer = createFrameTimer(gpu);
 
-    const stagingB = device.createBuffer({
-        label: "Histogram Staging B",
-        size: BINS_BUFFER_SIZE,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
+    // The bind group only changes when the image does, so it is kept rather
+    // than rebuilt on every slider move.
+    let boundTexture: GPUTexture | null = null;
+    let bindGroup: GPUBindGroup | null = null;
+
+    function bindGroupFor(inputTexture: GPUTexture): GPUBindGroup {
+        if (bindGroup && boundTexture === inputTexture) return bindGroup;
+        boundTexture = inputTexture;
+        bindGroup = device.createBindGroup({
+            label: "Histogram Bind Group",
+            layout: bindGroupLayout,
+            entries: [
+                { binding: 0, resource: inputTexture.createView() },
+                { binding: 1, resource: { buffer: calcParams.paramsBuffer } },
+                { binding: 2, resource: { buffer: bins } },
+            ],
+        });
+        return bindGroup;
+    }
 
     // ── Public API ───────────────────────────────────────────────────
 
@@ -135,18 +124,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
 
-        // Create a bind group connecting the actual resources
-        const bindGroup = device.createBindGroup({
-            label: "Histogram Bind Group",
-            layout: bindGroupLayout,
-            entries: [
-                { binding: 0, resource: inputTexture.createView() },
-                { binding: 1, resource: { buffer: calcParams.paramsBuffer } },
-                { binding: 2, resource: { buffer: binsR } },
-                { binding: 3, resource: { buffer: binsG } },
-                { binding: 4, resource: { buffer: binsB } },
-            ],
-        });
+        const measure = debugStats.enabled;
+        const start = measure ? performance.now() : 0;
+        if (measure) timer.beginFrame();
+
+        const bindGroup = bindGroupFor(inputTexture);
 
         const encoder = device.createCommandEncoder({
             label: "Histogram Compute",
@@ -156,12 +138,13 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         calcParams.recordCalcParams(encoder);
 
         // Clear bins to zero before dispatch
-        encoder.clearBuffer(binsR);
-        encoder.clearBuffer(binsG);
-        encoder.clearBuffer(binsB);
+        encoder.clearBuffer(bins);
 
         // Dispatch histogram compute shader
-        const pass = encoder.beginComputePass({ label: "Histogram Pass" });
+        const pass = encoder.beginComputePass({
+            label: "Histogram Pass",
+            timestampWrites: measure ? timer.passWrites("histogram") : undefined,
+        });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
 
@@ -171,40 +154,40 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         pass.dispatchWorkgroups(workgroupsX, workgroupsY);
         pass.end();
 
-        // Copy bins → staging buffers for CPU readback
-        encoder.copyBufferToBuffer(binsR, 0, stagingR, 0, BINS_BUFFER_SIZE);
-        encoder.copyBufferToBuffer(binsG, 0, stagingG, 0, BINS_BUFFER_SIZE);
-        encoder.copyBufferToBuffer(binsB, 0, stagingB, 0, BINS_BUFFER_SIZE);
+        // Copy bins → staging for CPU readback
+        encoder.copyBufferToBuffer(bins, 0, staging, 0, BINS_BUFFER_SIZE);
+        if (measure) timer.resolve(encoder);
 
         device.queue.submit([encoder.finish()]);
 
-        // Map staging buffers to CPU
-        await Promise.all([
-            stagingR.mapAsync(GPUMapMode.READ),
-            stagingG.mapAsync(GPUMapMode.READ),
-            stagingB.mapAsync(GPUMapMode.READ),
-        ]);
+        await staging.mapAsync(GPUMapMode.READ);
 
         // Copy the data out (mapAsync gives a temporary ArrayBuffer view)
-        const r = new Uint32Array(stagingR.getMappedRange().slice(0));
-        const g = new Uint32Array(stagingG.getMappedRange().slice(0));
-        const b = new Uint32Array(stagingB.getMappedRange().slice(0));
+        const all = new Uint32Array(staging.getMappedRange().slice(0));
+        staging.unmap();
 
-        stagingR.unmap();
-        stagingG.unmap();
-        stagingB.unmap();
+        // Stopped here rather than after the timings are read: this is the point
+        // the caller can use the data, and the pass timing is a separate map
+        // that would otherwise be counted as part of the wait.
+        const wallMs = measure ? performance.now() - start : 0;
+        if (measure) {
+            void timer.read().then((passes) => {
+                debugStats.recordHistogram({ gpuMs: passes[0]?.ms ?? 0, wallMs });
+            });
+        }
 
-        return { r, g, b };
+        return {
+            r: all.slice(0, NUM_BINS),
+            g: all.slice(NUM_BINS, NUM_BINS * 2),
+            b: all.slice(NUM_BINS * 2, NUM_BINS * 3),
+        };
     }
 
     function destroy() {
         calcParams.destroy();
-        binsR.destroy();
-        binsG.destroy();
-        binsB.destroy();
-        stagingR.destroy();
-        stagingG.destroy();
-        stagingB.destroy();
+        timer.destroy();
+        bins.destroy();
+        staging.destroy();
     }
 
     return { computeHistogram, destroy };

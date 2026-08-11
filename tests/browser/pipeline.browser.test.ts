@@ -33,6 +33,7 @@ import {
   VIEW_BUFFER_SIZE,
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
+import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -242,6 +243,53 @@ async function develop(
   detailTexture.destroy();
   compositeTexture.destroy();
   return out;
+}
+
+/**
+ * Run the histogram compute pipeline over `rgb`.
+ *
+ * The image is 64 × 4 against a 16 × 16 workgroup, so most of the last
+ * workgroup's rows fall outside it — which is the case the shader has to gate
+ * rather than return out of, since every invocation must reach its barriers.
+ */
+async function histogram(
+  rgb: Uint8Array,
+  sliders: Sliders,
+): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array }> {
+  const pipeline = createHistogramPipeline(gpu);
+  const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
+  try {
+    return await pipeline.computeHistogram(image.texture, sliders);
+  } finally {
+    image.texture.destroy();
+    pipeline.destroy();
+  }
+}
+
+/** Total weight one pixel casts per channel. Mirrors VOTE in histogram.wgsl. */
+const VOTE = 256;
+const TOTAL_WEIGHT = WIDTH * HEIGHT * VOTE;
+
+function sum(bins: Uint32Array): number {
+  return bins.reduce((total, v) => total + v, 0);
+}
+
+/** Weighted mean bin index — where a channel's mass sits. */
+function centroid(bins: Uint32Array): number {
+  let weighted = 0;
+  for (let i = 0; i < bins.length; i++) weighted += i * bins[i];
+  return weighted / sum(bins);
+}
+
+/** A solid colour across the whole chart. */
+function solid(r: number, g: number, b: number): Uint8Array {
+  const rgb = new Uint8Array(WIDTH * HEIGHT * 3);
+  for (let i = 0; i < WIDTH * HEIGHT; i++) {
+    rgb[i * 3] = r;
+    rgb[i * 3 + 1] = g;
+    rgb[i * 3 + 2] = b;
+  }
+  return rgb;
 }
 
 /** The same independent-channel ramp the Rust suite uses. */
@@ -525,5 +573,52 @@ describe("the view uniform", () => {
     // The pipeline seeds the buffer at construction, so leaving it alone and
     // setting it to full resolution are the same thing.
     expect([...untouched]).toEqual([...explicit]);
+  });
+});
+
+describe("histogram compute", () => {
+  // Each pixel splits one VOTE between two adjacent bins, so the weight in a
+  // channel is fixed no matter what the tone chain does to the values. That
+  // makes it the one assertion that holds without assuming anything about the
+  // develop maths — and votes lost in the workgroup merge, or counted twice by
+  // the out-of-bounds invocations, show up here and nowhere else.
+  it("conserves one vote per pixel per channel", async () => {
+    const bins = await histogram(rampChart(), defaultSlidersRGB);
+
+    expect(sum(bins.r)).toBe(TOTAL_WEIGHT);
+    expect(sum(bins.g)).toBe(TOTAL_WEIGHT);
+    expect(sum(bins.b)).toBe(TOTAL_WEIGHT);
+  });
+
+  it("keeps the three channels apart", async () => {
+    // Ascending red, descending green, and blue at half the red value. The
+    // three distributions are distinct, so a channel reading another's slice of
+    // the shared bin buffer cannot pass this.
+    const bins = await histogram(rampChart(), defaultSlidersRGB);
+
+    expect(centroid(bins.b)).toBeLessThan(centroid(bins.r));
+    expect(centroid(bins.b)).toBeLessThan(centroid(bins.g));
+    expect([...bins.r]).not.toEqual([...bins.g]);
+  });
+
+  it("puts a solid colour in one place per channel", async () => {
+    const bins = await histogram(solid(32, 128, 220), defaultSlidersRGB);
+
+    // Every pixel carries the same value, so its vote splits between the same
+    // two adjacent bins — nothing should land anywhere else.
+    for (const channel of [bins.r, bins.g, bins.b]) {
+      const occupied = [...channel.entries()].filter(([, weight]) => weight > 0);
+
+      expect(occupied.length).toBeGreaterThanOrEqual(1);
+      expect(occupied.length).toBeLessThanOrEqual(2);
+      if (occupied.length === 2) {
+        expect(occupied[1][0] - occupied[0][0]).toBe(1);
+      }
+      expect(sum(channel)).toBe(TOTAL_WEIGHT);
+    }
+
+    // Darkest channel lowest, brightest highest.
+    expect(centroid(bins.r)).toBeLessThan(centroid(bins.g));
+    expect(centroid(bins.g)).toBeLessThan(centroid(bins.b));
   });
 });

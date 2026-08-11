@@ -31,10 +31,23 @@ struct Params {
 }                               // total: 256 bytes
 @group(0) @binding(1) var<storage, read> params: Params;
 
-// Variables to calculate data into.
-@group(0) @binding(2) var<storage, read_write> bins_r: array<atomic<u32>, 256>;
-@group(0) @binding(3) var<storage, read_write> bins_g: array<atomic<u32>, 256>;
-@group(0) @binding(4) var<storage, read_write> bins_b: array<atomic<u32>, 256>;
+const BINS_PER_CHANNEL: u32 = 256u;
+const BIN_TOTAL:        u32 = 768u;   // three channels, laid out end to end
+const R_BASE:           u32 = 0u;
+const G_BASE:           u32 = 256u;
+const B_BASE:           u32 = 512u;
+
+// One buffer rather than three: the three are always written together and read
+// back together, so splitting them only multiplies the copies and the maps.
+@group(0) @binding(2) var<storage, read_write> bins: array<atomic<u32>, BIN_TOTAL>;
+
+// Per-workgroup tallies, merged into `bins` once at the end.
+//
+// Every pixel voting straight into storage put six atomics per pixel onto 768
+// addresses, and a photograph is exactly the contention worst case: a flat sky
+// aims millions of them at one bin. Accumulating in workgroup memory first
+// leaves one global atomic per bin per workgroup instead.
+var<workgroup> local_bins: array<atomic<u32>, BIN_TOTAL>;
 
 // Total weight each pixel contributes, split between the two bins it falls
 // between. This also bounds how many pixels a single bin can hold before the
@@ -101,12 +114,10 @@ fn contrast_curve(x: f32, k: f32) -> f32 {
 // ========================== (update both files together) ==========================
 
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) gid: vec3u) {
-  let dimensions = textureDimensions(inputTexture);
-  if (gid.x >= dimensions.x || gid.y >= dimensions.y) { return; }
-
-  var rgb = textureLoad(inputTexture, vec2u(gid.x, gid.y), 0).rgb;
+// One pixel through the same chain develop.wgsl runs, ending in the encoded
+// domain the bins measure.
+fn developed_srgb(coord: vec2u) -> vec3f {
+  var rgb = textureLoad(inputTexture, coord, 0).rgb;
 
   // ===================== Apply same adjustment chain as develop.wgsl =====================
 
@@ -210,35 +221,61 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
 
   // Clamp + linear → sRGB
-  let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));
   // ============================= (update if it ever changes) =============================
+  return encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));
+}
 
+// Split one pixel's vote between the two bins its value falls between, per
+// channel, into this workgroup's tallies.
+fn accumulate(srgb: vec3f) {
   // Fractional bin position in [0, 255]
-  let rf = clamp(srgb.r, 0.0, 1.0) * 255.0;
-  let gf = clamp(srgb.g, 0.0, 1.0) * 255.0;
-  let bf = clamp(srgb.b, 0.0, 1.0) * 255.0;
+  let f = clamp(srgb, vec3f(0.0), vec3f(1.0)) * 255.0;
 
-  // Lower bin indices
-  let r0 = u32(rf);
-  let g0 = u32(gf);
-  let b0 = u32(bf);
-
-  // Upper bin indices, clamped so bin 255 absorbs the right edge
-  let r1 = min(r0 + 1u, 255u);
-  let g1 = min(g0 + 1u, 255u);
-  let b1 = min(b0 + 1u, 255u);
+  // Lower bin indices, and upper ones clamped so bin 255 absorbs the right edge
+  let lo = vec3u(f);
+  let hi = min(lo + vec3u(1u), vec3u(BINS_PER_CHANNEL - 1u));
 
   // Fractional weight for the upper bin, scaled to [0, VOTE) so each pixel's
   // vote can be split across two adjacent bins without floating-point atomics.
   // Eliminates 8-bit quantisation combing.
-  let rw = u32((rf - f32(r0)) * f32(VOTE));
-  let gw = u32((gf - f32(g0)) * f32(VOTE));
-  let bw = u32((bf - f32(b0)) * f32(VOTE));
+  let w = vec3u((f - vec3f(lo)) * f32(VOTE));
 
-  atomicAdd(&bins_r[r0], VOTE - rw);
-  atomicAdd(&bins_r[r1], rw);
-  atomicAdd(&bins_g[g0], VOTE - gw);
-  atomicAdd(&bins_g[g1], gw);
-  atomicAdd(&bins_b[b0], VOTE - bw);
-  atomicAdd(&bins_b[b1], bw);
+  atomicAdd(&local_bins[R_BASE + lo.r], VOTE - w.r);
+  atomicAdd(&local_bins[R_BASE + hi.r], w.r);
+  atomicAdd(&local_bins[G_BASE + lo.g], VOTE - w.g);
+  atomicAdd(&local_bins[G_BASE + hi.g], w.g);
+  atomicAdd(&local_bins[B_BASE + lo.b], VOTE - w.b);
+  atomicAdd(&local_bins[B_BASE + hi.b], w.b);
+}
+
+// 16 × 16, so the strided loops below cover 768 bins three entries at a time.
+const WORKGROUP_THREADS: u32 = 256u;
+
+@compute @workgroup_size(16, 16)
+fn main(
+  @builtin(global_invocation_id) gid: vec3u,
+  @builtin(local_invocation_index) lid: u32,
+) {
+  for (var i = lid; i < BIN_TOTAL; i += WORKGROUP_THREADS) {
+    atomicStore(&local_bins[i], 0u);
+  }
+  workgroupBarrier();
+
+  // Both barriers have to be reached by every invocation in the workgroup, so
+  // the edge of the image gates the work rather than returning out of it.
+  let dimensions = textureDimensions(inputTexture);
+  if (gid.x < dimensions.x && gid.y < dimensions.y) {
+    accumulate(developed_srgb(gid.xy));
+  }
+
+  workgroupBarrier();
+
+  // Bins no pixel in this workgroup reached are the common case once the image
+  // is anything but a full-range gradient, and they are worth not paying for.
+  for (var i = lid; i < BIN_TOTAL; i += WORKGROUP_THREADS) {
+    let total = atomicLoad(&local_bins[i]);
+    if (total != 0u) {
+      atomicAdd(&bins[i], total);
+    }
+  }
 }

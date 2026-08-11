@@ -78,6 +78,22 @@
         };
     });
 
+    // Histogram updates run on their own cadence, so they average separately.
+    let histogram = $derived.by(() => {
+        debugStats.histogramVersion;
+        const recent = debugStats.histogramSamples.slice(-WINDOW);
+        if (recent.length === 0) return null;
+
+        const mean = (pick: (s: (typeof recent)[number]) => number) =>
+            recent.reduce((total, s) => total + pick(s), 0) / recent.length;
+
+        const gpuMs = mean((s) => s.gpuMs);
+        const wallMs = mean((s) => s.wallMs);
+        // What a faster shader cannot reach: the queue draining and the map
+        // callback finding its way back to JS.
+        return { gpuMs, wallMs, roundTripMs: Math.max(wallMs - gpuMs, 0) };
+    });
+
     // Redraw the sparkline whenever a frame lands. A canvas keeps this off the
     // DOM — 180 elements rebuilt at frame rate would cost more than it measures.
     $effect(() => {
@@ -156,6 +172,19 @@
             </dl>
         {:else if !debugStats.supportsPassTimings}
             <p class="note">no timestamp-query on this adapter</p>
+        {/if}
+
+        {#if !debugStats.histogramEnabled}
+            <p class="note">histogram off (F2)</p>
+        {:else if histogram}
+            <dl class="rows passes">
+                <dt class="total">histogram</dt>
+                <dd class="total">{ms(histogram.wallMs)}</dd>
+                <dt class="child">compute</dt>
+                <dd>{ms(histogram.gpuMs)}</dd>
+                <dt class="child">round trip</dt>
+                <dd>{ms(histogram.roundTripMs)}</dd>
+            </dl>
         {/if}
     {:else}
         <p class="note">move a slider to sample</p>

@@ -11,6 +11,7 @@
 
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath } from "node:url";
 
 const alias = {
@@ -31,6 +32,10 @@ export default defineConfig({
       },
       {
         resolve: { alias },
+        // The pipelines report their timings into a runes-backed store, so the
+        // `.svelte.ts` files they import have to be compiled rather than read
+        // as plain TypeScript.
+        plugins: [svelte()],
         test: {
           name: "browser",
           include: ["tests/browser/**/*.test.ts"],
