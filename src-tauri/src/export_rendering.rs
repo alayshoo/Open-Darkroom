@@ -18,6 +18,8 @@ pub const CALC_PARAMS_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
 pub const DEVELOP_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/develop.wgsl");
+pub const CALC_SHARP_TEXTURE_WGSL: &str =
+    include_str!("../../src/lib/gpu/shaders/calcSharpTexture.wgsl");
 pub const COMPOSITE_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/composite.wgsl");
 pub const COLOR_SPACE_ENCODE_WGSL: &str =
@@ -27,6 +29,77 @@ pub const COLOR_SPACE_ENCODE_WGSL: &str =
 /// `WORKING_FORMAT` in `src/lib/types/gpuTypes.ts` — see the note there on why
 /// the intermediates are 32-bit float rather than 16.
 pub const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+/// Format of the sharpness textures. Must match `SHARP_FORMAT` in
+/// `src/lib/types/gpuTypes.ts`.
+pub const SHARP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+/// Size of the `SharpParams` struct written by calcParams.wgsl and read by
+/// calcSharpTexture.wgsl / composite.wgsl.
+pub const SHARP_PARAMS_BYTES: u64 = 48;
+
+/// Smallest sigma the blur kernel is given, and the widest radius it can ask
+/// for. Both mirror `MIN_SIGMA` in calcParams.wgsl and `MAX_RADIUS` in
+/// calcSharpTexture.wgsl.
+pub const MIN_SIGMA: f32 = 0.7;
+pub const MAX_RADIUS: u32 = 180;
+
+/// Texture's two fixed scales, and the bounds on clarity's proportional one.
+/// All mirror calcParams.wgsl.
+pub const TEXTURE_SIGMA_LO: f32 = 1.2;
+pub const TEXTURE_SIGMA_HI: f32 = 5.0;
+pub const CLARITY_SIGMA_FRACTION: f32 = 0.01;
+pub const MIN_CLARITY_SIGMA: f32 = 20.0;
+pub const MAX_CLARITY_SIGMA: f32 = 60.0;
+
+/// Clarity's upper radius as calcParams.wgsl derives it — a fraction of the short
+/// edge, clamped at both ends. Its lower one is `TEXTURE_SIGMA_HI`, shared with
+/// texture so the two bands meet without overlapping.
+pub fn clarity_sigma(width: u32, height: u32) -> f32 {
+    let short_edge = width.min(height) as f32;
+    (short_edge * CLARITY_SIGMA_FRACTION).clamp(MIN_CLARITY_SIGMA, MAX_CLARITY_SIGMA)
+}
+
+/// Rows of overlap each chunk needs so the blur sees the same neighbours it
+/// would in a single-pass render.
+///
+/// The vertical pass at row `y` reads the horizontal pass at rows `y ± radius`,
+/// and the horizontal pass at a row reads only that row — so the margin is one
+/// radius, not two. Without it every chunk boundary would blur against a clamped
+/// edge and leave a visible seam.
+///
+/// The widest band in play sets it, and only bands whose slider is off the
+/// neutral position count: a default export still does exactly the work it did
+/// before the sharpness stage existed.
+pub fn sharp_margin_rows(sliders: &SlidersPayload, width: u32, height: u32) -> u32 {
+    // Export renders at full resolution, so no sigma needs view scaling.
+    let mut sigma: f32 = 0.0;
+
+    if sliders.usm_amount != 0.0 {
+        sigma = sigma.max(sliders.usm_radius.max(MIN_SIGMA));
+    }
+    if sliders.texture != 0.0 {
+        sigma = sigma.max(TEXTURE_SIGMA_HI.max(MIN_SIGMA * 2.0));
+    }
+    if sliders.clarity != 0.0 {
+        sigma = sigma.max(clarity_sigma(width, height));
+    }
+
+    if sigma == 0.0 {
+        return 0;
+    }
+    ((sigma * 3.0).ceil() as u32).min(MAX_RADIUS)
+}
+
+/// Rows to render per chunk, given the margin each one has to discard.
+///
+/// Clarity's kernel reaches 180 rows, so a fixed 512-row chunk would spend more
+/// than half its work on margins. Growing the chunk with the margin keeps that
+/// overhead bounded; the ceiling is memory, since four full-width intermediates
+/// at 16 bytes a texel are live at once.
+pub fn chunk_rows_for_margin(margin: u32) -> u32 {
+    CHUNK_ROWS.max(margin * 4)
+}
 
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
@@ -40,7 +113,7 @@ pub const SLIDERS_BYTES: usize = 128;
 /// Number of f32 fields in the `Sliders` struct, ahead of the tail padding.
 pub const SLIDER_COUNT: usize = 30;
 
-/// Size of the `View` uniform consumed by calcParams.wgsl. One f32 of payload,
+/// Size of the `View` uniform consumed by calcParams.wgsl. Three f32 of payload,
 /// padded to the 16 bytes a uniform struct binds at.
 pub const VIEW_BYTES: usize = 16;
 
@@ -182,12 +255,21 @@ pub struct ViewPayload {
     /// Rendered pixels per full-resolution image pixel. Below 1 for a
     /// downscaled preview, exactly 1 for an export.
     pub render_scale: f32,
+    /// Dimensions of the whole image, not of the chunk being rendered. Clarity's
+    /// radius is a fraction of the frame, so it needs the frame.
+    pub full_width: f32,
+    pub full_height: f32,
 }
 
 impl Default for ViewPayload {
-    /// Full resolution — the export path never renders anywhere else.
+    /// Full resolution — the export path never renders anywhere else. The
+    /// dimensions have no meaningful default and are filled in per render.
     fn default() -> Self {
-        Self { render_scale: 1.0 }
+        Self {
+            render_scale: 1.0,
+            full_width: 0.0,
+            full_height: 0.0,
+        }
     }
 }
 
@@ -195,6 +277,8 @@ impl Default for ViewPayload {
 pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
     let mut bytes = [0u8; VIEW_BYTES];
     bytes[0..4].copy_from_slice(&v.render_scale.to_le_bytes());
+    bytes[4..8].copy_from_slice(&v.full_width.to_le_bytes());
+    bytes[8..12].copy_from_slice(&v.full_height.to_le_bytes());
     bytes
 }
 
@@ -217,7 +301,7 @@ pub async fn render_image(
         height,
         sliders,
         bit_depth,
-        CHUNK_ROWS,
+        chunk_rows_for_margin(sharp_margin_rows(sliders, width, height)),
         on_progress,
     )
     .await
@@ -305,6 +389,13 @@ pub async fn render_image_with_chunk_rows(
         mapped_at_creation: false,
     });
 
+    let sharp_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sharp_buf"),
+        size: SHARP_PARAMS_BYTES,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
     // ── 3. calcParams compute pipeline ────────────────────────────────────────
 
     let calc_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -345,6 +436,16 @@ pub async fn render_image_with_chunk_rows(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -365,10 +466,15 @@ pub async fn render_image_with_chunk_rows(
             cache: None,
         });
 
-    // Export renders at full resolution, so the view is the default 1.0.
+    // Export renders at full resolution, so the scale is 1; the dimensions are
+    // the whole image, not the chunk.
     let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("view_buf"),
-        contents: &view_to_bytes(&ViewPayload::default()),
+        contents: &view_to_bytes(&ViewPayload {
+            render_scale: 1.0,
+            full_width: width as f32,
+            full_height: height as f32,
+        }),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -387,6 +493,10 @@ pub async fn render_image_with_chunk_rows(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: view_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: sharp_buf.as_entire_binding(),
             },
         ],
     });
@@ -493,35 +603,61 @@ pub async fn render_image_with_chunk_rows(
     // layout. 32-bit float textures are not filterable and these stages index
     // their input one to one with textureLoad, so no sampler is bound.
 
-    let fs_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("fs_bgl"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        }],
-    });
+    let intermediate_entry = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let params_entry = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
 
-    let fs_pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fs_layout"),
-            bind_group_layouts: &[&fs_bgl],
-            push_constant_ranges: &[],
-        });
+    let bgl = |label, entries: &[wgpu::BindGroupLayoutEntry]| {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(label),
+            entries,
+        })
+    };
 
-    let mut full_screen_pipeline = |label: &str, source: &str, format| {
+    let blur_bgl = bgl(
+        "blur_bgl",
+        &[intermediate_entry(0), intermediate_entry(1), params_entry(2)],
+    );
+    let composite_bgl = bgl(
+        "composite_bgl",
+        &[intermediate_entry(0), intermediate_entry(1), params_entry(2)],
+    );
+    let encode_bgl = bgl("encode_bgl", &[intermediate_entry(0)]);
+
+    let full_screen_pipeline = |label: &str,
+                                source: &str,
+                                entry_point: &str,
+                                format,
+                                layout: &wgpu::BindGroupLayout| {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[layout],
+            push_constant_ranges: &[],
+        });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&fs_pipeline_layout),
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &module,
                 entry_point: Some("vs_main"),
@@ -530,7 +666,7 @@ pub async fn render_image_with_chunk_rows(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
-                entry_point: Some("fs_main"),
+                entry_point: Some(entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
@@ -549,12 +685,33 @@ pub async fn render_image_with_chunk_rows(
         })
     };
 
-    let composite_pipeline =
-        full_screen_pipeline("composite_pipeline", COMPOSITE_WGSL, WORKING_FORMAT);
+    let sharp_h_pipeline = full_screen_pipeline(
+        "sharp_h_pipeline",
+        CALC_SHARP_TEXTURE_WGSL,
+        "h_main",
+        SHARP_FORMAT,
+        &blur_bgl,
+    );
+    let sharp_v_pipeline = full_screen_pipeline(
+        "sharp_v_pipeline",
+        CALC_SHARP_TEXTURE_WGSL,
+        "v_main",
+        SHARP_FORMAT,
+        &blur_bgl,
+    );
+    let composite_pipeline = full_screen_pipeline(
+        "composite_pipeline",
+        COMPOSITE_WGSL,
+        "fs_main",
+        WORKING_FORMAT,
+        &composite_bgl,
+    );
     let encode_pipeline = full_screen_pipeline(
         "color_space_encode_pipeline",
         COLOR_SPACE_ENCODE_WGSL,
+        "fs_main",
         output_format,
+        &encode_bgl,
     );
 
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -581,24 +738,45 @@ pub async fn render_image_with_chunk_rows(
     let mut row_start = 0u32;
     let mut out_rgb_offset = 0usize;
 
-    // Intermediates carrying the perceptual working signal between stages. Every
-    // chunk is the same height but the last, so these are built once and reused
-    // rather than reallocated per chunk — at 16 bytes per texel they are the
+    // Rows rendered either side of the chunk purely to feed the blur, then
+    // discarded. At the top and bottom of the image there is nothing to fetch and
+    // the margin is naturally short — which is correct, since a single-pass
+    // render clamps at those edges too.
+    let margin = sharp_margin_rows(sliders, width, height);
+
+    // Intermediates the chain hands between its stages. Chunks share a height
+    // except at the ends of the image, so these are built once and reused rather
+    // than reallocated per chunk — at up to 16 bytes per texel they are the
     // largest allocations in the loop.
-    let mut intermediates: Option<(u32, wgpu::TextureView, wgpu::TextureView)> = None;
+    #[allow(clippy::type_complexity)]
+    let mut intermediates: Option<(
+        u32,
+        wgpu::TextureView,
+        wgpu::TextureView,
+        wgpu::TextureView,
+        wgpu::TextureView,
+    )> = None;
 
     while row_start < height {
         let row_end = (row_start + chunk_rows).min(height);
         let chunk_height = row_end - row_start;
-        let pixel_start = (row_start * width) as usize;
-        let pixel_count = (chunk_height * width) as usize;
+
+        // The padded region actually rendered, and where the kept rows sit
+        // inside it.
+        let pad_start = row_start.saturating_sub(margin);
+        let pad_end = (row_end + margin).min(height);
+        let pad_height = pad_end - pad_start;
+        let top_margin = row_start - pad_start;
+
+        let pixel_start = (pad_start * width) as usize;
+        let pixel_count = (pad_height * width) as usize;
 
         let src_u16 = &pixels_u16[pixel_start * 4..(pixel_start + pixel_count) * 4];
         let chunk_f16_bytes = linearize_rgba_u16(src_u16, &lut);
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),
-            size: wgpu::Extent3d { width, height: chunk_height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -620,25 +798,25 @@ pub async fn render_image_with_chunk_rows(
                 bytes_per_row: Some(width * LINEAR_BYTES_PER_PIXEL as u32),
                 rows_per_image: None,
             },
-            wgpu::Extent3d { width, height: chunk_height, depth_or_array_layers: 1 },
+            wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
         );
 
         let input_view = input_tex.create_view(&Default::default());
 
-        if intermediates.as_ref().map(|(h, _, _)| *h) != Some(chunk_height) {
-            let intermediate = |label| {
+        if intermediates.as_ref().map(|(h, _, _, _, _)| *h) != Some(pad_height) {
+            let intermediate = |label, format| {
                 device
                     .create_texture(&wgpu::TextureDescriptor {
                         label: Some(label),
                         size: wgpu::Extent3d {
                             width,
-                            height: chunk_height,
+                            height: pad_height,
                             depth_or_array_layers: 1,
                         },
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: WORKING_FORMAT,
+                        format,
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                             | wgpu::TextureUsages::TEXTURE_BINDING,
                         view_formats: &[],
@@ -646,16 +824,19 @@ pub async fn render_image_with_chunk_rows(
                     .create_view(&Default::default())
             };
             intermediates = Some((
-                chunk_height,
-                intermediate("develop_tex"),
-                intermediate("composite_tex"),
+                pad_height,
+                intermediate("develop_tex", WORKING_FORMAT),
+                intermediate("sharp_h_tex", SHARP_FORMAT),
+                intermediate("detail_tex", SHARP_FORMAT),
+                intermediate("composite_tex", WORKING_FORMAT),
             ));
         }
-        let (_, develop_view, composite_view) = intermediates.as_ref().unwrap();
+        let (_, develop_view, sharp_h_view, detail_view, composite_view) =
+            intermediates.as_ref().unwrap();
 
         let output_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("output_tex"),
-            size: wgpu::Extent3d { width, height: chunk_height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -692,28 +873,77 @@ pub async fn render_image_with_chunk_rows(
             ],
         });
 
-        let full_screen_bg = |label, input: &wgpu::TextureView| {
+        // The horizontal pass never reads binding 1; it is the same developed
+        // texture it is already blurring, so the layout can stay shared.
+        let blur_bg = |label, input: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label),
-                layout: &fs_bgl,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(input),
-                }],
+                layout: &blur_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(input),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(develop_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: sharp_buf.as_entire_binding(),
+                    },
+                ],
             })
         };
-        let composite_bg = full_screen_bg("composite_bg", develop_view);
-        let encode_bg = full_screen_bg("encode_bg", composite_view);
+        let sharp_h_bg = blur_bg("sharp_h_bg", develop_view);
+        let sharp_v_bg = blur_bg("sharp_v_bg", sharp_h_view);
+
+        let composite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("composite_bg"),
+            layout: &composite_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(develop_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(detail_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: sharp_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let encode_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("encode_bg"),
+            layout: &encode_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(composite_view),
+            }],
+        });
 
         let mut enc = device.create_command_encoder(&Default::default());
 
+        // The blur is skipped whenever the margin is zero, which is exactly when
+        // the effect is switched off. Skipping is only ever a saving: calcParams
+        // zeroes the amount over the same condition, so composite is a no-op and
+        // the untouched detail texture goes nowhere.
+        let mut passes: Vec<(&str, &wgpu::TextureView, &wgpu::RenderPipeline, &wgpu::BindGroup)> =
+            vec![("develop_pass", develop_view, &dev_pipeline, &dev_bg)];
+        if margin > 0 {
+            passes.push(("sharp_h_pass", sharp_h_view, &sharp_h_pipeline, &sharp_h_bg));
+            passes.push(("sharp_v_pass", detail_view, &sharp_v_pipeline, &sharp_v_bg));
+        }
+        passes.push(("composite_pass", composite_view, &composite_pipeline, &composite_bg));
+        passes.push(("encode_pass", &output_view, &encode_pipeline, &encode_bg));
+
         // Each stage reads the previous one's target, so they cannot be merged:
         // a fragment can only read a texture it is not currently writing.
-        for (label, target, pipeline, bind_group) in [
-            ("develop_pass", develop_view, &dev_pipeline, &dev_bg),
-            ("composite_pass", composite_view, &composite_pipeline, &composite_bg),
-            ("encode_pass", &output_view, &encode_pipeline, &encode_bg),
-        ] {
+        for (label, target, pipeline, bind_group) in passes {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(label),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -733,11 +963,12 @@ pub async fn render_image_with_chunk_rows(
             pass.draw(0..6, 0..1);
         }
 
+        // Copy back only the rows this chunk owns, leaving the margins behind.
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &output_tex,
                 mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
+                origin: wgpu::Origin3d { x: 0, y: top_margin, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {

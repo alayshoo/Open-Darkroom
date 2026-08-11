@@ -13,7 +13,8 @@ mod common;
 use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL};
 
 use open_darkroom_lib::export_rendering::{
-    CALC_PARAMS_WGSL, DEVELOP_WGSL, PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
+    CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COMPOSITE_WGSL, DEVELOP_WGSL, PARAMS_BYTES,
+    SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
 };
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
@@ -314,6 +315,37 @@ fn params_struct_matches_the_declared_size() {
         struct_size(&fields),
         PARAMS_BYTES as usize,
         "PARAMS_BYTES disagrees with the WGSL Params struct: {fields:#?}"
+    );
+}
+
+/// SharpParams is written by calcParams.wgsl and read by the two shaders of the
+/// sharpness stage, so it is declared three times. It is kept apart from Params
+/// precisely so that neither struct has to carry fields its readers never touch —
+/// which only pays off while all three copies agree.
+#[test]
+fn sharp_params_struct_is_identical_across_every_shader() {
+    let from_calc = wgsl_struct(CALC_PARAMS_WGSL, "SharpParams");
+    let from_blur = wgsl_struct(CALC_SHARP_TEXTURE_WGSL, "SharpParams");
+    let from_composite = wgsl_struct(COMPOSITE_WGSL, "SharpParams");
+
+    assert_eq!(
+        from_calc, from_blur,
+        "SharpParams drifted between calcParams.wgsl and calcSharpTexture.wgsl"
+    );
+    assert_eq!(
+        from_calc, from_composite,
+        "SharpParams drifted between calcParams.wgsl and composite.wgsl"
+    );
+}
+
+#[test]
+fn sharp_params_struct_matches_the_declared_size() {
+    let fields = wgsl_struct(CALC_PARAMS_WGSL, "SharpParams");
+
+    assert_eq!(
+        struct_size(&fields),
+        SHARP_PARAMS_BYTES as usize,
+        "SHARP_PARAMS_BYTES disagrees with the WGSL SharpParams struct: {fields:#?}"
     );
 }
 

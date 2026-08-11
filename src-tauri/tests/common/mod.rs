@@ -16,7 +16,8 @@ use wgpu::util::DeviceExt;
 
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16};
 use open_darkroom_lib::export_rendering::{
-    render_image, sliders_to_bytes, SlidersPayload, PARAMS_BYTES,
+    render_image, sliders_to_bytes, view_to_bytes, SlidersPayload, ViewPayload, PARAMS_BYTES,
+    SHARP_PARAMS_BYTES,
 };
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 
@@ -363,6 +364,16 @@ impl Params {
 
 /// Build a params storage buffer by running calcParams.wgsl for `sliders`.
 fn calc_params_buffer(sliders: &SlidersPayload, extra_usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    calc_buffers(sliders, &ViewPayload::default(), extra_usage).0
+}
+
+/// Run calcParams.wgsl for `sliders` at `view`, returning both the `Params` and
+/// the `SharpParams` buffers it writes.
+fn calc_buffers(
+    sliders: &SlidersPayload,
+    view: &ViewPayload,
+    extra_usage: wgpu::BufferUsages,
+) -> (wgpu::Buffer, wgpu::Buffer) {
     let (device, queue) = device();
 
     let slider_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -371,9 +382,22 @@ fn calc_params_buffer(sliders: &SlidersPayload, extra_usage: wgpu::BufferUsages)
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
+    let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("test_view_buf"),
+        contents: &view_to_bytes(view),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("test_params_buf"),
         size: PARAMS_BYTES,
+        usage: wgpu::BufferUsages::STORAGE | extra_usage,
+        mapped_at_creation: false,
+    });
+
+    let sharp_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test_sharp_buf"),
+        size: SHARP_PARAMS_BYTES,
         usage: wgpu::BufferUsages::STORAGE | extra_usage,
         mapped_at_creation: false,
     });
@@ -406,6 +430,14 @@ fn calc_params_buffer(sliders: &SlidersPayload, extra_usage: wgpu::BufferUsages)
                 binding: 1,
                 resource: params_buf.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: view_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: sharp_buf.as_entire_binding(),
+            },
         ],
     });
 
@@ -419,7 +451,68 @@ fn calc_params_buffer(sliders: &SlidersPayload, extra_usage: wgpu::BufferUsages)
     queue.submit(std::iter::once(enc.finish()));
     let _ = device.poll(wgpu::MaintainBase::Wait);
 
-    params_buf
+    (params_buf, sharp_buf)
+}
+
+/// The `SharpParams` struct calcParams.wgsl writes, read back as f32 lanes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SharpParams {
+    pub usm_amount: f32,
+    pub usm_sigma: f32,
+    pub usm_luma_threshold: f32,
+    pub usm_detail_threshold: f32,
+    pub texture_amount: f32,
+    pub texture_sigma_lo: f32,
+    pub texture_sigma_hi: f32,
+    pub clarity_amount: f32,
+    pub clarity_sigma: f32,
+}
+
+/// Run calcParams.wgsl for a view and read the `SharpParams` back. The
+/// dimensions are the whole image's — clarity's radius is a fraction of them.
+pub fn run_calc_sharp(
+    sliders: &SlidersPayload,
+    render_scale: f32,
+    full_width: u32,
+    full_height: u32,
+) -> SharpParams {
+    let (device, queue) = device();
+
+    let (_, sharp_buf) = calc_buffers(
+        sliders,
+        &ViewPayload {
+            render_scale,
+            full_width: full_width as f32,
+            full_height: full_height as f32,
+        },
+        wgpu::BufferUsages::COPY_SRC,
+    );
+
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test_sharp_staging"),
+        size: SHARP_PARAMS_BYTES,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut enc = device.create_command_encoder(&Default::default());
+    enc.copy_buffer_to_buffer(&sharp_buf, 0, &staging, 0, SHARP_PARAMS_BYTES);
+    queue.submit(std::iter::once(enc.finish()));
+
+    let bytes = read_buffer(device, &staging);
+    let lane = |i: usize| f32::from_le_bytes([bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2], bytes[i * 4 + 3]]);
+
+    SharpParams {
+        usm_amount: lane(0),
+        usm_sigma: lane(1),
+        usm_luma_threshold: lane(2),
+        usm_detail_threshold: lane(3),
+        texture_amount: lane(4),
+        texture_sigma_lo: lane(5),
+        texture_sigma_hi: lane(6),
+        clarity_amount: lane(7),
+        clarity_sigma: lane(8),
+    }
 }
 
 /// Run calcParams.wgsl and read the resulting `Params` struct back.

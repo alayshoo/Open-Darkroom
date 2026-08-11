@@ -6,11 +6,26 @@
 // same stages the app does — a layout that drifts from its WGSL is exactly the
 // kind of bug the browser layer exists to catch.
 
-import { WORKING_FORMAT, type GPUSession, type RenderStage } from "$lib/types/gpuTypes";
+import {
+    SHARP_FORMAT,
+    WORKING_FORMAT,
+    type GPUSession,
+    type RenderStage,
+} from "$lib/types/gpuTypes";
 import { createRenderStage, intermediateBinding } from "./renderStagePipeline";
 import developSource from "../shaders/develop.wgsl?raw";
+import calcSharpTextureSource from "../shaders/calcSharpTexture.wgsl?raw";
 import compositeSource from "../shaders/composite.wgsl?raw";
 import colorSpaceEncodeSource from "../shaders/colorSpaceEncode.wgsl?raw";
+
+// A read-only storage buffer of computed values, as calcParams.wgsl writes them.
+function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
+    return {
+        binding,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: "read-only-storage" },
+    };
+}
 
 // Steps 1-10, from the source image into the perceptual working space.
 export function createDevelopStage(gpu: GPUSession): RenderStage {
@@ -38,6 +53,28 @@ export function createDevelopStage(gpu: GPUSession): RenderStage {
     });
 }
 
+// The two halves of the separable blur that extracts the detail bands. Both
+// declare the same layout so the two pipelines stay interchangeable at the call
+// site; the horizontal pass simply never reads binding 1, and points it at the
+// same developed texture it is already blurring.
+function createBlurStage(gpu: GPUSession, entryPoint: string, label: string): RenderStage {
+    return createRenderStage(gpu, {
+        label,
+        code: calcSharpTextureSource,
+        format: SHARP_FORMAT,
+        entryPoint,
+        bindings: [intermediateBinding(0), intermediateBinding(1), paramsBinding(2)],
+    });
+}
+
+export function createSharpHorizontalStage(gpu: GPUSession): RenderStage {
+    return createBlurStage(gpu, "h_main", "Sharp Blur H");
+}
+
+export function createSharpVerticalStage(gpu: GPUSession): RenderStage {
+    return createBlurStage(gpu, "v_main", "Sharp Blur V");
+}
+
 // Sharpness bands over the developed signal. Still working space in, working
 // space out.
 export function createCompositeStage(gpu: GPUSession): RenderStage {
@@ -45,7 +82,7 @@ export function createCompositeStage(gpu: GPUSession): RenderStage {
         label: "Composite",
         code: compositeSource,
         format: WORKING_FORMAT,
-        bindings: [intermediateBinding(0)],
+        bindings: [intermediateBinding(0), intermediateBinding(1), paramsBinding(2)],
     });
 }
 

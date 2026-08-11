@@ -10,13 +10,15 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
+import { SHARP_FORMAT, WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB, type Sliders } from "$lib/types/imgParameters";
 import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
 import {
   createCompositeStage,
   createDevelopStage,
   createEncodeStage,
+  createSharpHorizontalStage,
+  createSharpVerticalStage,
   createSourceSampler,
 } from "$lib/gpu/pipelines/chainStages";
 import {
@@ -26,9 +28,11 @@ import {
 import {
   createCalcParamsPipeline,
   PARAMS_BUFFER_SIZE,
+  SHARP_BUFFER_SIZE,
   SLIDERS_BUFFER_SIZE,
   VIEW_BUFFER_SIZE,
 } from "$lib/gpu/pipelines/calcParamsPipeline";
+import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -90,6 +94,11 @@ function linearisePixels(rgb: Uint8Array): Uint8Array {
 const WIDTH = 64; // 64 × 4 bytes = 256, so readback rows need no padding
 const HEIGHT = 4;
 
+// Dimensions of the image the charts stand in for. Only clarity's radius reads
+// these, and only to take a fraction of the short edge.
+const FULL_WIDTH = 4000;
+const FULL_HEIGHT = 3000;
+
 let gpu: GPUSession;
 
 beforeAll(async () => {
@@ -114,21 +123,25 @@ async function develop(
 ): Promise<Uint8Array> {
   const calcParams = createCalcParamsPipeline(gpu);
   const develop = createDevelopStage(gpu);
+  const sharpH = createSharpHorizontalStage(gpu);
+  const sharpV = createSharpVerticalStage(gpu);
   const composite = createCompositeStage(gpu);
   const colorSpaceEncode = createEncodeStage(gpu);
   const sampler = createSourceSampler(gpu);
 
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
 
-  const intermediate = (label: string) =>
+  const intermediate = (label: string, format: GPUTextureFormat) =>
     gpu.device.createTexture({
       label,
       size: { width: WIDTH, height: HEIGHT },
-      format: WORKING_FORMAT,
+      format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
-  const developTexture = intermediate("developed");
-  const compositeTexture = intermediate("composited");
+  const developTexture = intermediate("developed", WORKING_FORMAT);
+  const sharpHTexture = intermediate("sharp h", SHARP_FORMAT);
+  const detailTexture = intermediate("detail", SHARP_FORMAT);
+  const compositeTexture = intermediate("composited", WORKING_FORMAT);
 
   const target = gpu.device.createTexture({
     size: { width: WIDTH, height: HEIGHT },
@@ -149,18 +162,44 @@ async function develop(
   ]);
 
   calcParams.updateSliders(sliders);
-  if (renderScale !== undefined) calcParams.updateView(renderScale);
+  if (renderScale !== undefined) calcParams.updateView(renderScale, FULL_WIDTH, FULL_HEIGHT);
 
   const encoder = gpu.device.createCommandEncoder();
   calcParams.recordCalcParams(encoder);
 
   recordFullScreenPass(encoder, develop, developTexture.createView(), bindGroup);
+
+  if (sharpnessIsVisible(sliders, renderScale ?? 1)) {
+    recordFullScreenPass(
+      encoder,
+      sharpH,
+      sharpHTexture.createView(),
+      createStageBindGroup(gpu, sharpH, [
+        { binding: 0, resource: developTexture.createView() },
+        { binding: 1, resource: developTexture.createView() },
+        { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
+      ]),
+    );
+    recordFullScreenPass(
+      encoder,
+      sharpV,
+      detailTexture.createView(),
+      createStageBindGroup(gpu, sharpV, [
+        { binding: 0, resource: sharpHTexture.createView() },
+        { binding: 1, resource: developTexture.createView() },
+        { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
+      ]),
+    );
+  }
+
   recordFullScreenPass(
     encoder,
     composite,
     compositeTexture.createView(),
     createStageBindGroup(gpu, composite, [
       { binding: 0, resource: developTexture.createView() },
+      { binding: 1, resource: detailTexture.createView() },
+      { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
     ]),
   );
   recordFullScreenPass(
@@ -193,6 +232,8 @@ async function develop(
   calcParams.destroy();
   image.texture.destroy();
   developTexture.destroy();
+  sharpHTexture.destroy();
+  detailTexture.destroy();
   compositeTexture.destroy();
   return out;
 }
@@ -227,6 +268,8 @@ describe("pipeline construction", () => {
     const calcParams = createCalcParamsPipeline(gpu);
     const stages = [
       createDevelopStage(gpu),
+      createSharpHorizontalStage(gpu),
+      createSharpVerticalStage(gpu),
       createCompositeStage(gpu),
       createEncodeStage(gpu),
     ];
@@ -247,6 +290,8 @@ describe("pipeline construction", () => {
     expect(PARAMS_BUFFER_SIZE).toBe(256);
     // One f32, rounded up to the 16-byte alignment of a uniform struct.
     expect(VIEW_BUFFER_SIZE).toBe(16);
+    // Twelve f32 — three bands' amounts and sigmas, two thresholds, padding.
+    expect(SHARP_BUFFER_SIZE).toBe(48);
   });
 
   it("accepts a params bind group built the way renderer.ts builds it", () => {
@@ -358,6 +403,94 @@ describe("develop chain through the frontend pipelines", () => {
 
     const expected = throughLinear(128, (l) => l * 2);
     expect(Math.abs(out[0] - expected)).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("the sharpness stage", () => {
+  /** A vertical edge, dark on the left and bright on the right. */
+  function edgeChart(): Uint8Array {
+    const rgb = new Uint8Array(WIDTH * HEIGHT * 3);
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const v = x < WIDTH / 2 ? 60 : 190;
+        const i = (y * WIDTH + x) * 3;
+        rgb[i] = v;
+        rgb[i + 1] = v;
+        rgb[i + 2] = v;
+      }
+    }
+    return rgb;
+  }
+
+  it("overshoots on both sides of an edge", async () => {
+    const source = edgeChart();
+    const plain = await develop(source, defaultSlidersRGB);
+    const sharp = await develop(source, {
+      ...defaultSlidersRGB,
+      usmAmount: 150,
+      usmRadius: 2,
+    });
+
+    const mid = WIDTH / 2;
+    expect(sharp[(mid - 1) * 3]).toBeLessThan(plain[(mid - 1) * 3]);
+    expect(sharp[mid * 3]).toBeGreaterThan(plain[mid * 3]);
+    // The flats, far from the edge, have nothing to sharpen.
+    expect(sharp[2 * 3]).toBe(plain[2 * 3]);
+  });
+
+  it("leaves the image alone when the amount is zero", async () => {
+    const source = edgeChart();
+    const plain = await develop(source, defaultSlidersRGB);
+    const idle = await develop(source, {
+      ...defaultSlidersRGB,
+      usmAmount: 0,
+      usmRadius: 9,
+      usmLumaThreshold: 60,
+    });
+
+    expect(Array.from(idle)).toEqual(Array.from(plain));
+  });
+
+  it("fades the mask out as the render scale falls", async () => {
+    const source = edgeChart();
+    const plain = await develop(source, defaultSlidersRGB);
+    const sliders = { ...defaultSlidersRGB, usmAmount: 200, usmRadius: 1 };
+
+    const atFull = await develop(source, sliders, 1);
+    const zoomedOut = await develop(source, sliders, 0.05);
+
+    const mid = WIDTH / 2;
+    expect(atFull[mid * 3]).toBeGreaterThan(plain[mid * 3]);
+    expect(Array.from(zoomedOut)).toEqual(Array.from(plain));
+  });
+
+  it("moves the image with texture and with clarity", async () => {
+    // Both bands live in the same detail texture, so this catches a channel
+    // wired to the wrong slot on the TypeScript side.
+    const source = edgeChart();
+    const plain = await develop(source, defaultSlidersRGB);
+
+    const textured = await develop(source, { ...defaultSlidersRGB, texture: 100 });
+    const clarified = await develop(source, { ...defaultSlidersRGB, clarity: 100 });
+
+    expect(Array.from(textured)).not.toEqual(Array.from(plain));
+    expect(Array.from(clarified)).not.toEqual(Array.from(plain));
+    expect(Array.from(textured)).not.toEqual(Array.from(clarified));
+  });
+
+  it("agrees with the renderer about when the blur can be skipped", () => {
+    // The predicate has to be false wherever calcParams fades the amount to
+    // zero, or the renderer would skip a pass that still had work to do.
+    expect(sharpnessIsVisible(defaultSlidersRGB, 1)).toBe(false);
+    expect(sharpnessIsVisible({ ...defaultSlidersRGB, usmAmount: 100 }, 1)).toBe(true);
+    expect(sharpnessIsVisible({ ...defaultSlidersRGB, usmAmount: 100 }, 0.05)).toBe(false);
+
+    // Texture's scale is fixed and fine, so it leaves a zoomed-out view early.
+    expect(sharpnessIsVisible({ ...defaultSlidersRGB, texture: 100 }, 1)).toBe(true);
+    expect(sharpnessIsVisible({ ...defaultSlidersRGB, texture: 100 }, 0.1)).toBe(false);
+
+    // Clarity's is tens of pixels, so it survives any preview scale in practice.
+    expect(sharpnessIsVisible({ ...defaultSlidersRGB, clarity: 100 }, 0.1)).toBe(true);
   });
 });
 

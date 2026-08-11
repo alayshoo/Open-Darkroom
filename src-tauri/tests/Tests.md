@@ -12,18 +12,20 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 127 Rust tests, 23 TypeScript, 13 in-browser.
+Nothing is `#[ignore]`d. 150 Rust tests, 23 TypeScript, 18 in-browser.
 
 ---
 
 ## The render chain
 
-Four passes, and the tests are split along the same seams.
+Six passes, and the tests are split along the same seams.
 
 ```
-calcParams.wgsl        compute — sliders → Params
+calcParams.wgsl        compute — sliders + view → Params, SharpParams
 develop.wgsl           steps 1-10, into the perceptual working space
-composite.wgsl         sharpness bands (not wired up yet)
+calcSharpTexture.wgsl  h_main — luma, blurred along x at four scales
+calcSharpTexture.wgsl  v_main — blurs finished, three bands subtracted out
+composite.wgsl         the bands applied by scaling the colour
 colorSpaceEncode.wgsl  output transform + the single clamp
 ```
 
@@ -31,7 +33,11 @@ colorSpaceEncode.wgsl  output transform + the single clamp
 as the output transform. Anything asserting on final pixel values must therefore
 drive the whole chain, not the develop pass alone.
 
-## L1 — `shader_contracts.rs` (11)
+The two blur passes are skipped whenever no band can reach the screen. That is
+only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
+so composite is a no-op regardless of what the detail texture holds.
+
+## L1 — `shader_contracts.rs` (13)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -45,6 +51,8 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `rust_default_sliders_match_the_frontend_defaults` | `SlidersPayload::default()` == `defaultSlidersRGB` |
 | `params_struct_is_identical_across_every_shader` | `Params` same in all 3 WGSL files |
 | `params_struct_matches_the_declared_size` | `Params` = 256 bytes |
+| `sharp_params_struct_is_identical_across_every_shader` | `SharpParams` same in all 3 WGSL files |
+| `sharp_params_struct_matches_the_declared_size` | `SharpParams` = 48 bytes |
 | `params_field_offsets_match_the_readback_accessors` | test harness offsets still valid |
 | `develop_and_histogram_apply_the_same_chain` | steps 1-10 have not drifted between the two copies |
 | `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
@@ -64,11 +72,17 @@ histogram clamps and bins.
 | `linearize_maps_each_channel_through_the_lut` | no channel crossing; alpha not gamma-decoded |
 | `linearize_is_order_independent` | rayon parallelism has no data race |
 
-## L1 — `sharpness.rs` (10)
+## L1 + L2 — `sharpness.rs` (31)
 
-The sharpness sliders and the `View` uniform, from the UI type down to the packed
-bytes. The rendering itself does not exist yet, so the last two tests pin that:
-they are guards that will invert once `composite.wgsl` reads the bands.
+The sharpness block, from the UI type down to the halo on a rendered edge. Three
+bands out of four blurs: the unsharp mask is a high-pass at the user's radius,
+texture a band-pass between two fixed scales, and clarity the band directly above
+texture's, up to a radius proportional to the frame.
+
+Texture and clarity share a cutoff, so between them they partition the range of
+scales rather than overlapping — pushing both sliders cannot count the same
+detail twice, and clarity cannot lift film grain. The unsharp mask deliberately
+does overlap both: it is the explicit sharpening control.
 
 | Test | Asserts |
 |---|---|
@@ -77,11 +91,44 @@ they are guards that will invert once `composite.wgsl` reads the bands.
 | `sharpness_does_not_shift_the_lanes_before_it` | the 24 earlier lanes are undisturbed |
 | `the_uniform_is_padded_out_to_its_bound_size` | 120 bytes of fields, bound at 128 |
 | `the_export_payload_carries_the_sharpness_keys` | camelCase JSON reaches `SlidersPayload` |
-| `sharpness_does_not_change_the_computed_params` | not yet read by `calcParams.wgsl` |
-| `sharpness_does_not_change_a_rendered_image` | not yet read by the render chain |
+| `sharpness_does_not_change_the_computed_params` | it has its own buffer; `Params` is untouched |
+| `the_amount_is_off_until_the_slider_is_moved` | the default mask is switched off |
+| `an_amount_of_one_hundred_percent_adds_the_whole_band` | the amount scale is 1:1 |
+| `the_radius_is_measured_in_full_resolution_pixels` | sigma scales with the render scale |
+| `zooming_out_fades_the_mask_instead_of_aliasing` | sigma floored, amount faded to zero |
+| `the_thresholds_are_scaled_out_of_slider_units` | 0 is an exact no-op at both rails |
+| `the_mask_overshoots_on_both_sides_of_an_edge` | the halo, and flats that do not move |
+| `a_negative_amount_softens_the_same_edge` | the overshoot reverses |
+| `a_wider_radius_reaches_further_from_the_edge` | radius controls the reach |
+| `sharpening_does_not_shift_hue` | channel ratios survive; the band scales, not adds |
+| `amount_zero_renders_exactly_as_if_the_mask_were_absent` | bit-exact no-op |
+| `texture_acts_on_mid_scale_detail` | the band responds at its own scale |
+| `texture_passes_over_the_finest_detail` | the lower cutoff; grain is left where USM lifts it |
+| `texture_reverses_with_the_slider` | both directions |
+| `clarity_steepens_a_broad_edge` | reach, ten pixels out from the edge |
+| `clarity_radius_scales_with_the_image_between_its_clamps` | fraction of the short edge, clamped |
+| `clarity_backs_off_at_the_endpoints` | the midtone mask protects the extremes |
+| `clarity_saturates_rather_than_growing_without_bound` | the soft clip |
+| `clarity_and_texture_act_on_scales_the_other_cannot` | the bands partition, in both directions |
+| `clarity_and_texture_are_separate_channels` | no crossed wires in the detail texture |
+| `chunk_size_does_not_change_a_sharpened_render` | 5 chunk sizes vs one pass, no seam |
+| `chunk_size_does_not_change_a_clarity_render` | the same at clarity's much wider kernel |
+| `the_overlap_is_one_radius_and_disappears_when_the_mask_is_off` | margin follows the widest band |
 | `the_view_defaults_to_full_resolution` | `render_scale` defaults to 1.0 |
-| `the_view_packs_the_render_scale_into_the_first_lane` | byte layout matches the WGSL struct |
+| `the_view_packs_the_render_scale_into_the_first_lane` | scale and both dimensions, in order |
 | `the_view_zeroes_its_tail_padding` | no uninitialised bytes in the uniform |
+
+### Why the export renders more rows than it keeps
+
+A blur reads across chunk boundaries, so each chunk is rendered with a margin of
+neighbouring rows that is then cropped out of the readback. The margin is **one**
+radius, not two: the vertical pass at row `y` reads the horizontal pass at
+`y ± radius`, and the horizontal pass reads only its own row.
+
+At the top and bottom of the image the margin is naturally short, which is
+correct — a single-pass render clamps at those edges too, so the results agree.
+`chunk_size_does_not_change_a_sharpened_render` is what holds that to bit
+equality, and it is the test that fails first if the arithmetic drifts.
 
 ## L1 — `image_prep.rs` (14)
 
@@ -281,16 +328,16 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `openImage` × 7 | header, pixel slicing, R/G/B histogram order, no region overlap, odd sizes |
 | `sharpnessPage` × 12 | the sharpness controls' ranges, defaults, steps and history wiring |
 
-## L3 — `tests/browser/` (13, real WebGPU)
+## L3 — `tests/browser/` (18, real WebGPU)
 
-Drives the frontend's own pipeline modules, including the full four-pass chain. A
+Drives the frontend's own pipeline modules, including the full six-pass chain. A
 failure here that passes in L2 is a TypeScript wiring bug.
 
 | Test | Asserts |
 |---|---|
 | `exposes an adapter and a device` | WebGPU reachable |
-| `builds every stage of the chain against the shipped WGSL` | all three stages compile, layouts valid |
-| `declares buffer sizes matching the WGSL structs` | 128, 256 and 16 bytes |
+| `builds every stage of the chain against the shipped WGSL` | all five stages compile, layouts valid |
+| `declares buffer sizes matching the WGSL structs` | 128, 256, 16 and 48 bytes |
 | `accepts a params bind group built the way renderer.ts builds it` | bind group is legal |
 | `leaves the image untouched with the default sliders` | identity, as in L2 |
 | `keeps the primaries on their own channels` | no channel crossing |
@@ -299,5 +346,10 @@ failure here that passes in L2 is a TypeScript wiring bug.
 | `applies gamma to one channel only` | per-channel gamma |
 | `packs the sliders in the order the shader reads them` | two sliders at once, right order |
 | `carries the sharpness sliders without disturbing the ones before them` | lane isolation, as in L1 |
-| `renders identically at any render scale` | the view uniform does not yet move a pixel |
+| `renders identically at any render scale` | the view moves nothing while the mask is off |
 | `renders the same whether or not the view was ever written` | the 1.0 default is real |
+| `overshoots on both sides of an edge` | the halo, through the TypeScript wiring |
+| `leaves the image alone when the amount is zero` | bit-exact no-op |
+| `fades the mask out as the render scale falls` | the zoomed-out preview stops sharpening |
+| `moves the image with texture and with clarity` | both bands reach the pixels, and differ |
+| `agrees with the renderer about when the blur can be skipped` | `sharpnessIsVisible` tracks the shader's fade |

@@ -32,6 +32,13 @@ export interface GPUImage {
 // output reaches the final clamp bit for bit.
 export const WORKING_FORMAT: GPUTextureFormat = "rgba32float";
 
+// Format of the sharpness textures — four blurred lumas in the intermediate,
+// three bands and a blurred luma in the output. Same precision as the working
+// format, and the precision is the point: a band is the difference of two nearly
+// equal averages, which is exactly where a narrower mantissa shows up as
+// quantised local contrast on smooth gradients.
+export const SHARP_FORMAT: GPUTextureFormat = "rgba32float";
+
 
 // One stage of the render chain: a full-screen quad reading bound resources and
 // writing a single target. Develop, composite and the output transform are all
@@ -49,7 +56,7 @@ import type { Sliders } from "./imgParameters";
 export interface Renderer {
     loadImage: (image: GPUImage) => void;
     setSliders: (sliders: Sliders) => void;
-    setRenderScale: (renderScale: number) => void;
+    setView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     render: () => void;
     destroy: () => void;
 }

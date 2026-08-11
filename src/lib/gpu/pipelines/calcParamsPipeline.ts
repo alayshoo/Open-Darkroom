@@ -9,11 +9,13 @@ import shaderSource from "../shaders/calcParams.wgsl?raw";
 export const SLIDERS_BUFFER_SIZE = 128;
 export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
 export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
+export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
+    sharpBuffer: GPUBuffer;
     updateSliders: (sliders: Sliders) => void;
-    updateView: (renderScale: number) => void;
+    updateView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     recordCalcParams: (encoder: GPUCommandEncoder) => void;
     destroy: () => void;
 }
@@ -48,6 +50,14 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
+    // SharpParams storage buffer — sharpness values derived from the sliders and
+    // the view, read by calcSharpTexture.wgsl and composite.wgsl
+    const sharpBuffer = device.createBuffer({
+        label: "Computed Sharp Params Storage Buffer",
+        size: SHARP_BUFFER_SIZE,
+        usage: GPUBufferUsage.STORAGE,
+    });
+
     const bindGroupLayout = device.createBindGroupLayout({
         label: "Calc Params Bind Group Layout",
         entries: [
@@ -65,6 +75,11 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
                 binding: 2,
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "uniform" },
+            },
+            {
+                binding: 3,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "storage" },
             },
         ],
     });
@@ -87,6 +102,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
             { binding: 0, resource: { buffer: slidersBuffer } },
             { binding: 1, resource: { buffer: paramsBuffer } },
             { binding: 2, resource: { buffer: viewBuffer } },
+            { binding: 3, resource: { buffer: sharpBuffer } },
         ],
     });
 
@@ -95,8 +111,8 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         device.queue.writeBuffer(slidersBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
-    function updateView(renderScale: number) {
-        const data = new Float32Array([renderScale, 0, 0, 0]);
+    function updateView(renderScale: number, fullWidth: number, fullHeight: number) {
+        const data = new Float32Array([renderScale, fullWidth, fullHeight, 0]);
         device.queue.writeBuffer(viewBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
@@ -112,12 +128,15 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         slidersBuffer.destroy();
         paramsBuffer.destroy();
         viewBuffer.destroy();
+        sharpBuffer.destroy();
     }
 
-    // A render is full resolution until something says otherwise.
-    updateView(1);
+    // A render is full resolution until something says otherwise. The dimensions
+    // stay at zero until an image arrives; clarity's radius clamps to its floor
+    // rather than collapsing.
+    updateView(1, 0, 0);
 
-    return { paramsBuffer, updateSliders, updateView, recordCalcParams, destroy };
+    return { paramsBuffer, sharpBuffer, updateSliders, updateView, recordCalcParams, destroy };
 }
 
 // Packs raw slider values into a Float32Array matching the WGSL Sliders struct

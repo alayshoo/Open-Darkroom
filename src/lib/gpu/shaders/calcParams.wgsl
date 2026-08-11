@@ -1,8 +1,17 @@
 // src/lib/gpu/shaders/calcParams.wgsl
 //
-// Compute shader that calculates processing matrices from raw slider values.
-// Runs once per slider change (single invocation) to produce the Params struct
-// consumed by develop.wgsl and histogram.wgsl.
+// Compute shader that derives everything the render chain needs from the raw
+// slider values and the view. Runs once per slider change, as a single
+// invocation, and writes two structs:
+//
+//   Params       matrices and tone amplitudes, for develop.wgsl and histogram.wgsl
+//   SharpParams  sigmas, amounts and thresholds, for calcSharpTexture.wgsl and
+//                composite.wgsl
+//
+// The two are kept apart because their readers are: neither set of shaders has
+// any use for the other's fields. They are computed together because their
+// inputs are shared — both come from the same Sliders uniform, whose fields a
+// second shader could not bind a subset of.
 
 struct Sliders {
     invert:            f32,   //  0   (0.0 or 1.0)
@@ -46,9 +55,9 @@ struct Sliders {
 // view rather than with an edit.
 struct View {
     render_scale: f32,   //  0
-    _pad0:        f32,   //  4
-    _pad1:        f32,   //  8
-    _pad2:        f32,   // 12
+    full_width:   f32,   //  4
+    full_height:  f32,   //  8
+    _pad0:        f32,   // 12
 }                        // total: 16 bytes
 
 struct Params {
@@ -77,9 +86,30 @@ struct Params {
     _pad7:          f32,          // 252
 }                                 // total: 256 bytes
 
+// Parameters for the sharpness stage, kept apart from Params because a
+// different set of shaders reads them: calcSharpTexture.wgsl and composite.wgsl
+// need these and none of the develop chain, while histogram.wgsl needs the
+// develop chain and none of these. Splitting the two keeps each shader's
+// declaration to the bytes it actually uses.
+struct SharpParams {
+    usm_amount:           f32,   //  0  (1.0 = add the full band)
+    usm_sigma:            f32,   //  4  (texture pixels, already floored)
+    usm_luma_threshold:   f32,   //  8
+    usm_detail_threshold: f32,   // 12
+    texture_amount:       f32,   // 16
+    texture_sigma_lo:     f32,   // 20
+    texture_sigma_hi:     f32,   // 24
+    clarity_amount:       f32,   // 28
+    clarity_sigma:        f32,   // 32
+    _pad0:                f32,   // 36
+    _pad1:                f32,   // 40
+    _pad2:                f32,   // 44
+}                                // total: 48 bytes
+
 @group(0) @binding(0) var<uniform> sliders: Sliders;
 @group(0) @binding(1) var<storage, read_write> params: Params;
 @group(0) @binding(2) var<uniform> view: View;
+@group(0) @binding(3) var<storage, read_write> sharp: SharpParams;
 
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -152,11 +182,72 @@ const LB: f32 = 0.0722;
 const MAX_WIDE_REGION:   f32 = 0.20;   // highlights, shadows (mask width 0.5)
 const MAX_NARROW_REGION: f32 = 0.07;   // whites, blacks      (mask width 0.25)
 
+// ── Sharpness ────────────────────────────────────────────────────────────────
+//
+// Radii are specified in full-resolution pixels, so they shrink with the view.
+// Below about 0.7 texture pixels a discrete Gaussian stops being sampled well
+// enough to mean anything: the kernel collapses toward [0, 1, 0], the blur
+// becomes the identity, and the band it feeds degenerates into grid-locked noise
+// that shifts as the window resizes. So the sigma is floored there and the
+// amount is faded out across the approach instead — the effect leaves a
+// zoomed-out preview smoothly, which is also roughly what the downsampled export
+// looks like, rather than aliasing on the way out.
+//
+// At 1:1 the render scale is 1, the fade is 1, and none of this applies.
+const MIN_SIGMA:        f32 = 0.7;
+const SIGMA_FADE_START: f32 = 0.3;
+const SIGMA_FADE_END:   f32 = 1.0;
+
+// Both unsharp-mask thresholds ramp from zero to their setting rather than
+// sitting at a fixed width around it, which is what makes a setting of 0 an
+// exact no-op: the smoothstep collapses to a step at the origin, so every pixel
+// with any signal at all passes ungated.
+//
+// The luma gate spans the whole encoded range, so at the rail only near-white
+// sharpens. The detail gate is scaled to the band magnitudes actually seen on
+// real detail — a tenth of the encoded range is already coarse enough to
+// suppress most of it.
+const MAX_USM_LUMA_THRESHOLD:   f32 = 1.0;
+const MAX_USM_DETAIL_THRESHOLD: f32 = 0.1;
+
+// Texture is a band-pass rather than a high-pass, and the lower sigma is the
+// whole reason: it cuts the finest frequencies off before they reach the band,
+// so the control lifts fabric, foliage and skin structure without amplifying the
+// grain a sharpening radius would. Both are fixed measurements in
+// full-resolution pixels — this is a control over detail at a particular size,
+// not a fraction of the frame.
+const TEXTURE_SIGMA_LO: f32 = 1.2;
+const TEXTURE_SIGMA_HI: f32 = 5.0;
+
+// Clarity's upper radius scales with the image, so the slider means the same
+// thing on a 12 and a 60 megapixel file rather than covering a different fraction
+// of each. Clamped at both ends: below about 15 its band closes up against
+// texture's, and above 60 the halo is wide enough to read as the HDR look however
+// hard the soft clip works.
+//
+// Its lower radius is TEXTURE_SIGMA_HI — the two bands meet there and share the
+// cutoff, so they partition the scales between them instead of overlapping.
+const CLARITY_SIGMA_FRACTION: f32 = 0.01;
+const MIN_CLARITY_SIGMA:      f32 = 20.0;
+const MAX_CLARITY_SIGMA:      f32 = 60.0;
+
+// Rail amplitudes. Texture reaches further than clarity because its band is
+// narrower and correspondingly weaker; clarity's is broad enough that a factor
+// of one is already a large move before the soft clip in composite.wgsl.
+const MAX_TEXTURE_AMOUNT: f32 = 1.5;
+const MAX_CLARITY_AMOUNT: f32 = 1.0;
+
 // Brightness is a uniform shift in encoded code values, so it is monotone at any
 // amplitude; this is a judgement about feel. A quarter of the range is already a
 // drastic move, and the slider needed rescaling regardless: as a linear-light
 // offset on a -1..1 range, +0.2 took sRGB 32 to 128.
 const MAX_BRIGHTNESS: f32 = 0.25;
+
+
+// A band whose kernel has shrunk below a pixel fades out rather than aliasing.
+fn sigma_fade(sigma_view: f32) -> f32 {
+    return smoothstep(SIGMA_FADE_START, SIGMA_FADE_END, sigma_view);
+}
 
 
 // ── CCT -> XYZ (Planckian locus, Kim et al.) ────────────────────────────────
@@ -393,4 +484,44 @@ fn main() {
     params._pad5         = 0.0;
     params._pad6         = 0.0;
     params._pad7         = 0.0;
+
+    // Sharpness. Every radius is a full-resolution measurement, so each has to be
+    // brought into the texture space this render actually works in before its
+    // kernel can use it — see the note on MIN_SIGMA above for what happens when
+    // one lands below a pixel.
+
+    // Unsharp mask — a high-pass at the radius the user set.
+    let usm_sigma_view = sliders.usm_radius * view.render_scale;
+    sharp.usm_sigma            = max(usm_sigma_view, MIN_SIGMA);
+    sharp.usm_amount           = sliders.usm_amount / 100.0 * sigma_fade(usm_sigma_view);
+    sharp.usm_luma_threshold   = sliders.usm_luma_threshold / 100.0 * MAX_USM_LUMA_THRESHOLD;
+    sharp.usm_detail_threshold = sliders.usm_detail_threshold / 100.0 * MAX_USM_DETAIL_THRESHOLD;
+
+    // Texture — a band between two fixed scales. The fade follows the lower
+    // sigma, which is the one that runs out of pixels first.
+    let texture_lo_view = TEXTURE_SIGMA_LO * view.render_scale;
+    let texture_hi_view = TEXTURE_SIGMA_HI * view.render_scale;
+    sharp.texture_sigma_lo = max(texture_lo_view, MIN_SIGMA);
+    // Keeping the two apart matters even once the amount has faded out: a band
+    // between two equal blurs is identically zero, and a kernel of zero width is
+    // not something to hand the blur pass.
+    sharp.texture_sigma_hi = max(texture_hi_view, sharp.texture_sigma_lo * 2.0);
+    sharp.texture_amount   =
+        sliders.texture / 100.0 * MAX_TEXTURE_AMOUNT * sigma_fade(texture_lo_view);
+
+    // Clarity — the band above texture's, up to a radius proportional to the frame.
+    let short_edge = min(view.full_width, view.full_height);
+    let clarity_sigma_full = clamp(
+        short_edge * CLARITY_SIGMA_FRACTION,
+        MIN_CLARITY_SIGMA,
+        MAX_CLARITY_SIGMA,
+    );
+    let clarity_view = clarity_sigma_full * view.render_scale;
+    sharp.clarity_sigma  = max(clarity_view, MIN_SIGMA);
+    sharp.clarity_amount =
+        sliders.clarity / 100.0 * MAX_CLARITY_AMOUNT * sigma_fade(clarity_view);
+
+    sharp._pad0 = 0.0;
+    sharp._pad1 = 0.0;
+    sharp._pad2 = 0.0;
 }

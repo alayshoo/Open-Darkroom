@@ -16,6 +16,9 @@ export function createRenderStage(
         code: string;
         format: GPUTextureFormat;
         bindings: GPUBindGroupLayoutEntry[];
+        // Defaults to fs_main. Named only where one file holds several stages,
+        // as the two halves of the separable blur do.
+        entryPoint?: string;
     },
 ): RenderStage {
     const { device } = gpu;
@@ -36,7 +39,7 @@ export function createRenderStage(
         vertex: { module: shaderModule, entryPoint: "vs_main" },
         fragment: {
             module: shaderModule,
-            entryPoint: "fs_main",
+            entryPoint: options.entryPoint ?? "fs_main",
             targets: [{ format: options.format }],
         },
     });
