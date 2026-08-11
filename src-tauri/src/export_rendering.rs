@@ -18,6 +18,15 @@ pub const CALC_PARAMS_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
 pub const DEVELOP_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/develop.wgsl");
+pub const COMPOSITE_WGSL: &str =
+    include_str!("../../src/lib/gpu/shaders/composite.wgsl");
+pub const COLOR_SPACE_ENCODE_WGSL: &str =
+    include_str!("../../src/lib/gpu/shaders/colorSpaceEncode.wgsl");
+
+/// Format the render chain hands between its stages. Must match
+/// `WORKING_FORMAT` in `src/lib/types/gpuTypes.ts` — see the note there on why
+/// the intermediates are 32-bit float rather than 16.
+pub const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
@@ -447,6 +456,7 @@ pub async fn render_image_with_chunk_rows(
         wgpu::TextureFormat::Rgba8Unorm
     };
 
+    // Develop writes the perceptual working signal, not the display surface.
     let dev_pipeline =
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dev_pipeline"),
@@ -461,7 +471,7 @@ pub async fn render_image_with_chunk_rows(
                 module: &develop_module,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: output_format,
+                    format: WORKING_FORMAT,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -476,6 +486,76 @@ pub async fn render_image_with_chunk_rows(
             multiview: None,
             cache: None,
         });
+
+    // ── 4b. composite and output-transform pipelines ──────────────────────────
+    //
+    // Both read one texture and write one full-screen target, so they share a
+    // layout. 32-bit float textures are not filterable and these stages index
+    // their input one to one with textureLoad, so no sampler is bound.
+
+    let fs_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("fs_bgl"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }],
+    });
+
+    let fs_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fs_layout"),
+            bind_group_layouts: &[&fs_bgl],
+            push_constant_ranges: &[],
+        });
+
+    let mut full_screen_pipeline = |label: &str, source: &str, format| {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&fs_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        })
+    };
+
+    let composite_pipeline =
+        full_screen_pipeline("composite_pipeline", COMPOSITE_WGSL, WORKING_FORMAT);
+    let encode_pipeline = full_screen_pipeline(
+        "color_space_encode_pipeline",
+        COLOR_SPACE_ENCODE_WGSL,
+        output_format,
+    );
 
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -500,6 +580,12 @@ pub async fn render_image_with_chunk_rows(
 
     let mut row_start = 0u32;
     let mut out_rgb_offset = 0usize;
+
+    // Intermediates carrying the perceptual working signal between stages. Every
+    // chunk is the same height but the last, so these are built once and reused
+    // rather than reallocated per chunk — at 16 bytes per texel they are the
+    // largest allocations in the loop.
+    let mut intermediates: Option<(u32, wgpu::TextureView, wgpu::TextureView)> = None;
 
     while row_start < height {
         let row_end = (row_start + chunk_rows).min(height);
@@ -538,6 +624,34 @@ pub async fn render_image_with_chunk_rows(
         );
 
         let input_view = input_tex.create_view(&Default::default());
+
+        if intermediates.as_ref().map(|(h, _, _)| *h) != Some(chunk_height) {
+            let intermediate = |label| {
+                device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width,
+                            height: chunk_height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: WORKING_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    })
+                    .create_view(&Default::default())
+            };
+            intermediates = Some((
+                chunk_height,
+                intermediate("develop_tex"),
+                intermediate("composite_tex"),
+            ));
+        }
+        let (_, develop_view, composite_view) = intermediates.as_ref().unwrap();
 
         let output_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("output_tex"),
@@ -578,12 +692,32 @@ pub async fn render_image_with_chunk_rows(
             ],
         });
 
+        let full_screen_bg = |label, input: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &fs_bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(input),
+                }],
+            })
+        };
+        let composite_bg = full_screen_bg("composite_bg", develop_view);
+        let encode_bg = full_screen_bg("encode_bg", composite_view);
+
         let mut enc = device.create_command_encoder(&Default::default());
-        {
+
+        // Each stage reads the previous one's target, so they cannot be merged:
+        // a fragment can only read a texture it is not currently writing.
+        for (label, target, pipeline, bind_group) in [
+            ("develop_pass", develop_view, &dev_pipeline, &dev_bg),
+            ("composite_pass", composite_view, &composite_pipeline, &composite_bg),
+            ("encode_pass", &output_view, &encode_pipeline, &encode_bg),
+        ] {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("develop_pass"),
+                label: Some(label),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &output_view,
+                    view: target,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -594,10 +728,11 @@ pub async fn render_image_with_chunk_rows(
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&dev_pipeline);
-            pass.set_bind_group(0, &dev_bg, &[]);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
             pass.draw(0..6, 0..1);
         }
+
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &output_tex,

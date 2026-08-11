@@ -240,8 +240,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
 
-  // Clamp + linear → sRGB
-  let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));
-
-  return vec4f(srgb, color.a);
+  // Encode into the perceptual working space and hand off.
+  //
+  // Deliberately unclamped. Sharpening runs on this signal in composite.wgsl,
+  // and colorSpaceEncode.wgsl clamps once at the very end, in the destination
+  // gamut. Clamping here instead would flatten the headroom before the stage
+  // that can still use it: a negative halo pulls a blown highlight back into
+  // range, which it cannot do against an already-flat ceiling.
+  return vec4f(encode_srgb(rgb), color.a);
 }

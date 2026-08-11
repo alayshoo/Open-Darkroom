@@ -376,12 +376,16 @@ fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) 
 
 /// Pull the shared adjustment chain out of a shader: everything from the first
 /// numbered step through the linear→sRGB conversion.
+/// Steps 1-10 of the adjustment chain — everything the two shaders have to
+/// agree on. What each does afterwards is its own business: develop hands the
+/// perceptual signal to composite.wgsl unclamped, while histogram clamps it and
+/// bins it.
 fn develop_chain(source: &str, label: &str) -> Vec<String> {
     wgsl_region(
         source,
         label,
         "// 1. Darkroom matrix",
-        "let srgb = encode_srgb(clamp(rgb, vec3f(0.0), vec3f(1.0)));",
+        "rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);",
     )
 }
 

@@ -12,26 +12,46 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 115 Rust tests, 10 TypeScript, 10 in-browser.
+Nothing is `#[ignore]`d. 127 Rust tests, 23 TypeScript, 13 in-browser.
 
 ---
 
-## L1 — `shader_contracts.rs` (10)
+## The render chain
+
+Four passes, and the tests are split along the same seams.
+
+```
+calcParams.wgsl        compute — sliders → Params
+develop.wgsl           steps 1-10, into the perceptual working space
+composite.wgsl         sharpness bands (not wired up yet)
+colorSpaceEncode.wgsl  output transform + the single clamp
+```
+
+`develop.wgsl` deliberately does **not** clamp: the headroom has to survive as far
+as the output transform. Anything asserting on final pixel values must therefore
+drive the whole chain, not the develop pass alone.
+
+## L1 — `shader_contracts.rs` (11)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
 | Test | Asserts |
 |---|---|
-| `sliders_struct_is_all_f32_and_matches_the_declared_size` | 24 f32 fields = 96 bytes |
+| `sliders_struct_is_all_f32_and_matches_the_declared_size` | 30 f32 fields = 120 bytes |
 | `rust_slider_packing_matches_the_wgsl_struct` | `sliders_to_bytes` order == WGSL order |
 | `typescript_slider_packing_matches_the_wgsl_struct` | `slidersToArray` order == WGSL order |
 | `typescript_declares_the_same_buffer_sizes_as_rust` | TS buffer-size constants == Rust |
+| `view_struct_is_all_f32_and_matches_the_declared_size` | `View` is f32-only and 16 bytes |
 | `rust_default_sliders_match_the_frontend_defaults` | `SlidersPayload::default()` == `defaultSlidersRGB` |
 | `params_struct_is_identical_across_every_shader` | `Params` same in all 3 WGSL files |
-| `params_struct_matches_the_declared_size` | `Params` = 240 bytes |
+| `params_struct_matches_the_declared_size` | `Params` = 256 bytes |
 | `params_field_offsets_match_the_readback_accessors` | test harness offsets still valid |
-| `develop_and_histogram_apply_the_same_chain` | the duplicated develop chain has not drifted |
-| `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths it calls |
+| `develop_and_histogram_apply_the_same_chain` | steps 1-10 have not drifted between the two copies |
+| `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
+
+The chain comparison stops after vibrance, because that is where the two files
+stop agreeing by design — develop hands off to `composite.wgsl` unclamped, while
+histogram clamps and bins.
 
 ## L1 — `color.rs` (6)
 
@@ -44,7 +64,26 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `linearize_maps_each_channel_through_the_lut` | no channel crossing; alpha not gamma-decoded |
 | `linearize_is_order_independent` | rayon parallelism has no data race |
 
-## L1 — `image_prep.rs` (13)
+## L1 — `sharpness.rs` (10)
+
+The sharpness sliders and the `View` uniform, from the UI type down to the packed
+bytes. The rendering itself does not exist yet, so the last two tests pin that:
+they are guards that will invert once `composite.wgsl` reads the bands.
+
+| Test | Asserts |
+|---|---|
+| `sharpness_defaults_are_neutral` | the six defaults switch the effect off |
+| `sharpness_lands_in_its_own_lanes` | each slider reaches its own f32 lane |
+| `sharpness_does_not_shift_the_lanes_before_it` | the 24 earlier lanes are undisturbed |
+| `the_uniform_is_padded_out_to_its_bound_size` | 120 bytes of fields, bound at 128 |
+| `the_export_payload_carries_the_sharpness_keys` | camelCase JSON reaches `SlidersPayload` |
+| `sharpness_does_not_change_the_computed_params` | not yet read by `calcParams.wgsl` |
+| `sharpness_does_not_change_a_rendered_image` | not yet read by the render chain |
+| `the_view_defaults_to_full_resolution` | `render_scale` defaults to 1.0 |
+| `the_view_packs_the_render_scale_into_the_first_lane` | byte layout matches the WGSL struct |
+| `the_view_zeroes_its_tail_padding` | no uninitialised bytes in the uniform |
+
+## L1 — `image_prep.rs` (14)
 
 | Test | Asserts |
 |---|---|
@@ -59,6 +98,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `preview_uses_the_same_linearisation_as_export` | preview and export share one code path |
 | `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
+| `payload_header_carries_the_full_resolution_of_a_downscaled_preview` | the anchor for pixel-denominated sliders |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
@@ -233,23 +273,24 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_webp_lossless_flag_reaches_the_encoder` | lossless exact, lossy not |
 | `an_unsupported_tiff_bit_depth_is_reported` | 12-bit errors by name |
 
-## L1 — `tests/unit/` (10, TypeScript)
+## L1 — `tests/unit/` (23, TypeScript)
 
 | Test | Asserts |
 |---|---|
-| `multiplyMat4` × 5 | identity, diagonals, column-major order, non-commutativity, shape |
-| `openImage` × 5 | header, pixel slicing, R/G/B histogram order, no region overlap, odd sizes |
+| `calcMatrixHelpers` × 5 | identity, diagonals, column-major order, non-commutativity, shape |
+| `openImage` × 7 | header, pixel slicing, R/G/B histogram order, no region overlap, odd sizes |
+| `sharpnessPage` × 12 | the sharpness controls' ranges, defaults, steps and history wiring |
 
-## L3 — `tests/browser/` (10, real WebGPU)
+## L3 — `tests/browser/` (13, real WebGPU)
 
-Drives the frontend's own pipeline modules. A failure here that passes in L2 is a
-TypeScript wiring bug.
+Drives the frontend's own pipeline modules, including the full four-pass chain. A
+failure here that passes in L2 is a TypeScript wiring bug.
 
 | Test | Asserts |
 |---|---|
 | `exposes an adapter and a device` | WebGPU reachable |
-| `builds both pipelines against the shipped WGSL` | shaders compile, layouts valid |
-| `declares buffer sizes matching the WGSL structs` | 96 and 240 bytes |
+| `builds every stage of the chain against the shipped WGSL` | all three stages compile, layouts valid |
+| `declares buffer sizes matching the WGSL structs` | 128, 256 and 16 bytes |
 | `accepts a params bind group built the way renderer.ts builds it` | bind group is legal |
 | `leaves the image untouched with the default sliders` | identity, as in L2 |
 | `keeps the primaries on their own channels` | no channel crossing |
@@ -257,3 +298,6 @@ TypeScript wiring bug.
 | `inverts, reversing the tone order` | black ↔ white |
 | `applies gamma to one channel only` | per-channel gamma |
 | `packs the sliders in the order the shader reads them` | two sliders at once, right order |
+| `carries the sharpness sliders without disturbing the ones before them` | lane isolation, as in L1 |
+| `renders identically at any render scale` | the view uniform does not yet move a pixel |
+| `renders the same whether or not the view was ever written` | the 1.0 default is real |

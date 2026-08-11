@@ -10,10 +10,19 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import type { GPUSession } from "$lib/types/gpuTypes";
+import { WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB, type Sliders } from "$lib/types/imgParameters";
 import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
-import { createImgDevPipeline } from "$lib/gpu/pipelines/imgDevPipeline";
+import {
+  createCompositeStage,
+  createDevelopStage,
+  createEncodeStage,
+  createSourceSampler,
+} from "$lib/gpu/pipelines/chainStages";
+import {
+  createStageBindGroup,
+  recordFullScreenPass,
+} from "$lib/gpu/pipelines/renderStagePipeline";
 import {
   createCalcParamsPipeline,
   PARAMS_BUFFER_SIZE,
@@ -95,7 +104,8 @@ beforeAll(async () => {
 
 /**
  * Drive the real frontend pipelines over `rgb` and read the result back.
- * Mirrors `renderer.ts`: calcParams compute pass, then the develop render pass.
+ * Mirrors `renderer.ts`: the calcParams compute pass, then the three render
+ * passes of the develop chain — develop, composite, output transform.
  */
 async function develop(
   rgb: Uint8Array,
@@ -103,9 +113,22 @@ async function develop(
   renderScale?: number,
 ): Promise<Uint8Array> {
   const calcParams = createCalcParamsPipeline(gpu);
-  const imgDev = createImgDevPipeline(gpu);
+  const develop = createDevelopStage(gpu);
+  const composite = createCompositeStage(gpu);
+  const colorSpaceEncode = createEncodeStage(gpu);
+  const sampler = createSourceSampler(gpu);
 
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
+
+  const intermediate = (label: string) =>
+    gpu.device.createTexture({
+      label,
+      size: { width: WIDTH, height: HEIGHT },
+      format: WORKING_FORMAT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+  const developTexture = intermediate("developed");
+  const compositeTexture = intermediate("composited");
 
   const target = gpu.device.createTexture({
     size: { width: WIDTH, height: HEIGHT },
@@ -119,14 +142,11 @@ async function develop(
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
-  const bindGroup = gpu.device.createBindGroup({
-    layout: imgDev.bindGroupLayout,
-    entries: [
-      { binding: 0, resource: image.texture.createView() },
-      { binding: 1, resource: imgDev.sampler },
-      { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
-    ],
-  });
+  const bindGroup = createStageBindGroup(gpu, develop, [
+    { binding: 0, resource: image.texture.createView() },
+    { binding: 1, resource: sampler },
+    { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
+  ]);
 
   calcParams.updateSliders(sliders);
   if (renderScale !== undefined) calcParams.updateView(renderScale);
@@ -134,20 +154,23 @@ async function develop(
   const encoder = gpu.device.createCommandEncoder();
   calcParams.recordCalcParams(encoder);
 
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [
-      {
-        view: target.createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: "clear",
-        storeOp: "store",
-      },
-    ],
-  });
-  pass.setPipeline(imgDev.pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.draw(6);
-  pass.end();
+  recordFullScreenPass(encoder, develop, developTexture.createView(), bindGroup);
+  recordFullScreenPass(
+    encoder,
+    composite,
+    compositeTexture.createView(),
+    createStageBindGroup(gpu, composite, [
+      { binding: 0, resource: developTexture.createView() },
+    ]),
+  );
+  recordFullScreenPass(
+    encoder,
+    colorSpaceEncode,
+    target.createView(),
+    createStageBindGroup(gpu, colorSpaceEncode, [
+      { binding: 0, resource: compositeTexture.createView() },
+    ]),
+  );
 
   encoder.copyTextureToBuffer(
     { texture: target },
@@ -169,6 +192,8 @@ async function develop(
   }
   calcParams.destroy();
   image.texture.destroy();
+  developTexture.destroy();
+  compositeTexture.destroy();
   return out;
 }
 
@@ -196,15 +221,21 @@ describe("WebGPU availability", () => {
 });
 
 describe("pipeline construction", () => {
-  it("builds both pipelines against the shipped WGSL", () => {
+  it("builds every stage of the chain against the shipped WGSL", () => {
     // Compiling the shaders and validating the bind group layouts happens here;
     // a layout that disagrees with the WGSL throws.
     const calcParams = createCalcParamsPipeline(gpu);
-    const imgDev = createImgDevPipeline(gpu);
+    const stages = [
+      createDevelopStage(gpu),
+      createCompositeStage(gpu),
+      createEncodeStage(gpu),
+    ];
 
     expect(calcParams.paramsBuffer.size).toBe(PARAMS_BUFFER_SIZE);
-    expect(imgDev.pipeline).toBeDefined();
-    expect(imgDev.bindGroupLayout).toBeDefined();
+    for (const stage of stages) {
+      expect(stage.pipeline, stage.label).toBeDefined();
+      expect(stage.bindGroupLayout, stage.label).toBeDefined();
+    }
     calcParams.destroy();
   });
 
@@ -220,7 +251,8 @@ describe("pipeline construction", () => {
 
   it("accepts a params bind group built the way renderer.ts builds it", () => {
     const calcParams = createCalcParamsPipeline(gpu);
-    const imgDev = createImgDevPipeline(gpu);
+    const develop = createDevelopStage(gpu);
+    const sampler = createSourceSampler(gpu);
     const image = uploadRawPixelsToGPU(
       gpu.device,
       linearisePixels(new Uint8Array(WIDTH * HEIGHT * 3)),
@@ -229,14 +261,11 @@ describe("pipeline construction", () => {
     );
 
     expect(() =>
-      gpu.device.createBindGroup({
-        layout: imgDev.bindGroupLayout,
-        entries: [
-          { binding: 0, resource: image.texture.createView() },
-          { binding: 1, resource: imgDev.sampler },
-          { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
-        ],
-      }),
+      createStageBindGroup(gpu, develop, [
+        { binding: 0, resource: image.texture.createView() },
+        { binding: 1, resource: sampler },
+        { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
+      ]),
     ).not.toThrow();
 
     calcParams.destroy();
