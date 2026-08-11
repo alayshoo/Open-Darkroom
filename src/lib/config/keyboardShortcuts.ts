@@ -6,9 +6,10 @@ interface ShortcutActions {
     movePage: (right?: boolean) => void;
     changeMode: () => void;
     openImage: () => void;
+    toggleFrameStats: () => void;
 }
 
-export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage }: ShortcutActions) {
+export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, toggleFrameStats }: ShortcutActions) {
     return (e: KeyboardEvent) => {
         let handled = false;
     
@@ -30,6 +31,9 @@ export function createKeydownHandler({ undo, redo, movePage, changeMode, openIma
         } else if (e.ctrlKey && e.key === "o") {
             openImage();
             handled = true
+        } else if (e.key === "F1") {
+            toggleFrameStats();
+            handled = true;
         }
     
         if (handled) {

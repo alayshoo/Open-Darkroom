@@ -60,19 +60,35 @@ export function createStageBindGroup(
     });
 }
 
+export interface FullScreenPassOptions {
+    clearValue?: GPUColor;
+    timestampWrites?: GPURenderPassTimestampWrites;
+}
+
+const DEFAULT_CLEAR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
+// Shared so that omitting the argument costs no allocation — a default of `{}`
+// would build a fresh object on every pass of every frame.
+const NO_OPTIONS: FullScreenPassOptions = {};
+
 // Draw a full-screen quad from `stage` into `target`.
 export function recordFullScreenPass(
     encoder: GPUCommandEncoder,
     stage: RenderStage,
     target: GPUTextureView,
     bindGroup: GPUBindGroup,
-    clearValue: GPUColor = { r: 0, g: 0, b: 0, a: 1 },
+    options: FullScreenPassOptions = NO_OPTIONS,
 ) {
     const pass = encoder.beginRenderPass({
         label: `${stage.label} Pass`,
         colorAttachments: [
-            { view: target, clearValue, loadOp: "clear", storeOp: "store" },
+            {
+                view: target,
+                clearValue: options.clearValue ?? DEFAULT_CLEAR,
+                loadOp: "clear",
+                storeOp: "store",
+            },
         ],
+        timestampWrites: options.timestampWrites,
     });
     pass.setPipeline(stage.pipeline);
     pass.setBindGroup(0, bindGroup);

@@ -17,15 +17,21 @@ export async function initializeGPU(): Promise<GPUSession> {
         throw new Error("No GPU adapter found");
     }
 
+    // Timestamp queries drive the per-pass timings the frame stats overlay
+    // shows. Optional: not every adapter exposes them, and nothing but the
+    // overlay depends on them.
+    const canTimestamp = adapter.features.has("timestamp-query");
+
     // Request a device — logical handle
     // All GPU objects (buffers, textures, pipelines) belong to a device.
-    // Can request specific features/limits here in the future if needed.
-    const device = await adapter.requestDevice();
+    const device = await adapter.requestDevice({
+        requiredFeatures: canTimestamp ? ["timestamp-query"] : [],
+    });
 
     // Format is the pixel format the display expects.
     const format = navigator.gpu.getPreferredCanvasFormat();
 
-    return { device, format } ;
+    return { device, format, canTimestamp } ;
 }
 
 

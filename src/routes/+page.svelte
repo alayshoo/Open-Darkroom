@@ -10,6 +10,8 @@
 
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
+    import FrameStatsOverlay from "$lib/components/outputs/FrameStatsOverlay.svelte";
+    import { frameStats } from "$lib/gpu/frameStats.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
@@ -279,12 +281,21 @@
         if (a) applyAction(a, stateAccessors);
     }
 
+    // Frame stats start visible in a dev run and hidden in a release build, so
+    // the numbers are there while working without shipping to a user. F1 flips
+    // it either way — a release build still needs to be measurable.
+    frameStats.enabled = import.meta.env.DEV;
+
     const handleKeydown = createKeydownHandler({
         undo: undo,
         redo: redo,
         movePage: movePage,
         changeMode: handleModeToggle,
         openImage: handleOpenImage,
+        toggleFrameStats: () => {
+            frameStats.enabled = !frameStats.enabled;
+            if (!frameStats.enabled) frameStats.clear();
+        },
     });
 </script>
 
@@ -301,6 +312,9 @@
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
+        {#if frameStats.enabled}
+            <FrameStatsOverlay />
+        {/if}
     </div>
     <div class="side-bar flex w-[23%] flex-col gap-3">
         <div class="histogram-panel glass shrink-0 rounded-[12px]">

@@ -108,7 +108,13 @@ beforeAll(async () => {
 
   // rgba8unorm rather than the canvas's preferred format, so readback bytes are
   // in R, G, B order and need no channel swizzle.
-  gpu = { device: await adapter.requestDevice(), format: "rgba8unorm" };
+  // The suite reads pixels back rather than timing anything, so it takes the
+  // device without the optional timestamp feature the app asks for.
+  gpu = {
+    device: await adapter.requestDevice(),
+    format: "rgba8unorm",
+    canTimestamp: false,
+  };
 });
 
 /**

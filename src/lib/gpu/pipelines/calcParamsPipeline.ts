@@ -16,7 +16,10 @@ export interface CalcParamsPipeline {
     sharpBuffer: GPUBuffer;
     updateSliders: (sliders: Sliders) => void;
     updateView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
-    recordCalcParams: (encoder: GPUCommandEncoder) => void;
+    recordCalcParams: (
+        encoder: GPUCommandEncoder,
+        timestampWrites?: GPUComputePassTimestampWrites,
+    ) => void;
     destroy: () => void;
 }
 
@@ -116,8 +119,14 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         device.queue.writeBuffer(viewBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
-    function recordCalcParams(encoder: GPUCommandEncoder) {
-        const pass = encoder.beginComputePass({ label: "Calc Params Pass" });
+    function recordCalcParams(
+        encoder: GPUCommandEncoder,
+        timestampWrites?: GPUComputePassTimestampWrites,
+    ) {
+        const pass = encoder.beginComputePass({
+            label: "Calc Params Pass",
+            timestampWrites,
+        });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(1);

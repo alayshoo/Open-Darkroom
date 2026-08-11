@@ -14,6 +14,7 @@ import { createCalcParamsPipeline, type CalcParamsPipeline } from "./pipelines/c
 import {
     createStageBindGroup,
     recordFullScreenPass,
+    type FullScreenPassOptions,
 } from "./pipelines/renderStagePipeline";
 import {
     createCompositeStage,
@@ -24,7 +25,14 @@ import {
     createSourceSampler,
 } from "./pipelines/chainStages";
 import { sharpnessIsVisible } from "./sharpnessVisibility";
+import { createFrameTimer } from "./pipelines/frameTimer";
+import { frameStats } from "./frameStats.svelte";
 
+
+// The backdrop the preview sits on, and the encode stage's options as an
+// unmeasured frame passes them. Both constant, so both hoisted out of the frame.
+const PREVIEW_CLEAR: GPUColor = { r: 0.1, g: 0.1, b: 0.1, a: 1 };
+const ENCODE_OPTIONS: FullScreenPassOptions = { clearValue: PREVIEW_CLEAR };
 
 export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
 
@@ -53,6 +61,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     let inFlight = false;
     let frameHandle: number | null = null;
     let destroyed = false;
+
+    const frameTimer = createFrameTimer(gpu);
+    frameStats.supportsPassTimings = frameTimer.available;
+    let lastFrameStart = 0;
 
     // Bind groups connect actual resources to the layout slots, and the
     // intermediate textures are sized to the image. Neither exists until an
@@ -173,9 +185,33 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         if (drawFrame()) dirty = false;
     }
 
+    // Whether the frame currently being recorded is measured. Held here rather
+    // than passed down so the helpers below can be built once instead of per
+    // frame — an unmeasured frame must cost exactly what it did before the
+    // overlay existed, and a closure rebuilt 60 times a second is not that.
+    let measuring = false;
+
+    function timedOptions(label: string): FullScreenPassOptions | undefined {
+        return measuring
+            ? { timestampWrites: frameTimer.passWrites(label) }
+            : undefined;
+    }
+
     function onWorkDone() {
         inFlight = false;
         if (dirty) scheduleFrame();
+    }
+
+    async function recordSample(
+        intervalMs: number,
+        acquireMs: number,
+        recordMs: number,
+        submitEnd: number,
+    ) {
+        const turnaroundMs = performance.now() - submitEnd;
+        const passes = await frameTimer.read();
+        if (destroyed) return;
+        frameStats.record({ intervalMs, acquireMs, recordMs, turnaroundMs, passes });
     }
 
     function drawFrame(): boolean {
@@ -184,10 +220,21 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         if (!developBindGroup || !compositeBindGroup || !encodeBindGroup) return false;
         if (!sharpHBindGroup || !sharpVBindGroup) return false;
 
+        // Measuring is opt-in: timestamp queries are not free, and neither are
+        // the clocks around them, so both follow the overlay.
+        measuring = frameStats.enabled;
+        const frameStart = measuring ? performance.now() : 0;
+        const intervalMs = measuring && lastFrameStart ? frameStart - lastFrameStart : 0;
+        if (measuring) {
+            lastFrameStart = frameStart;
+            frameTimer.beginFrame();
+        }
+
         // Step 1: Get the current canvas texture to render into.
         // This changes every frame (it's a swapchain texture).
         const targetTexture = canvas.canvasConfig.getCurrentTexture();
         const targetView = targetTexture.createView();
+        const acquireEnd = measuring ? performance.now() : 0;
 
         // Step 2: Create a command encoder — this records GPU commands.
         // Nothing actually executes until we submit the command buffer.
@@ -197,35 +244,69 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
         // Step 3: Compute params from sliders (matrices calculated on GPU).
         // This compute pass writes the Params storage buffer.
-        calcParams.recordCalcParams(encoder);
+        calcParams.recordCalcParams(
+            encoder,
+            measuring ? frameTimer.passWrites("params") : undefined,
+        );
 
         // Step 4: The chain. Each stage reads the previous one's target, so they
         // cannot be collapsed: a fragment can only read a texture it is not
         // currently writing.
-        recordFullScreenPass(encoder, develop, developView, developBindGroup);
+        recordFullScreenPass(
+            encoder, develop, developView, developBindGroup,
+            timedOptions("develop"),
+        );
 
         // The two halves of the separable blur, skipped whenever the effect
         // cannot reach the screen. Skipping is only ever a saving: calcParams
         // zeroes the amount over the same range, so composite is a no-op and the
         // stale bands in the detail texture go nowhere.
         if (sharpnessIsVisible(currentSliders, currentRenderScale)) {
-            recordFullScreenPass(encoder, sharpH, sharpHView, sharpHBindGroup);
-            recordFullScreenPass(encoder, sharpV, detailView, sharpVBindGroup);
+            recordFullScreenPass(
+                encoder, sharpH, sharpHView, sharpHBindGroup,
+                timedOptions("sharp H"),
+            );
+            recordFullScreenPass(
+                encoder, sharpV, detailView, sharpVBindGroup,
+                timedOptions("sharp V"),
+            );
         }
 
-        recordFullScreenPass(encoder, composite, compositeView, compositeBindGroup);
-        recordFullScreenPass(encoder, colorSpaceEncode, targetView, encodeBindGroup, {
-            r: 0.1,
-            g: 0.1,
-            b: 0.1,
-            a: 1,
-        });
+        recordFullScreenPass(
+            encoder, composite, compositeView, compositeBindGroup,
+            timedOptions("composite"),
+        );
+        recordFullScreenPass(
+            encoder, colorSpaceEncode, targetView, encodeBindGroup,
+            measuring
+                ? { clearValue: PREVIEW_CLEAR, timestampWrites: frameTimer.passWrites("encode") }
+                : ENCODE_OPTIONS,
+        );
+
+        if (measuring) frameTimer.resolve(encoder);
 
         // Step 5: Submit, and hold the next frame until this one has drained.
         gpu.device.queue.submit([encoder.finish()]);
 
         inFlight = true;
-        gpu.device.queue.onSubmittedWorkDone().then(onWorkDone);
+        const drained = gpu.device.queue.onSubmittedWorkDone();
+
+        // The unmeasured path ends here, on a callback built once at startup.
+        if (!measuring) {
+            drained.then(onWorkDone);
+            return true;
+        }
+
+        const submitEnd = performance.now();
+        drained.then(() => {
+            onWorkDone();
+            void recordSample(
+                intervalMs,
+                acquireEnd - frameStart,
+                submitEnd - acquireEnd,
+                submitEnd,
+            );
+        });
 
         return true;
     }
@@ -240,6 +321,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         frameHandle = null;
 
         calcParams.destroy();
+        frameTimer.destroy();
         developTexture?.destroy();
         sharpHTexture?.destroy();
         detailTexture?.destroy();

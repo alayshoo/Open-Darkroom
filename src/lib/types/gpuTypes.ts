@@ -5,6 +5,9 @@
 export interface GPUSession {
     device: GPUDevice;
     format: GPUTextureFormat;
+    // Whether the device was created with `timestamp-query`. Only the frame
+    // stats overlay reads it; the render chain does not depend on it.
+    canTimestamp: boolean;
 }
 
 
