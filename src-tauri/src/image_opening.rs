@@ -2,6 +2,7 @@
 
 use fast_image_resize as fir;
 use fast_image_resize::images::{Image, ImageRef};
+use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::ipc::Response;
@@ -22,6 +23,10 @@ pub const PREVIEW_MAX_EDGE: u32 = 2048;
 
 /// Bins in each per-channel histogram.
 pub const HIST_BINS: usize = 256;
+
+/// Pixels one worker bins before its partial counts are merged. Splitting any
+/// finer would cost more in carrying the 3 KB of counters around than it saves.
+const HIST_BLOCK_PIXELS: usize = 1 << 16;
 
 /// Bytes preceding the pixel data in the frontend payload: preview width and
 /// height, then full-resolution width and height, u32 LE. The full dimensions
@@ -129,16 +134,31 @@ pub fn downscale_to_max_edge(
 
 /// R/G/B histograms of the full-resolution image. u16 sRGB values (0–65535) are
 /// mapped to 8-bit bins (0–255) via `>> 8`. Alpha, where present, is not binned.
+///
+/// Each worker bins into its own set of counters and the partials are summed at
+/// the end, so the hot loop needs no atomics.
 pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
-    let mut r = [0u32; HIST_BINS];
-    let mut g = [0u32; HIST_BINS];
-    let mut b = [0u32; HIST_BINS];
+    let empty = || ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS]);
 
-    for px in src.chunks_exact(channels) {
-        r[(px[0] >> 8) as usize] += 1;
-        g[(px[1] >> 8) as usize] += 1;
-        b[(px[2] >> 8) as usize] += 1;
-    }
+    let (r, g, b) = src
+        .par_chunks(HIST_BLOCK_PIXELS * channels)
+        .map(|block| {
+            let mut bins = empty();
+            for px in block.chunks_exact(channels) {
+                bins.0[(px[0] >> 8) as usize] += 1;
+                bins.1[(px[1] >> 8) as usize] += 1;
+                bins.2[(px[2] >> 8) as usize] += 1;
+            }
+            bins
+        })
+        .reduce(empty, |mut acc, part| {
+            for i in 0..HIST_BINS {
+                acc.0[i] += part.0[i];
+                acc.1[i] += part.1[i];
+                acc.2[i] += part.2[i];
+            }
+            acc
+        });
 
     Histograms { r, g, b }
 }
