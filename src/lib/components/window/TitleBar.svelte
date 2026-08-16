@@ -14,12 +14,18 @@
         undo = () => {},
         redo = () => {},
         open = () => {},
+        copyAdjustments = () => {},
+        pasteAdjustments = () => {},
+        resetAdjustments = () => {},
     }: {
         title?: string;
         editable?: boolean;
         undo?: () => void;
         redo?: () => void;
         open?: () => void;
+        copyAdjustments?: () => void;
+        pasteAdjustments?: () => void;
+        resetAdjustments?: () => void;
     } = $props();
 
     let isMaximized = $state(false);
@@ -95,9 +101,21 @@
                     { label: "Undo", shortcut: "Ctrl+Z", action: undo },
                     { label: "Redo", shortcut: "Ctrl+Shift+Z", action: redo },
                     { separator: true },
-                    { label: "Copy Adjustments", shortcut: "Ctrl+C" },
-                    { label: "Paste Adjustments", shortcut: "Ctrl+V" },
-                    { label: "Reset Adjustments" },
+                    {
+                        label: "Copy Adjustments",
+                        shortcut: "Ctrl+C",
+                        action: copyAdjustments,
+                    },
+                    {
+                        label: "Paste Adjustments",
+                        shortcut: "Ctrl+V",
+                        action: pasteAdjustments,
+                    },
+                    {
+                        label: "Reset Adjustments",
+                        shortcut: "Ctrl+Alt+R",
+                        action: resetAdjustments,
+                    },
                 ]}
             />
             <MenuButton

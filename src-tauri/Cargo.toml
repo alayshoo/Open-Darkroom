@@ -30,6 +30,7 @@ half = "2"
 rayon = "1.11"
 fast_image_resize = "6.0"
 wgpu = "25"
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [dev-dependencies]
 # Drives the async wgpu pipeline from synchronous #[test] functions.

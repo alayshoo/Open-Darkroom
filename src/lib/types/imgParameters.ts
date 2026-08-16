@@ -104,6 +104,30 @@ export const defaultSlidersBW: Sliders = {
     usmDetailThreshold: 0,
 };
 
+/* The two control modes own disjoint halves of the slider set — the darkroom
+   pager drives these, every other page drives the rest. Copy, paste and reset
+   only ever touch the half belonging to the mode the user is in. */
+const darkroomKeys = new Set<keyof Sliders>([
+    "invert",
+    "redBlackPoint",
+    "redGamma",
+    "redWhitePoint",
+    "greenBlackPoint",
+    "greenGamma",
+    "greenWhitePoint",
+    "blueBlackPoint",
+    "blueGamma",
+    "blueWhitePoint",
+    "rgbOutputBlack",
+    "rgbOutputWhite",
+]);
+
+export function modeKeys(isDarkroom: boolean): (keyof Sliders)[] {
+    return (Object.keys(defaultSlidersRGB) as (keyof Sliders)[]).filter(
+        (key) => darkroomKeys.has(key) === isDarkroom,
+    );
+}
+
 export const overridesBW: Partial<Sliders> = {
     saturation: -100,
     vibrance: 0,

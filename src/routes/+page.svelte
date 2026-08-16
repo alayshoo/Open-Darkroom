@@ -14,6 +14,7 @@
     import { debugStats } from "$lib/gpu/debugStats.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
+    import RevertButton from "$lib/components/inputs/revertButton.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -27,10 +28,12 @@
         defaultSlidersRGB,
         defaultSlidersBW,
         overridesBW,
+        modeKeys,
     } from "$lib/types/imgParameters";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { openImage } from "$lib/utils/openImage";
+    import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
     import { exportImage } from "$lib/utils/exportImage";
     import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 
@@ -179,6 +182,23 @@
     let isRgb = $state(true);
     let savedColorValues: Partial<typeof sliders> | null = null;
 
+    /* The colour keys are in transit for as long as the toggle animates them,
+       so anything reading them has to wait rather than judge them mid-flight —
+       see isIdentity, which would otherwise flicker on the way back to colour.
+       Passed to animateObject so the two cannot drift apart. */
+    const COLOR_ANIM_MS = 200;
+    let isColorAnimating = $state(false);
+    let colorAnimTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function markColorAnimating() {
+        isColorAnimating = true;
+        if (colorAnimTimer) clearTimeout(colorAnimTimer);
+        colorAnimTimer = setTimeout(() => {
+            isColorAnimating = false;
+            colorAnimTimer = null;
+        }, COLOR_ANIM_MS);
+    }
+
     let activePage = $derived(
         isDarkroom ? activePageDarkroom : activePageNormal,
     );
@@ -197,7 +217,9 @@
             animateObject(
                 sliders as unknown as Record<string, number>,
                 overridesBW as Record<string, number>,
+                COLOR_ANIM_MS,
             );
+            markColorAnimating();
             if (activePageNormal > 2) {
                 await tick(); // wait for the {#if isRgb} block to unmount
                 scrollToPage(2);
@@ -206,7 +228,9 @@
             animateObject(
                 sliders as unknown as Record<string, number>,
                 savedColorValues as Record<string, number>,
+                COLOR_ANIM_MS,
             );
+            markColorAnimating();
             savedColorValues = null;
         }
     }
@@ -276,6 +300,19 @@
         setSlider: (key, val) => {
             (sliders as unknown as Record<string, typeof val>)[key] = val;
         },
+        // Numbers travel to their new values the way the colour-mode toggle
+        // moves them; anything else lands at once.
+        setSliders: (values) => {
+            const numeric: Record<string, number> = {};
+            for (const [key, val] of Object.entries(values)) {
+                if (typeof val === "number") numeric[key] = val;
+                else (sliders as unknown as Record<string, typeof val>)[key] = val;
+            }
+            animateObject(
+                sliders as unknown as Record<string, number>,
+                numeric,
+            );
+        },
     };
 
     function commit(action: Action) {
@@ -290,6 +327,81 @@
         if (a) applyAction(a, stateAccessors);
     }
 
+    // ===== Adjustments clipboard =====
+
+    /* In B&W the colour keys are pinned to their overrides, so an incoming set
+       puts its colour values aside for the toggle back to colour instead of
+       applying them. The whole set lands as one history step. */
+    function applySliderSet(values: Partial<Sliders>) {
+        const next: Partial<Sliders> = { ...values };
+
+        if (!isRgb) {
+            const held: Partial<Sliders> = { ...(savedColorValues ?? {}) };
+            for (const key of Object.keys(overridesBW) as (keyof Sliders)[]) {
+                if (key in next) {
+                    (held as any)[key] = next[key];
+                    delete next[key];
+                }
+            }
+            savedColorValues = held;
+        }
+
+        const oldValues: Partial<Sliders> = {};
+        for (const key of Object.keys(next) as (keyof Sliders)[]) {
+            (oldValues as any)[key] = sliders[key];
+        }
+
+        commit({ type: "sliders", oldValues, newValues: next });
+        stateAccessors.setSliders(next);
+    }
+
+    // All three act on the mode the user is looking at, and never reach across
+    // into the other mode's half of the sliders.
+    let activeKeys = $derived(modeKeys(isDarkroom));
+
+    async function handleCopyAdjustments() {
+        try {
+            await copyAdjustments(sliders, activeKeys);
+        } catch (e) {
+            console.error("Failed to copy adjustments:", e);
+        }
+    }
+
+    async function handlePasteAdjustments() {
+        try {
+            applySliderSet(await readAdjustments(activeKeys));
+        } catch (e) {
+            console.error("Failed to paste adjustments:", e);
+        }
+    }
+
+    // Always the colour defaults: in B&W the overridden keys are diverted to
+    // the saved colour values, leaving the mode itself untouched.
+    function handleResetAdjustments() {
+        const next: Partial<Sliders> = {};
+        for (const key of activeKeys) {
+            (next as any)[key] = defaultSlidersRGB[key];
+        }
+        applySliderSet(next);
+    }
+
+    /* Whether a reset would change anything, judged on the same keys a reset
+       would write. The tolerance is there because animated values land on
+       their target through a lerp, which need not be bit-exact. */
+    let isIdentity = $derived.by(() => {
+        for (const key of activeKeys) {
+            if ((!isRgb || isColorAnimating) && key in overridesBW) continue;
+            const def = defaultSlidersRGB[key];
+            const val = sliders[key];
+            if (typeof def === "number" && typeof val === "number") {
+                if (Math.abs(val - def) > 1e-6) return false;
+            } else if (val !== def) {
+                return false;
+            }
+        }
+        return true;
+    });
+
     // Frame stats start visible in a dev run and hidden in a release build, so
     // the numbers are there while working without shipping to a user. F1 flips
     // it either way — a release build still needs to be measurable.
@@ -301,6 +413,9 @@
         movePage: movePage,
         changeMode: handleModeToggle,
         openImage: handleOpenImage,
+        copyAdjustments: handleCopyAdjustments,
+        pasteAdjustments: handlePasteAdjustments,
+        resetAdjustments: handleResetAdjustments,
         toggleDebugStats: () => {
             debugStats.enabled = !debugStats.enabled;
             if (!debugStats.enabled) debugStats.clear();
@@ -316,7 +431,14 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<TitleBar {undo} {redo} open={handleOpenImage}></TitleBar>
+<TitleBar
+    {undo}
+    {redo}
+    open={handleOpenImage}
+    copyAdjustments={handleCopyAdjustments}
+    pasteAdjustments={handlePasteAdjustments}
+    resetAdjustments={handleResetAdjustments}
+></TitleBar>
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and
      side bar sit on a higher layer and simply paint over the overflow. -->
@@ -342,7 +464,7 @@
         </div>
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
             <div
-                class="quick-actions flex items-center flex-row gap-2 ml-3 mt-2.5"
+                class="quick-actions flex items-center flex-row gap-2 ml-3 mr-3 mt-2.5"
                 class:dimmed={exportMenuOpen}
             >
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
@@ -353,6 +475,13 @@
                      the row on every frame. -->
                 <div class="invert-slot" class:shown={isDarkroom}>
                     <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
+                </div>
+                <!-- Pushed to the far end of the row, opposite the toggles. -->
+                <div class="ml-auto">
+                    <RevertButton
+                        visible={!isIdentity}
+                        onrevert={handleResetAdjustments}
+                    />
                 </div>
             </div>
             <div class="controls-section flex relative flex-1 flex-col" class:dimmed={exportMenuOpen}>

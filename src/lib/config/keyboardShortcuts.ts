@@ -6,11 +6,24 @@ interface ShortcutActions {
     movePage: (right?: boolean) => void;
     changeMode: () => void;
     openImage: () => void;
+    copyAdjustments: () => void;
+    pasteAdjustments: () => void;
+    resetAdjustments: () => void;
     toggleDebugStats: () => void;
     toggleHistogram: () => void;
 }
 
-export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, toggleDebugStats, toggleHistogram }: ShortcutActions) {
+// Ctrl+C / Ctrl+V mean the ordinary thing while a field has focus, so the
+// adjustments bindings stand aside for it.
+function isTextField(target: EventTarget | null) {
+    return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+    );
+}
+
+export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, copyAdjustments, pasteAdjustments, resetAdjustments, toggleDebugStats, toggleHistogram }: ShortcutActions) {
     return (e: KeyboardEvent) => {
         let handled = false;
 
@@ -36,6 +49,15 @@ export function createKeydownHandler({ undo, redo, movePage, changeMode, openIma
         } else if (e.ctrlKey && key === "o") {
             openImage();
             handled = true
+        } else if (e.ctrlKey && key === "c" && !e.shiftKey && !isTextField(e.target)) {
+            copyAdjustments();
+            handled = true;
+        } else if (e.ctrlKey && key === "v" && !e.shiftKey && !isTextField(e.target)) {
+            pasteAdjustments();
+            handled = true;
+        } else if (e.ctrlKey && e.altKey && key === "r") {
+            resetAdjustments();
+            handled = true;
         } else if (e.key === "F1") {
             toggleDebugStats();
             handled = true;
