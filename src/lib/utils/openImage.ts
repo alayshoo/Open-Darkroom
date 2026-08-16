@@ -4,9 +4,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { type ImagePayload } from "$lib/types/imagePayload";
 
 
-// Replace the invoke call with this helper
-export async function openImage(): Promise<ImagePayload> {
-    const buffer = await invoke<ArrayBuffer>("open_image_file");
+// Returned by the backend when the file picker is dismissed. Must match
+// OPEN_CANCELLED in image_opening.rs.
+const OPEN_CANCELLED = "open:cancelled";
+
+// Open an image, or return null if the user dismissed the picker. Any other
+// rejection means the backend got as far as releasing the image it held, so the
+// caller has to drop what it is showing rather than keep it.
+export async function openImage(): Promise<ImagePayload | null> {
+    let buffer: ArrayBuffer;
+    try {
+        buffer = await invoke<ArrayBuffer>("open_image_file");
+    } catch (e) {
+        if (e === OPEN_CANCELLED) return null;
+        throw e;
+    }
 
     // Parse the header: preview width and height, then the full-resolution
     // width and height, u32 little-endian.

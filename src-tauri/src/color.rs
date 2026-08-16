@@ -58,78 +58,108 @@ pub fn build_resample_lut() -> Vec<u16> {
         .collect()
 }
 
-/// Gamma-decode interleaved RGBA u16 sRGB pixels into interleaved RGBA u16
-/// *linear* pixels, ready to be resampled.
+/// Samples per pixel a source buffer may carry: RGB, or RGB with alpha.
 ///
-/// Alpha carries no gamma encoding, so it is passed through untouched rather
-/// than sent through `lut`.
-pub fn srgb_to_linear_rgba_u16(rgba_u16: &[u16], lut: &[u16]) -> Vec<u16> {
-    debug_assert_eq!(rgba_u16.len() % 4, 0, "input must be whole RGBA pixels");
-    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
-
-    let mut out = vec![0u16; rgba_u16.len()];
-
-    out.par_chunks_exact_mut(4)
-        .enumerate()
-        .for_each(|(i, chunk)| {
-            let src = i * 4;
-            chunk[0] = lut[rgba_u16[src] as usize];
-            chunk[1] = lut[rgba_u16[src + 1] as usize];
-            chunk[2] = lut[rgba_u16[src + 2] as usize];
-            chunk[3] = rgba_u16[src + 3];
-        });
-
-    out
+/// Images whose format declares no alpha channel are decoded and stored as three
+/// channels, which is a quarter less memory held for the life of the session.
+/// Everything uploaded to the GPU is still RGBA — `rgba16float` is the only
+/// 16-bit float texture format WebGPU offers — so the alpha is synthesised at
+/// the point of upload rather than carried through the buffer.
+fn assert_channels(channels: usize) {
+    debug_assert!(
+        channels == 3 || channels == 4,
+        "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
+    );
 }
 
-/// Pack interleaved RGBA u16 *linear* pixels into the little-endian f16 bytes an
-/// `rgba16float` texture expects.
+/// Gamma-decode interleaved u16 sRGB pixels into interleaved u16 *linear*
+/// pixels, ready to be resampled. The channel count is preserved.
 ///
-/// The counterpart to [`srgb_to_linear_rgba_u16`]: that decodes, this uploads.
-/// Every channel is already linear here, alpha included, so all four scale the
-/// same way.
-pub fn linear_u16_to_f16_bytes(rgba_u16: &[u16]) -> Vec<u8> {
-    debug_assert_eq!(rgba_u16.len() % 4, 0, "input must be whole RGBA pixels");
+/// Alpha carries no gamma encoding, so where present it is passed through
+/// untouched rather than sent through `lut`.
+pub fn srgb_to_linear_u16(src: &[u16], channels: usize, lut: &[u16]) -> Vec<u16> {
+    assert_channels(channels);
+    debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
+    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
 
-    let pixel_count = rgba_u16.len() / 4;
-    let mut out = vec![0u8; pixel_count * LINEAR_BYTES_PER_PIXEL];
+    let mut out = vec![0u16; src.len()];
 
-    out.par_chunks_exact_mut(LINEAR_BYTES_PER_PIXEL)
+    out.par_chunks_exact_mut(channels)
         .enumerate()
         .for_each(|(i, chunk)| {
-            let src = i * 4;
-            for c in 0..4 {
-                let v = f16::from_f32(rgba_u16[src + c] as f32 / (LUT_SIZE - 1) as f32);
-                chunk[c * 2..c * 2 + 2].copy_from_slice(&v.to_le_bytes());
+            let s = i * channels;
+            chunk[0] = lut[src[s] as usize];
+            chunk[1] = lut[src[s + 1] as usize];
+            chunk[2] = lut[src[s + 2] as usize];
+            if channels == 4 {
+                chunk[3] = src[s + 3];
             }
         });
 
     out
 }
 
-/// Convert interleaved RGBA u16 sRGB pixels into little-endian RGBA f16 linear
-/// bytes, ready to upload as an `rgba16float` texture.
+/// Pack interleaved u16 *linear* pixels into the little-endian RGBA f16 bytes an
+/// `rgba16float` texture expects.
 ///
-/// RGB is gamma-decoded through `lut`; alpha is scaled linearly, since alpha
-/// carries no gamma encoding.
-///
-/// `rgba_u16.len()` is expected to be a multiple of 4; any trailing partial
-/// pixel is ignored.
-pub fn linearize_rgba_u16(rgba_u16: &[u16], lut: &[f16]) -> Vec<u8> {
-    debug_assert_eq!(rgba_u16.len() % 4, 0, "input must be whole RGBA pixels");
-    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+/// The counterpart to [`srgb_to_linear_u16`]: that decodes, this uploads. Every
+/// channel is already linear here, alpha included, so all of them scale the same
+/// way. A three-channel source is uploaded fully opaque.
+pub fn linear_u16_to_f16_bytes(src: &[u16], channels: usize) -> Vec<u8> {
+    assert_channels(channels);
+    debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
 
-    let pixel_count = rgba_u16.len() / 4;
+    let pixel_count = src.len() / channels;
     let mut out = vec![0u8; pixel_count * LINEAR_BYTES_PER_PIXEL];
 
     out.par_chunks_exact_mut(LINEAR_BYTES_PER_PIXEL)
         .enumerate()
         .for_each(|(i, chunk)| {
-            let src = i * 4;
-            let r = lut[rgba_u16[src] as usize];
-            let g = lut[rgba_u16[src + 1] as usize];
-            let b = lut[rgba_u16[src + 2] as usize];
-            let a = f16::from_f32(rgba_u16[src + 3] as f32 / (LUT_SIZE - 1) as f32);
+            let s = i * channels;
+            for c in 0..3 {
+                let v = f16::from_f32(src[s + c] as f32 / (LUT_SIZE - 1) as f32);
+                chunk[c * 2..c * 2 + 2].copy_from_slice(&v.to_le_bytes());
+            }
+            let a = if channels == 4 {
+                f16::from_f32(src[s + 3] as f32 / (LUT_SIZE - 1) as f32)
+            } else {
+                f16::ONE
+            };
+            chunk[6..8].copy_from_slice(&a.to_le_bytes());
+        });
+
+    out
+}
+
+/// Convert interleaved u16 sRGB pixels into little-endian RGBA f16 linear bytes,
+/// ready to upload as an `rgba16float` texture.
+///
+/// RGB is gamma-decoded through `lut`; alpha, where the source carries it, is
+/// scaled linearly, since alpha carries no gamma encoding. A three-channel
+/// source is uploaded fully opaque.
+///
+/// `src.len()` is expected to be a multiple of `channels`; any trailing partial
+/// pixel is ignored.
+pub fn linearize_u16(src: &[u16], channels: usize, lut: &[f16]) -> Vec<u8> {
+    assert_channels(channels);
+    debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
+    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+
+    let pixel_count = src.len() / channels;
+    let mut out = vec![0u8; pixel_count * LINEAR_BYTES_PER_PIXEL];
+
+    out.par_chunks_exact_mut(LINEAR_BYTES_PER_PIXEL)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let s = i * channels;
+            let r = lut[src[s] as usize];
+            let g = lut[src[s + 1] as usize];
+            let b = lut[src[s + 2] as usize];
+            let a = if channels == 4 {
+                f16::from_f32(src[s + 3] as f32 / (LUT_SIZE - 1) as f32)
+            } else {
+                f16::ONE
+            };
             chunk[0..2].copy_from_slice(&r.to_le_bytes());
             chunk[2..4].copy_from_slice(&g.to_le_bytes());
             chunk[4..6].copy_from_slice(&b.to_le_bytes());

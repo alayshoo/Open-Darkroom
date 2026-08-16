@@ -226,8 +226,17 @@
 
     let imagePayload: ImagePayload | null = $state(null);
 
+    // A failed open has already cost the backend the image it was holding, so
+    // the view is cleared to match rather than left showing pixels that can no
+    // longer be exported. A dismissed picker returns null and changes nothing.
     async function handleOpenImage() {
-        imagePayload = await openImage();
+        try {
+            const payload = await openImage();
+            if (payload) imagePayload = payload;
+        } catch (e) {
+            imagePayload = null;
+            console.error("Failed to open image:", e);
+        }
     }
 
     let isExportPending = $state(false);

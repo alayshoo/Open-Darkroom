@@ -10,12 +10,27 @@
 
 mod common;
 
-use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL};
+use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS};
 
 use open_darkroom_lib::export_rendering::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COMPOSITE_WGSL, DEVELOP_WGSL, PARAMS_BYTES,
     SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
 };
+use open_darkroom_lib::image_opening::OPEN_CANCELLED;
+
+/// The frontend has to tell a dismissed file picker apart from an open that
+/// failed after the loaded image was released — the first leaves the current
+/// image alone, the second means it is already gone. That distinction rides on
+/// one string matching across the two languages, and nothing else would catch it
+/// drifting: the mismatch turns a cancelled open into a cleared canvas.
+#[test]
+fn typescript_matches_the_cancelled_open_sentinel() {
+    let quoted = format!("\"{OPEN_CANCELLED}\"");
+    assert!(
+        OPEN_IMAGE_TS.contains(&format!("OPEN_CANCELLED = {quoted}")),
+        "openImage.ts does not declare OPEN_CANCELLED = {quoted}"
+    );
+}
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
 

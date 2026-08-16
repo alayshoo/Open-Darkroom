@@ -15,7 +15,7 @@ use open_darkroom_lib::image_opening::Rgba16Image;
 
 fn render8(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, sliders, 8, |_| {})).expect("render")
+    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 8, |_| {})).expect("render")
 }
 
 fn render_chunked(img: &Rgba16Image, chunk_rows: u32) -> Vec<u8> {
@@ -24,6 +24,7 @@ fn render_chunked(img: &Rgba16Image, chunk_rows: u32) -> Vec<u8> {
         img.as_raw(),
         w,
         h,
+        4,
         &SlidersPayload::default(),
         8,
         chunk_rows,
@@ -114,6 +115,7 @@ fn awkward_dimensions_survive_at_16_bit() {
             img.as_raw(),
             width,
             3,
+            4,
             &SlidersPayload::default(),
             16,
             |_| {},
@@ -143,7 +145,7 @@ fn eight_and_sixteen_bit_paths_agree() {
     let sliders = SlidersPayload::default();
 
     let eight = render8(&img, &sliders);
-    let sixteen = pollster::block_on(render_image(img.as_raw(), 32, 16, &sliders, 16, |_| {}))
+    let sixteen = pollster::block_on(render_image(img.as_raw(), 32, 16, 4, &sliders, 16, |_| {}))
         .expect("render");
 
     assert_eq!(eight.len(), 32 * 16 * 3);
@@ -172,6 +174,7 @@ fn sixteen_bit_output_carries_more_levels_than_eight() {
         img.as_raw(),
         256,
         1,
+        4,
         &SlidersPayload::default(),
         16,
         |_| {},
@@ -207,6 +210,7 @@ fn progress_increases_and_finishes_at_one() {
         img.as_raw(),
         16,
         30,
+        4,
         &SlidersPayload::default(),
         8,
         10,
@@ -232,6 +236,7 @@ fn a_ragged_final_chunk_still_reports_completion() {
         img.as_raw(),
         8,
         25,
+        4,
         &SlidersPayload::default(),
         8,
         10,
@@ -250,15 +255,15 @@ fn a_ragged_final_chunk_still_reports_completion() {
 fn malformed_input_is_rejected_before_touching_the_gpu() {
     let sliders = SlidersPayload::default();
 
-    let err = pollster::block_on(render_image(&[0u16; 16], 4, 4, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[0u16; 16], 4, 4, 4, &sliders, 8, |_| {}))
         .expect_err("buffer too small for 4×4 RGBA");
     assert!(err.contains("expected 64"), "unhelpful error: {err}");
 
-    let err = pollster::block_on(render_image(&[], 0, 4, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[], 0, 4, 4, &sliders, 8, |_| {}))
         .expect_err("zero width");
     assert!(err.contains("0 × 4"), "unhelpful error: {err}");
 
-    let err = pollster::block_on(render_image(&[], 4, 0, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[], 4, 0, 4, &sliders, 8, |_| {}))
         .expect_err("zero height");
     assert!(err.contains("4 × 0"), "unhelpful error: {err}");
 
@@ -266,6 +271,7 @@ fn malformed_input_is_rejected_before_touching_the_gpu() {
         &[0u16; 16],
         2,
         2,
+        4,
         &sliders,
         8,
         0,
@@ -273,4 +279,103 @@ fn malformed_input_is_rejected_before_touching_the_gpu() {
     ))
     .expect_err("zero chunk size");
     assert!(err.contains("chunk_rows"), "unhelpful error: {err}");
+
+    // A three-channel buffer sized as if it were four, and an unsupported
+    // channel count — the stride is what the slicing arithmetic trusts.
+    let err = pollster::block_on(render_image(&[0u16; 64], 4, 4, 3, &sliders, 8, |_| {}))
+        .expect_err("buffer sized for RGBA, declared RGB");
+    assert!(err.contains("expected 48"), "unhelpful error: {err}");
+
+    let err = pollster::block_on(render_image(&[0u16; 32], 4, 4, 2, &sliders, 8, |_| {}))
+        .expect_err("two channels is not a thing");
+    assert!(err.contains("channels must be"), "unhelpful error: {err}");
+}
+
+// ── Channel count ─────────────────────────────────────────────────────────────
+
+/// Sources with no alpha channel are stored three-wide, so the renderer has to
+/// slice them at a stride of three and synthesise the alpha on upload. Since the
+/// develop chain never reads alpha and the output is RGB, the two layouts must
+/// produce byte-identical files.
+#[test]
+fn a_three_channel_source_renders_exactly_like_its_rgba_equivalent() {
+    let rgba = noise(24, 18, 0x5EED);
+
+    let rgb: Vec<u16> = rgba
+        .as_raw()
+        .chunks_exact(4)
+        .flat_map(|px| [px[0], px[1], px[2]])
+        .collect();
+
+    for bit_depth in [8u8, 16] {
+        let from_rgba = pollster::block_on(render_image(
+            rgba.as_raw(),
+            24,
+            18,
+            4,
+            &SlidersPayload::default(),
+            bit_depth,
+            |_| {},
+        ))
+        .expect("render");
+
+        let from_rgb = pollster::block_on(render_image(
+            &rgb,
+            24,
+            18,
+            3,
+            &SlidersPayload::default(),
+            bit_depth,
+            |_| {},
+        ))
+        .expect("render");
+
+        assert_eq!(
+            from_rgb, from_rgba,
+            "dropping the alpha channel changed the {bit_depth}-bit render"
+        );
+    }
+}
+
+/// The chunked path slices the source buffer itself, so a stride error would
+/// show up as a seam rather than as a uniformly wrong image.
+#[test]
+fn chunking_a_three_channel_source_leaves_no_seam() {
+    let rgba = rgb_ramp(16, 40);
+    let rgb: Vec<u16> = rgba
+        .as_raw()
+        .chunks_exact(4)
+        .flat_map(|px| [px[0], px[1], px[2]])
+        .collect();
+
+    let whole = pollster::block_on(render_image_with_chunk_rows(
+        &rgb,
+        16,
+        40,
+        3,
+        &SlidersPayload::default(),
+        8,
+        40,
+        |_| {},
+    ))
+    .expect("render");
+
+    for chunk_rows in [1, 7, 13, 39, 41] {
+        let chunked = pollster::block_on(render_image_with_chunk_rows(
+            &rgb,
+            16,
+            40,
+            3,
+            &SlidersPayload::default(),
+            8,
+            chunk_rows,
+            |_| {},
+        ))
+        .expect("render");
+
+        assert_eq!(
+            chunked, whole,
+            "chunking a three-channel source at {chunk_rows} rows changed the output"
+        );
+    }
 }

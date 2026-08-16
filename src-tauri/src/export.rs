@@ -47,10 +47,15 @@ pub(crate) async fn export_image(
         ExportFormat::Tiff => ensure_extension(path, "tiff"),
     };
 
-    let (pixels_u16, width, height) = {
+    let (pixels_u16, width, height, channels) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
-        (Arc::clone(&img.pixels_u16), img.width, img.height)
+        (
+            Arc::clone(&img.pixels_u16),
+            img.width,
+            img.height,
+            img.channels,
+        )
     };
 
     let t = Instant::now();
@@ -69,6 +74,7 @@ pub(crate) async fn export_image(
         &pixels_u16,
         width,
         height,
+        channels,
         &sliders,
         bit_depth,
         move |progress| {

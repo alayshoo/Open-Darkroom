@@ -6,6 +6,7 @@
 // framing has to break one side or the other.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type ImagePayload } from "$lib/types/imagePayload";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -14,6 +15,13 @@ const { openImage } = await import("$lib/utils/openImage");
 
 const HIST_BINS = 256;
 const HEADER = 16;
+
+/** Open and assert a payload came back; the null path has its own test. */
+async function open(): Promise<ImagePayload> {
+  const image = await openImage();
+  if (!image) throw new Error("expected a payload, got a cancelled open");
+  return image;
+}
 
 /** Build a payload exactly as `build_payload` does in image_opening.rs. */
 function payload(
@@ -52,7 +60,7 @@ describe("openImage", () => {
   it("reads the dimensions from the header", async () => {
     invoke.mockResolvedValue(payload(9, 5, () => 0));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(invoke).toHaveBeenCalledWith("open_image_file");
     expect(image.width).toBe(9);
@@ -64,7 +72,7 @@ describe("openImage", () => {
     // pixels to a preview that is smaller than the image.
     invoke.mockResolvedValue(payload(2048, 1024, () => 0, 0, [3000, 1500]));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.width).toBe(2048);
     expect(image.fullWidth).toBe(3000);
@@ -75,7 +83,7 @@ describe("openImage", () => {
   it("reports the full resolution as the preview when nothing was downscaled", async () => {
     invoke.mockResolvedValue(payload(9, 5, () => 0));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.fullWidth).toBe(9);
     expect(image.fullHeight).toBe(5);
@@ -84,7 +92,7 @@ describe("openImage", () => {
   it("slices the pixels at eight bytes per pixel", async () => {
     invoke.mockResolvedValue(payload(4, 3, (i) => i % 256));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.pixels).toHaveLength(4 * 3 * 8);
     expect(image.pixels[0]).toBe(0);
@@ -95,7 +103,7 @@ describe("openImage", () => {
   it("reads the three histograms in R, G, B order after the pixels", async () => {
     invoke.mockResolvedValue(payload(2, 2, () => 0));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.histR).toHaveLength(HIST_BINS);
     expect(image.histG).toHaveLength(HIST_BINS);
@@ -114,7 +122,7 @@ describe("openImage", () => {
     // histogram value would otherwise be read out of the pixel block.
     invoke.mockResolvedValue(payload(1, 1, () => 0xff, 7));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.pixels).toHaveLength(8);
     expect([...image.pixels]).toEqual(Array(8).fill(0xff));
@@ -124,11 +132,12 @@ describe("openImage", () => {
   it("handles a preview whose dimensions are not powers of two", async () => {
     invoke.mockResolvedValue(payload(2048, 683, () => 1));
 
-    const image = await openImage();
+    const image = await open();
 
     expect(image.width).toBe(2048);
     expect(image.height).toBe(683);
     expect(image.pixels).toHaveLength(2048 * 683 * 8);
     expect(image.histR).toHaveLength(HIST_BINS);
   });
+
 });

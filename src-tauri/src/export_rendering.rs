@@ -12,7 +12,7 @@
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
-use crate::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
+use crate::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
 
 pub const CALC_PARAMS_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
@@ -291,6 +291,7 @@ pub async fn render_image(
     pixels_u16: &[u16],
     width: u32,
     height: u32,
+    channels: usize,
     sliders: &SlidersPayload,
     bit_depth: u8,
     on_progress: impl Fn(f32) + Send + Sync,
@@ -299,6 +300,7 @@ pub async fn render_image(
         pixels_u16,
         width,
         height,
+        channels,
         sliders,
         bit_depth,
         chunk_rows_for_margin(sharp_margin_rows(sliders, width, height)),
@@ -314,16 +316,19 @@ pub async fn render_image(
 /// texture is `Rgba16Float`; each channel is read back as an f16, converted to
 /// a u16 (0–65535), and stored little-endian, giving 6 bytes per pixel.
 ///
-/// `pixels_u16` is interleaved RGBA at `width` × `height`. The image is
-/// rendered `chunk_rows` rows at a time; `on_progress` is called after each
-/// chunk with the fraction completed, in (0, 1].
+/// `pixels_u16` is interleaved at `width` × `height`, `channels` samples per
+/// pixel — 3 for a source with no alpha, 4 for one with. The image is rendered
+/// `chunk_rows` rows at a time; `on_progress` is called after each chunk with
+/// the fraction completed, in (0, 1].
 ///
 /// `chunk_rows` is exposed so tests can vary the chunking — rendering an image
 /// in one pass and in several must produce identical output.
+#[allow(clippy::too_many_arguments)]
 pub async fn render_image_with_chunk_rows(
     pixels_u16: &[u16],
     width: u32,
     height: u32,
+    channels: usize,
     sliders: &SlidersPayload,
     bit_depth: u8,
     chunk_rows: u32,
@@ -339,10 +344,14 @@ pub async fn render_image_with_chunk_rows(
     if chunk_rows == 0 {
         return Err("chunk_rows must be non-zero".to_string());
     }
-    let expected = (width as usize) * (height as usize) * 4;
+    if channels != 3 && channels != 4 {
+        return Err(format!("channels must be 3 (RGB) or 4 (RGBA), got {channels}"));
+    }
+    let expected = (width as usize) * (height as usize) * channels;
     if pixels_u16.len() != expected {
         return Err(format!(
-            "Pixel buffer is {} u16 values, expected {expected} for {width} × {height} RGBA",
+            "Pixel buffer is {} u16 values, expected {expected} for {width} × {height} \
+             at {channels} channels",
             pixels_u16.len()
         ));
     }
@@ -771,8 +780,9 @@ pub async fn render_image_with_chunk_rows(
         let pixel_start = (pad_start * width) as usize;
         let pixel_count = (pad_height * width) as usize;
 
-        let src_u16 = &pixels_u16[pixel_start * 4..(pixel_start + pixel_count) * 4];
-        let chunk_f16_bytes = linearize_rgba_u16(src_u16, &lut);
+        let src_u16 =
+            &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels];
+        let chunk_f16_bytes = linearize_u16(src_u16, channels, &lut);
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),

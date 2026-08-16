@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 150 Rust tests, 23 TypeScript, 18 in-browser.
+Nothing is `#[ignore]`d. 158 Rust tests, 23 TypeScript, 18 in-browser.
 
 ---
 
@@ -37,7 +37,7 @@ The two blur passes are skipped whenever no band can reach the screen. That is
 only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
 so composite is a no-op regardless of what the detail texture holds.
 
-## L1 — `shader_contracts.rs` (13)
+## L1 — `shader_contracts.rs` (14)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -56,12 +56,13 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `params_field_offsets_match_the_readback_accessors` | test harness offsets still valid |
 | `develop_and_histogram_apply_the_same_chain` | steps 1-10 have not drifted between the two copies |
 | `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
+| `typescript_matches_the_cancelled_open_sentinel` | the string that tells a cancelled open from a failed one |
 
 The chain comparison stops after vibrance, because that is where the two files
 stop agreeing by design — develop hands off to `composite.wgsl` unclamped, while
 histogram clamps and bins.
 
-## L1 — `color.rs` (6)
+## L1 — `color.rs` (8)
 
 | Test | Asserts |
 |---|---|
@@ -71,6 +72,18 @@ histogram clamps and bins.
 | `linearize_produces_eight_bytes_per_pixel` | output sizing |
 | `linearize_maps_each_channel_through_the_lut` | no channel crossing; alpha not gamma-decoded |
 | `linearize_is_order_independent` | rayon parallelism has no data race |
+| `linearize_widens_three_channels_to_an_opaque_rgba` | RGB and opaque RGBA upload identically |
+| `a_three_channel_upload_is_fully_opaque` | the synthesised alpha is exactly 1.0 |
+
+### Why a source can be three channels wide
+
+A file whose format declares no alpha — every JPEG, and RAW when it lands — is
+decoded and held as RGB, a quarter less memory resident for as long as the image
+is open. The GPU still wants RGBA, since `rgba16float` is the only 16-bit float
+texture format WebGPU offers, so the alpha is synthesised at the point of upload
+rather than carried through the buffer. Everything downstream of the decode takes
+the sample count as a parameter, and the tests that matter are the equivalence
+ones: the same pixels, stored either way, must come out the same.
 
 ## L1 + L2 — `sharpness.rs` (31)
 
@@ -130,7 +143,7 @@ correct — a single-pass render clamps at those edges too, so the results agree
 `chunk_size_does_not_change_a_sharpened_render` is what holds that to bit
 equality, and it is the test that fails first if the arithmetic drifts.
 
-## L1 — `image_prep.rs` (14)
+## L1 — `image_prep.rs` (17)
 
 | Test | Asserts |
 |---|---|
@@ -138,11 +151,14 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `downscale_leaves_small_images_untouched` | no resampling at or below the cap |
 | `downscale_preserves_a_flat_colour_exactly` | u16 byte round trip is clean |
 | `downscale_keeps_channels_distinct` | no channel swap during resize |
+| `downscale_agrees_across_channel_counts` | `U16x3` and `U16x4` resample to the same pixels |
 | `histogram_counts_every_pixel_once` | bins sum to the pixel count |
 | `histogram_bins_by_the_high_byte` | u16 → bin mapping is `>> 8` |
 | `histogram_channels_are_not_crossed` | R/G/B stay separate |
+| `histograms_do_not_depend_on_the_channel_count` | the stride is the only thing separating the bins |
 | `histograms_describe_the_full_resolution_image` | counted before downscaling, not after |
 | `preview_uses_the_same_linearisation_as_export` | preview and export share one code path |
+| `preparing_a_three_channel_source_matches_its_rgba_equivalent` | both branches, resampled and not |
 | `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
 | `payload_header_carries_the_full_resolution_of_a_downscaled_preview` | the anchor for pixel-denominated sliders |
@@ -286,7 +302,7 @@ is where Lightroom's Basic panel works. That is what puts the mask boundaries at
 sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
 real mid-grey instead of on a bright highlight.
 
-## L2 — `export_gpu.rs` (11)
+## L2 — `export_gpu.rs` (13)
 
 Export mechanics: the parts that break on unusual dimensions, not unusual sliders.
 
@@ -302,7 +318,9 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `sixteen_bit_output_carries_more_levels_than_eight` | 16-bit actually resolves more |
 | `progress_increases_and_finishes_at_one` | monotonic, ends at 1.0 |
 | `a_ragged_final_chunk_still_reports_completion` | short trailing chunk |
-| `malformed_input_is_rejected_before_touching_the_gpu` | 4 bad inputs return errors |
+| `malformed_input_is_rejected_before_touching_the_gpu` | 6 bad inputs, including a bad channel count |
+| `a_three_channel_source_renders_exactly_like_its_rgba_equivalent` | byte-identical at 8 and 16 bits |
+| `chunking_a_three_channel_source_leaves_no_seam` | 5 chunk sizes at a stride of three |
 
 ## L2 — `encoding.rs` (11)
 

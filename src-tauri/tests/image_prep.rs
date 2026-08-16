@@ -11,11 +11,31 @@ use half::f16;
 use image::{ImageBuffer, Rgba};
 use open_darkroom_lib::image_opening::Rgba16Image;
 
-use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16, LINEAR_BYTES_PER_PIXEL};
+use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
 use open_darkroom_lib::image_opening::{
     build_payload, compute_histograms, downscale_to_max_edge, payload_len_for, prepare_image,
-    HIST_BINS, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
+    PreparedImage, HIST_BINS, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
 };
+
+/// Prepare an RGBA fixture, which is the shape a source declaring alpha decodes to.
+fn prepare(img: &Rgba16Image) -> PreparedImage {
+    let (w, h) = img.dimensions();
+    prepare_image(img.as_raw(), w, h, 4)
+}
+
+/// Downscale an RGBA fixture, discarding the dimensions the caller already knows.
+fn downscale(img: &Rgba16Image, max_edge: u32) -> (Vec<u16>, u32, u32) {
+    let (w, h) = img.dimensions();
+    downscale_to_max_edge(img.as_raw(), w, h, 4, max_edge)
+}
+
+/// The same pixels as `img`, with the alpha channel dropped.
+fn without_alpha(img: &Rgba16Image) -> Vec<u16> {
+    img.as_raw()
+        .chunks_exact(4)
+        .flat_map(|px| [px[0], px[1], px[2]])
+        .collect()
+}
 
 // ── Downscaling ───────────────────────────────────────────────────────────────
 
@@ -31,8 +51,8 @@ fn downscale_preserves_aspect_ratio() {
 
     for ((w, h), expected) in cases {
         let img = solid(w, h, [0, 0, 0, u16::MAX]);
-        let small = downscale_to_max_edge(&img, PREVIEW_MAX_EDGE);
-        assert_eq!(small.dimensions(), expected, "downscaling {w}×{h}");
+        let (_, new_w, new_h) = downscale(&img, PREVIEW_MAX_EDGE);
+        assert_eq!((new_w, new_h), expected, "downscaling {w}×{h}");
 
         let src_aspect = w as f64 / h as f64;
         let dst_aspect = expected.0 as f64 / expected.1 as f64;
@@ -46,17 +66,15 @@ fn downscale_preserves_aspect_ratio() {
 #[test]
 fn downscale_leaves_small_images_untouched() {
     let img = rgb_ramp(64, 32);
-    let same = downscale_to_max_edge(&img, PREVIEW_MAX_EDGE);
+    let (same, w, h) = downscale(&img, PREVIEW_MAX_EDGE);
 
-    assert_eq!(same.dimensions(), (64, 32));
-    assert_eq!(same.as_raw(), img.as_raw(), "no resampling should occur");
+    assert_eq!((w, h), (64, 32));
+    assert_eq!(&same, img.as_raw(), "no resampling should occur");
 
     // Exactly at the limit is still untouched.
     let edge = solid(PREVIEW_MAX_EDGE, 100, [7, 7, 7, u16::MAX]);
-    assert_eq!(
-        downscale_to_max_edge(&edge, PREVIEW_MAX_EDGE).dimensions(),
-        (PREVIEW_MAX_EDGE, 100)
-    );
+    let (_, w, h) = downscale(&edge, PREVIEW_MAX_EDGE);
+    assert_eq!((w, h), (PREVIEW_MAX_EDGE, 100));
 }
 
 #[test]
@@ -64,9 +82,9 @@ fn downscale_preserves_a_flat_colour_exactly() {
     // Resampling a constant image must be a no-op on the values. This is what
     // catches a botched u16 byte re-interpretation in the resize round trip.
     let img = solid(4000, 2000, [1234, 5678, 9012, u16::MAX]);
-    let small = downscale_to_max_edge(&img, PREVIEW_MAX_EDGE);
+    let (small, _, _) = downscale(&img, PREVIEW_MAX_EDGE);
 
-    for px in small.as_raw().chunks_exact(4) {
+    for px in small.chunks_exact(4) {
         assert_eq!([px[0], px[1], px[2]], [1234, 5678, 9012]);
     }
 }
@@ -76,14 +94,36 @@ fn downscale_keeps_channels_distinct() {
     // A channel swap during the byte round trip would survive the flat-colour
     // test, so check a gradient where the channels disagree.
     let img = rgb_ramp(3000, 100);
-    let small = downscale_to_max_edge(&img, PREVIEW_MAX_EDGE);
+    let (small, w, _) = downscale(&img, PREVIEW_MAX_EDGE);
 
-    let (w, _) = small.dimensions();
-    let last = small.get_pixel(w - 1, 0).0;
-    let first = small.get_pixel(0, 0).0;
+    let first = &small[0..3];
+    let last = &small[(w as usize - 1) * 4..(w as usize - 1) * 4 + 3];
 
     assert!(last[0] > first[0], "red ramps up");
     assert!(last[1] < first[1], "green ramps down");
+}
+
+/// Resizing a three-channel source uses a different `fast_image_resize` pixel
+/// type, and unlike the four-channel one it does no alpha premultiply round trip
+/// at all. With an opaque source the two have to land on the same pixels.
+#[test]
+fn downscale_agrees_across_channel_counts() {
+    let img = rgb_ramp(3000, 100);
+
+    let (from_rgba, w, h) = downscale(&img, PREVIEW_MAX_EDGE);
+    let (from_rgb, rgb_w, rgb_h) =
+        downscale_to_max_edge(&without_alpha(&img), 3000, 100, 3, PREVIEW_MAX_EDGE);
+
+    assert_eq!((rgb_w, rgb_h), (w, h));
+
+    let stripped: Vec<u16> = from_rgba
+        .chunks_exact(4)
+        .flat_map(|px| [px[0], px[1], px[2]])
+        .collect();
+    assert_eq!(
+        from_rgb, stripped,
+        "the resample changed when the alpha channel was dropped"
+    );
 }
 
 // ── Histograms ────────────────────────────────────────────────────────────────
@@ -91,7 +131,7 @@ fn downscale_keeps_channels_distinct() {
 #[test]
 fn histogram_counts_every_pixel_once() {
     let img = noise(200, 150, 0xC0FFEE);
-    let h = compute_histograms(&img);
+    let h = compute_histograms(img.as_raw(), 4);
 
     let total = (200 * 150) as u32;
     assert_eq!(h.r.iter().sum::<u32>(), total);
@@ -102,7 +142,7 @@ fn histogram_counts_every_pixel_once() {
 #[test]
 fn histogram_bins_by_the_high_byte() {
     let img = solid(10, 10, [u8_to_u16(128), u8_to_u16(0), u8_to_u16(255), u16::MAX]);
-    let h = compute_histograms(&img);
+    let h = compute_histograms(img.as_raw(), 4);
 
     // 128 * 257 = 32896, and 32896 >> 8 = 128.
     assert_eq!(h.r[128], 100);
@@ -113,7 +153,7 @@ fn histogram_bins_by_the_high_byte() {
 #[test]
 fn histogram_channels_are_not_crossed() {
     let img = solid(4, 4, [u8_to_u16(10), u8_to_u16(20), u8_to_u16(30), u16::MAX]);
-    let h = compute_histograms(&img);
+    let h = compute_histograms(img.as_raw(), 4);
 
     assert_eq!(h.r[10], 16, "red");
     assert_eq!(h.g[20], 16, "green");
@@ -121,12 +161,26 @@ fn histogram_channels_are_not_crossed() {
     assert_eq!(h.r[20] + h.r[30], 0, "red bin picked up another channel");
 }
 
+/// The stride is the only thing separating one channel's bin from the next, so a
+/// three-channel source has to bin exactly as its RGBA equivalent does.
+#[test]
+fn histograms_do_not_depend_on_the_channel_count() {
+    let img = noise(64, 48, 0xA11FA);
+
+    let rgba = compute_histograms(img.as_raw(), 4);
+    let rgb = compute_histograms(&without_alpha(&img), 3);
+
+    assert_eq!(rgb.r, rgba.r, "red");
+    assert_eq!(rgb.g, rgba.g, "green");
+    assert_eq!(rgb.b, rgba.b, "blue");
+}
+
 #[test]
 fn histograms_describe_the_full_resolution_image() {
     // Larger than the preview cap, so preview and full-res dimensions differ
     // and we can tell which one was counted.
     let img = solid(2500, 100, [u8_to_u16(128); 4]);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
 
     assert_eq!(prepared.full_width, 2500);
     assert_eq!(prepared.preview_width, PREVIEW_MAX_EDGE, "preview is capped");
@@ -143,15 +197,41 @@ fn preview_uses_the_same_linearisation_as_export() {
     // preview bytes must be exactly what the export path would upload. This is
     // the guarantee that sharing `linearize_rgba_u16` was supposed to buy.
     let img = rgb_ramp(97, 13);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
 
     let lut = build_srgb_to_linear_lut_u16();
-    let expected = linearize_rgba_u16(img.as_raw(), &lut);
+    let expected = linearize_u16(img.as_raw(), 4, &lut);
 
     assert_eq!(
         prepared.preview_pixels, expected,
         "preview and export linearisation diverged"
     );
+}
+
+/// Dropping the stored alpha must not disturb anything the frontend receives.
+/// Both branches of `prepare_image` are covered: one fixture sits inside the
+/// preview cap and takes the direct path, the other is resampled.
+#[test]
+fn preparing_a_three_channel_source_matches_its_rgba_equivalent() {
+    for (w, h) in [(97u32, 13u32), (3000, 200)] {
+        let img = rgb_ramp(w, h);
+
+        let from_rgba = prepare(&img);
+        let from_rgb = prepare_image(&without_alpha(&img), w, h, 3);
+
+        assert_eq!(
+            (from_rgb.preview_width, from_rgb.preview_height),
+            (from_rgba.preview_width, from_rgba.preview_height),
+            "{w}×{h}: preview dimensions"
+        );
+        assert_eq!(
+            from_rgb.preview_pixels, from_rgba.preview_pixels,
+            "{w}×{h}: preview pixels diverged when alpha was dropped"
+        );
+        assert_eq!(from_rgb.histograms.r, from_rgba.histograms.r, "{w}×{h}: red");
+        assert_eq!(from_rgb.histograms.g, from_rgba.histograms.g, "{w}×{h}: green");
+        assert_eq!(from_rgb.histograms.b, from_rgba.histograms.b, "{w}×{h}: blue");
+    }
 }
 
 /// The preview is resampled, and resampling averages light, not code values.
@@ -171,7 +251,7 @@ fn the_preview_is_resampled_in_linear_light() {
         Rgba([u8_to_u16(v), u8_to_u16(v), u8_to_u16(v), u16::MAX])
     });
 
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
     assert_eq!(
         (prepared.preview_width, prepared.preview_height),
         (PREVIEW_MAX_EDGE, 4),
@@ -200,7 +280,7 @@ fn the_preview_is_resampled_in_linear_light() {
 #[test]
 fn prepare_reports_both_resolutions() {
     let img = gray_ramp(3000, 1500);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
 
     assert_eq!((prepared.full_width, prepared.full_height), (3000, 1500));
     assert_eq!((prepared.preview_width, prepared.preview_height), (2048, 1024));
@@ -218,7 +298,7 @@ fn prepare_reports_both_resolutions() {
 #[test]
 fn payload_header_carries_the_full_resolution_of_a_downscaled_preview() {
     let img = gray_ramp(3000, 1500);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
     let payload = build_payload(&prepared);
 
     let preview_width = u32::from_le_bytes(payload[0..4].try_into().unwrap());
@@ -237,7 +317,7 @@ fn payload_header_carries_the_full_resolution_of_a_downscaled_preview() {
 #[test]
 fn payload_round_trips_through_the_frontend_layout() {
     let img = rgb_ramp(9, 5);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
     let payload = build_payload(&prepared);
 
     assert_eq!(payload.len(), payload_len_for(9, 5));
@@ -281,7 +361,7 @@ fn payload_header_carries_preview_not_source_dimensions() {
     // describe the preview — using the source size would desynchronise the
     // histogram offset and corrupt the texture.
     let img = solid(2500, 500, [0, 0, 0, u16::MAX]);
-    let prepared = prepare_image(&img);
+    let prepared = prepare(&img);
     let payload = build_payload(&prepared);
 
     let width = u32::from_le_bytes(payload[0..4].try_into().unwrap());

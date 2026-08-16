@@ -10,10 +10,11 @@ use tauri_plugin_dialog::DialogExt;
 use image::{ImageBuffer, Rgba};
 
 use crate::color::{
-    build_resample_lut, build_srgb_to_linear_lut_u16, linear_u16_to_f16_bytes, linearize_rgba_u16,
-    srgb_to_linear_rgba_u16, LINEAR_BYTES_PER_PIXEL,
+    build_resample_lut, build_srgb_to_linear_lut_u16, linear_u16_to_f16_bytes, linearize_u16,
+    srgb_to_linear_u16, LINEAR_BYTES_PER_PIXEL,
 };
 
+/// The four-channel decode shape, produced whenever the source declares alpha.
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 
 /// Longest edge of the preview handed to the frontend.
@@ -30,11 +31,15 @@ pub const PAYLOAD_HEADER_BYTES: usize = 16;
 // ── State ─────────────────────────────────────────────────────────────────────
 
 pub struct OriginalImage {
-    /// Full-resolution RGBA u16 pixels. Behind an `Arc` so export can take a
-    /// reference-counted handle instead of copying the whole buffer.
+    /// Full-resolution interleaved u16 pixels. Behind an `Arc` so export can
+    /// take a reference-counted handle instead of copying the whole buffer.
     pub pixels_u16: Arc<Vec<u16>>,
     pub width: u32,
     pub height: u32,
+    /// Samples per pixel: 3 when the source declared no alpha channel, 4 when
+    /// it did. Sources without alpha are stored three-wide, which is a quarter
+    /// less memory held for as long as the image is open.
+    pub channels: usize,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -62,35 +67,45 @@ pub struct PreparedImage {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Downscale so the longest edge is at most `max_edge`, preserving aspect ratio.
-/// Images already within the limit are returned unchanged.
+/// Downscale so the longest edge is at most `max_edge`, preserving aspect ratio,
+/// and return the pixels with their new dimensions. Images already within the
+/// limit are returned unchanged.
 ///
 /// Resampling happens in u16 space so the preview keeps the source precision.
-/// `max_edge` must be greater than zero.
-pub fn downscale_to_max_edge(rgba: &Rgba16Image, max_edge: u32) -> Rgba16Image {
+/// `channels` is 3 or 4; `max_edge` must be greater than zero.
+pub fn downscale_to_max_edge(
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    max_edge: u32,
+) -> (Vec<u16>, u32, u32) {
     assert!(max_edge > 0, "max_edge must be non-zero");
+    assert!(
+        channels == 3 || channels == 4,
+        "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
+    );
 
-    let (w, h) = rgba.dimensions();
-    if w.max(h) <= max_edge {
-        return rgba.clone();
+    if width.max(height) <= max_edge {
+        return (src.to_vec(), width, height);
     }
 
-    let scale = max_edge as f32 / w.max(h) as f32;
-    let new_w = ((w as f32 * scale).round() as u32).max(1);
-    let new_h = ((h as f32 * scale).round() as u32).max(1);
+    let scale = max_edge as f32 / width.max(height) as f32;
+    let new_w = ((width as f32 * scale).round() as u32).max(1);
+    let new_h = ((height as f32 * scale).round() as u32).max(1);
 
-    let src_image = ImageRef::new(
-        w,
-        h,
-        bytemuck::cast_slice(rgba.as_raw()),
-        fir::PixelType::U16x4,
-    )
-    .unwrap();
+    let pixel_type = if channels == 4 {
+        fir::PixelType::U16x4
+    } else {
+        fir::PixelType::U16x3
+    };
+
+    let src_image = ImageRef::new(width, height, bytemuck::cast_slice(src), pixel_type).unwrap();
 
     let mut dst_image = Image::new(
         new_w.try_into().unwrap(),
         new_h.try_into().unwrap(),
-        fir::PixelType::U16x4,
+        pixel_type,
     );
 
     let mut resizer = fir::Resizer::new();
@@ -109,17 +124,17 @@ pub fn downscale_to_max_edge(rgba: &Rgba16Image, max_edge: u32) -> Rgba16Image {
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
 
-    ImageBuffer::from_raw(new_w, new_h, u16_vec).unwrap()
+    (u16_vec, new_w, new_h)
 }
 
 /// R/G/B histograms of the full-resolution image. u16 sRGB values (0–65535) are
-/// mapped to 8-bit bins (0–255) via `>> 8`.
-pub fn compute_histograms(rgba16: &Rgba16Image) -> Histograms {
+/// mapped to 8-bit bins (0–255) via `>> 8`. Alpha, where present, is not binned.
+pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
     let mut r = [0u32; HIST_BINS];
     let mut g = [0u32; HIST_BINS];
     let mut b = [0u32; HIST_BINS];
 
-    for px in rgba16.as_raw().chunks_exact(4) {
+    for px in src.chunks_exact(channels) {
         r[(px[0] >> 8) as usize] += 1;
         g[(px[1] >> 8) as usize] += 1;
         b[(px[2] >> 8) as usize] += 1;
@@ -131,10 +146,15 @@ pub fn compute_histograms(rgba16: &Rgba16Image) -> Histograms {
 /// Build the preview texture and histograms for a decoded image.
 ///
 /// Borrows rather than consumes, so the caller can move the full-resolution
-/// buffer into the shared state afterwards without cloning it.
-pub fn prepare_image(rgba16: &Rgba16Image) -> PreparedImage {
-    let (full_width, full_height) = rgba16.dimensions();
-
+/// buffer into the shared state afterwards without cloning it. `channels` is 3
+/// for a source with no alpha channel and 4 for one with; the preview is RGBA
+/// either way, since that is what the texture format requires.
+pub fn prepare_image(
+    src: &[u16],
+    full_width: u32,
+    full_height: u32,
+    channels: usize,
+) -> PreparedImage {
     // Resampling happens in linear light, so the image is gamma-decoded before
     // it is downscaled rather than after.
     //
@@ -151,27 +171,18 @@ pub fn prepare_image(rgba16: &Rgba16Image) -> PreparedImage {
     // so their bytes stay identical to what the export path would upload.
     let (preview_width, preview_height, preview_pixels) =
         if full_width.max(full_height) > PREVIEW_MAX_EDGE {
-            let linear: Rgba16Image = ImageBuffer::from_raw(
-                full_width,
-                full_height,
-                srgb_to_linear_rgba_u16(rgba16.as_raw(), &build_resample_lut()),
-            )
-            .expect("a linearised buffer keeps the dimensions of its source");
+            let linear = srgb_to_linear_u16(src, channels, &build_resample_lut());
 
-            let preview = downscale_to_max_edge(&linear, PREVIEW_MAX_EDGE);
-            let (w, h) = preview.dimensions();
-            (w, h, linear_u16_to_f16_bytes(preview.as_raw()))
+            let (preview, w, h) =
+                downscale_to_max_edge(&linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
+            (w, h, linear_u16_to_f16_bytes(&preview, channels))
         } else {
             let lut = build_srgb_to_linear_lut_u16();
-            (
-                full_width,
-                full_height,
-                linearize_rgba_u16(rgba16.as_raw(), &lut),
-            )
+            (full_width, full_height, linearize_u16(src, channels, &lut))
         };
 
     // Histograms come from the full-resolution image, not the preview.
-    let histograms = compute_histograms(rgba16);
+    let histograms = compute_histograms(src, channels);
 
     PreparedImage {
         preview_pixels,
@@ -219,6 +230,13 @@ pub fn payload_len_for(preview_width: u32, preview_height: u32) -> usize {
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
+/// Error returned when the user dismisses the file picker.
+///
+/// Dismissal happens before the loaded image is released, so it is the one
+/// failure that leaves the current image intact — `openImage.ts` matches on this
+/// exact string to tell it apart from an open that got far enough to purge.
+pub const OPEN_CANCELLED: &str = "open:cancelled";
+
 #[tauri::command]
 pub(crate) async fn open_image_file(
     app: tauri::AppHandle,
@@ -231,7 +249,7 @@ pub(crate) async fn open_image_file(
         .file()
         .add_filter("Images", &["jpg", "jpeg", "png"])
         .blocking_pick_file()
-        .ok_or("No file selected")?
+        .ok_or(OPEN_CANCELLED)?
         .into_path()
         .map_err(|e| e.to_string())?;
 
@@ -248,12 +266,18 @@ pub(crate) async fn open_image_file(
 
     let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
 
-    // `into_rgba16` consumes the DynamicImage, so the decoded source buffer is
-    // released as soon as the conversion is done rather than idling.
-    let rgba16 = img.into_rgba16();
+    let (full_width, full_height) = (img.width(), img.height());
 
-    let prepared = prepare_image(&rgba16);
-    let (full_width, full_height) = (prepared.full_width, prepared.full_height);
+    // Sources whose format declares no alpha are kept three-wide. `into_rgb16` /
+    // `into_rgba16` consume the DynamicImage, so the decoded source buffer is
+    // released as soon as the conversion is done rather than idling.
+    let (samples, channels) = if img.color().has_alpha() {
+        (img.into_rgba16().into_raw(), 4)
+    } else {
+        (img.into_rgb16().into_raw(), 3)
+    };
+
+    let prepared = prepare_image(&samples, full_width, full_height, channels);
 
     // Store the original full-resolution image for export. This happens after
     // `prepare_image` so the buffer can be moved into the state rather than
@@ -261,9 +285,10 @@ pub(crate) async fn open_image_file(
     {
         let mut guard = state.lock().unwrap();
         *guard = Some(OriginalImage {
-            pixels_u16: Arc::new(rgba16.into_raw()),
+            pixels_u16: Arc::new(samples),
             width: full_width,
             height: full_height,
+            channels,
         });
     }
 

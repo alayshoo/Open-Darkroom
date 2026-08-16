@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use image::{ImageBuffer, Rgba};
 use wgpu::util::DeviceExt;
 
-use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_rgba_u16};
+use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16};
 use open_darkroom_lib::export_rendering::{
     render_image, sliders_to_bytes, view_to_bytes, SlidersPayload, ViewPayload, PARAMS_BYTES,
     SHARP_PARAMS_BYTES,
@@ -31,6 +31,7 @@ pub const CALC_PARAMS_PIPELINE_TS: &str =
     include_str!("../../../src/lib/gpu/pipelines/calcParamsPipeline.ts");
 pub const IMG_PARAMETERS_TS: &str = include_str!("../../../src/lib/types/imgParameters.ts");
 pub const EXPORT_RENDERING_RS: &str = include_str!("../../src/export_rendering.rs");
+pub const OPEN_IMAGE_TS: &str = include_str!("../../../src/lib/utils/openImage.ts");
 
 // ── Reference colour maths ────────────────────────────────────────────────────
 //
@@ -195,14 +196,14 @@ pub fn mixed_ramp(width: u32) -> Rgba16Image {
 /// Render `img` with `sliders` at 8 bits and return the RGB bytes.
 pub fn develop(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, sliders, 8, |_| {}))
+    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 8, |_| {}))
         .expect("render should succeed")
 }
 
 /// Render `img` with `sliders` at 16 bits, returning one u16 per channel.
 pub fn develop16(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u16> {
     let (w, h) = img.dimensions();
-    let bytes = pollster::block_on(render_image(img.as_raw(), w, h, sliders, 16, |_| {}))
+    let bytes = pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 16, |_| {}))
         .expect("render should succeed");
     bytes
         .chunks_exact(2)
@@ -556,7 +557,7 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
 
     // Upload the image exactly the way the preview path does.
     let lut = build_srgb_to_linear_lut_u16();
-    let linear = linearize_rgba_u16(img.as_raw(), &lut);
+    let linear = linearize_u16(img.as_raw(), 4, &lut);
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("test_hist_tex"),
@@ -593,21 +594,13 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
         },
     );
 
-    let bin_bytes = (HIST_BINS * 4) as u64;
-    let zeros = vec![0u8; bin_bytes as usize];
-    let bins: Vec<wgpu::Buffer> = (0..3)
-        .map(|i| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(match i {
-                    0 => "bins_r",
-                    1 => "bins_g",
-                    _ => "bins_b",
-                }),
-                contents: &zeros,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            })
-        })
-        .collect();
+    // One buffer holding the three channels end to end, matching histogram.wgsl.
+    let bin_bytes = (HIST_BINS * 3 * 4) as u64;
+    let bins = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("bins"),
+        contents: &vec![0u8; bin_bytes as usize],
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
 
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("histogram"),
@@ -638,29 +631,17 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: bins[0].as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: bins[1].as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: bins[2].as_entire_binding(),
+                resource: bins.as_entire_binding(),
             },
         ],
     });
 
-    let staging: Vec<wgpu::Buffer> = (0..3)
-        .map(|_| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("test_hist_staging"),
-                size: bin_bytes,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            })
-        })
-        .collect();
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test_hist_staging"),
+        size: bin_bytes,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
 
     let mut enc = device.create_command_encoder(&Default::default());
     {
@@ -669,17 +650,13 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
     }
-    for i in 0..3 {
-        enc.copy_buffer_to_buffer(&bins[i], 0, &staging[i], 0, bin_bytes);
-    }
+    enc.copy_buffer_to_buffer(&bins, 0, &staging, 0, bin_bytes);
     queue.submit(std::iter::once(enc.finish()));
 
+    let bytes = read_buffer(device, &staging);
     let mut out = [[0u32; HIST_BINS]; 3];
-    for (channel, buf) in staging.iter().enumerate() {
-        let bytes = read_buffer(device, buf);
-        for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-            out[channel][i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        }
+    for (i, chunk) in bytes.chunks_exact(4).enumerate() {
+        out[i / HIST_BINS][i % HIST_BINS] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
     out
 }
