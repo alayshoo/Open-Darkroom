@@ -235,6 +235,15 @@ pub(crate) async fn open_image_file(
         .into_path()
         .map_err(|e| e.to_string())?;
 
+    // Release the previous image before decoding the next one. Held any longer
+    // and two full-resolution buffers are resident at once, which for large
+    // files roughly doubles the peak. The dialog has already returned a path, so
+    // a cancelled open never reaches here and leaves the current image alone.
+    {
+        let mut guard = state.lock().unwrap();
+        *guard = None;
+    }
+
     let overall_start = Instant::now();
 
     let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
