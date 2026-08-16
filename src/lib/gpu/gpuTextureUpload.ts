@@ -51,10 +51,12 @@ export function uploadRawPixelsToGPU(
             GPUTextureUsage.COPY_DST,
     });
 
-    // writeTexture copies a CPU byte array → GPU texture
+    // writeTexture copies a CPU byte array → GPU texture. The view is passed
+    // whole rather than as `.buffer`, which would drop its byte offset and
+    // upload from the start of the payload instead of the start of the pixels.
     device.queue.writeTexture(
         { texture },
-        pixels.buffer as ArrayBuffer,
+        pixels,
         {
             // "bytes per row" — each row is width × 4 channels × 2 bytes per f16 (RGBA)
             bytesPerRow: width * 8,

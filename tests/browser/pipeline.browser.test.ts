@@ -13,6 +13,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SHARP_FORMAT, WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB, type Sliders } from "$lib/types/imgParameters";
 import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
+import { parseImagePayload } from "$lib/utils/openImage";
 import {
   createCompositeStage,
   createDevelopStage,
@@ -118,6 +119,14 @@ beforeAll(async () => {
   };
 });
 
+/** Overrides for a run over something other than the default chart. */
+interface DevelopOptions {
+  width?: number;
+  height?: number;
+  /** RGBA f16 pixels to upload as they stand, rather than linearising `rgb`. */
+  pixels?: Uint8Array;
+}
+
 /**
  * Drive the real frontend pipelines over `rgb` and read the result back.
  * Mirrors `renderer.ts`: the calcParams compute pass, then the three render
@@ -127,7 +136,11 @@ async function develop(
   rgb: Uint8Array,
   sliders: Sliders,
   renderScale?: number,
+  options: DevelopOptions = {},
 ): Promise<Uint8Array> {
+  const width = options.width ?? WIDTH;
+  const height = options.height ?? HEIGHT;
+
   const calcParams = createCalcParamsPipeline(gpu);
   const develop = createDevelopStage(gpu);
   const sharpH = createSharpHorizontalStage(gpu);
@@ -136,12 +149,17 @@ async function develop(
   const colorSpaceEncode = createEncodeStage(gpu);
   const sampler = createSourceSampler(gpu);
 
-  const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
+  const image = uploadRawPixelsToGPU(
+    gpu.device,
+    options.pixels ?? linearisePixels(rgb),
+    width,
+    height,
+  );
 
   const intermediate = (label: string, format: GPUTextureFormat) =>
     gpu.device.createTexture({
       label,
-      size: { width: WIDTH, height: HEIGHT },
+      size: { width, height },
       format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
@@ -151,14 +169,17 @@ async function develop(
   const compositeTexture = intermediate("composited", WORKING_FORMAT);
 
   const target = gpu.device.createTexture({
-    size: { width: WIDTH, height: HEIGHT },
+    size: { width, height },
     format: "rgba8unorm",
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
   });
 
-  const bytesPerRow = WIDTH * 4;
+  // Readback rows are padded to the 256-byte alignment the copy requires, so a
+  // width whose rows do not land on it is a case the harness handles rather
+  // than a width the tests have to avoid.
+  const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
   const staging = gpu.device.createBuffer({
-    size: bytesPerRow * HEIGHT,
+    size: bytesPerRow * height,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
@@ -221,7 +242,7 @@ async function develop(
   encoder.copyTextureToBuffer(
     { texture: target },
     { buffer: staging, bytesPerRow },
-    { width: WIDTH, height: HEIGHT },
+    { width, height },
   );
   gpu.device.queue.submit([encoder.finish()]);
 
@@ -229,12 +250,17 @@ async function develop(
   const rgba = new Uint8Array(staging.getMappedRange().slice(0));
   staging.unmap();
 
-  // Drop alpha so the result lines up with the Rust renderer's RGB output.
-  const out = new Uint8Array(WIDTH * HEIGHT * 3);
-  for (let i = 0; i < WIDTH * HEIGHT; i++) {
-    out[i * 3] = rgba[i * 4];
-    out[i * 3 + 1] = rgba[i * 4 + 1];
-    out[i * 3 + 2] = rgba[i * 4 + 2];
+  // Drop alpha and the row padding so the result lines up with the Rust
+  // renderer's RGB output.
+  const out = new Uint8Array(width * height * 3);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const from = y * bytesPerRow + x * 4;
+      const to = (y * width + x) * 3;
+      out[to] = rgba[from];
+      out[to + 1] = rgba[from + 1];
+      out[to + 2] = rgba[from + 2];
+    }
   }
   calcParams.destroy();
   image.texture.destroy();
@@ -672,5 +698,161 @@ describe("histogram scale reduction", () => {
   it("never reports zero, so the draw cannot divide by it", async () => {
     const bins = await histogram(solid(0, 0, 0), defaultSlidersRGB);
     expect(bins.scale).toBeGreaterThan(0);
+  });
+});
+
+// ── Image integrity ───────────────────────────────────────────────────────────
+//
+// The tests above ask what the chain does to a value. These ask whether the
+// pixel that came out is the pixel that went in, at the position it went in at
+// — the class of fault where the maths is right and the geometry is not: a roll,
+// a flip, a row stride off by a padding, a buffer read from the wrong offset.
+//
+// They start from a payload framed the way the backend frames one, because the
+// pixels reaching the GPU in the app are a view into the middle of that payload
+// rather than a buffer of their own, and an upload that reads from the start of
+// the buffer instead shifts the whole image by the header.
+
+/** Awkward on purpose: rows land off the 256-byte readback alignment. */
+const INTEGRITY_WIDTH = 253;
+const INTEGRITY_HEIGHT = 61;
+
+/**
+ * A chart where every pixel is far from its neighbours, so a displacement of
+ * even one pixel shows up as a large difference rather than a small one. A
+ * gradient would hide a shift inside the tolerance the round trip needs.
+ */
+function scatterChart(width: number, height: number): Uint8Array {
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    // Odd multipliers over a byte, so consecutive pixels land far apart and the
+    // sequence does not repeat within a row or a column.
+    rgb[i * 3] = (i * 149 + 11) & 0xff;
+    rgb[i * 3 + 1] = (i * 83 + 197) & 0xff;
+    rgb[i * 3 + 2] = (i * 211 + 61) & 0xff;
+  }
+  return rgb;
+}
+
+/** Frame pixels the way `build_payload` in image_opening.rs does. */
+function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBuffer {
+  const HEADER = 16;
+  const pixels = linearisePixels(rgb);
+  const buffer = new ArrayBuffer(HEADER + pixels.length + 3 * 256 * 4);
+  const view = new DataView(buffer);
+
+  view.setUint32(0, width, true);
+  view.setUint32(4, height, true);
+  view.setUint32(8, width, true);
+  view.setUint32(12, height, true);
+  new Uint8Array(buffer, HEADER, pixels.length).set(pixels);
+
+  // Histograms are not read here, but they have to be present: they are what
+  // makes the pixels an interior slice rather than the tail of the buffer.
+  for (let i = 0; i < 3 * 256; i++) {
+    view.setUint32(HEADER + pixels.length + i * 4, i, true);
+  }
+  return buffer;
+}
+
+/**
+ * Where `out` sits relative to `source`, in whole pixels of the row-major
+ * order, or null if no displacement lines them up. Reported on failure so a
+ * geometry fault names itself instead of arriving as a wall of wrong bytes.
+ */
+function displacement(out: Uint8Array, source: Uint8Array, search = 8): number | null {
+  for (let shift = -search; shift <= search; shift++) {
+    if (shift === 0) continue;
+    let worst = 0;
+    // Skip the pixels that wrapped: what is being identified is the body.
+    for (let i = Math.max(0, -shift) + search; i < source.length / 3 - search; i++) {
+      const from = (i + shift) * 3;
+      for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(out[from + c] - source[i * 3 + c]));
+      if (worst > 2) break;
+    }
+    if (worst <= 2) return shift;
+  }
+  return null;
+}
+
+describe("image integrity", () => {
+  it("returns the image it was given, pixel for pixel, at identity", async () => {
+    const source = scatterChart(INTEGRITY_WIDTH, INTEGRITY_HEIGHT);
+    const payload = parseImagePayload(
+      backendPayload(source, INTEGRITY_WIDTH, INTEGRITY_HEIGHT),
+    );
+
+    expect(payload.width).toBe(INTEGRITY_WIDTH);
+    expect(payload.height).toBe(INTEGRITY_HEIGHT);
+    // The pixels are a window into the payload, not a buffer of their own.
+    expect(payload.pixels.byteOffset).toBe(16);
+
+    const out = await develop(source, defaultSlidersRGB, 1, {
+      width: payload.width,
+      height: payload.height,
+      pixels: payload.pixels,
+    });
+
+    let worst = 0;
+    let worstAt = -1;
+    for (let i = 0; i < source.length; i++) {
+      const delta = Math.abs(out[i] - source[i]);
+      if (delta > worst) {
+        worst = delta;
+        worstAt = i;
+      }
+    }
+
+    if (worst > 2) {
+      const shift = displacement(out, source);
+      const pixel = Math.floor(worstAt / 3);
+      throw new Error(
+        shift === null
+          ? `pixel ${pixel} (${pixel % INTEGRITY_WIDTH}, ${Math.floor(pixel / INTEGRITY_WIDTH)}) ` +
+            `is off by ${worst}, and no whole-pixel displacement explains it`
+          : `the rendered image is the source displaced by ${shift} pixel(s)`,
+      );
+    }
+  });
+
+  it("holds the edges in place", async () => {
+    // The corners are where a displacement leaves its wrapped pixels, so they
+    // get their own assertion: an error confined to a handful of pixels at one
+    // edge is a fraction of the frame small enough for a whole-image tolerance
+    // to swallow.
+    const source = scatterChart(INTEGRITY_WIDTH, INTEGRITY_HEIGHT);
+    const payload = parseImagePayload(
+      backendPayload(source, INTEGRITY_WIDTH, INTEGRITY_HEIGHT),
+    );
+
+    const out = await develop(source, defaultSlidersRGB, 1, {
+      width: payload.width,
+      height: payload.height,
+      pixels: payload.pixels,
+    });
+
+    const at = (x: number, y: number) => (y * INTEGRITY_WIDTH + x) * 3;
+    const corners = [
+      ["top left", at(0, 0)],
+      ["top right", at(INTEGRITY_WIDTH - 1, 0)],
+      ["bottom left", at(0, INTEGRITY_HEIGHT - 1)],
+      ["bottom right", at(INTEGRITY_WIDTH - 1, INTEGRITY_HEIGHT - 1)],
+    ] as const;
+
+    for (const [name, i] of corners) {
+      for (let c = 0; c < 3; c++) {
+        expect(Math.abs(out[i + c] - source[i + c]), name).toBeLessThanOrEqual(2);
+      }
+    }
+
+    // Both ends of every row, which is where a stride fault surfaces first.
+    for (let y = 0; y < INTEGRITY_HEIGHT; y++) {
+      for (const x of [0, INTEGRITY_WIDTH - 1]) {
+        const i = at(x, y);
+        for (let c = 0; c < 3; c++) {
+          expect(Math.abs(out[i + c] - source[i + c]), `(${x}, ${y})`).toBeLessThanOrEqual(2);
+        }
+      }
+    }
   });
 });

@@ -8,18 +8,10 @@ import { type ImagePayload } from "$lib/types/imagePayload";
 // OPEN_CANCELLED in image_opening.rs.
 const OPEN_CANCELLED = "open:cancelled";
 
-// Open an image, or return null if the user dismissed the picker. Any other
-// rejection means the backend got as far as releasing the image it held, so the
-// caller has to drop what it is showing rather than keep it.
-export async function openImage(): Promise<ImagePayload | null> {
-    let buffer: ArrayBuffer;
-    try {
-        buffer = await invoke<ArrayBuffer>("open_image_file");
-    } catch (e) {
-        if (e === OPEN_CANCELLED) return null;
-        throw e;
-    }
-
+// Split the backend payload into its regions. The pixels and histograms are
+// views onto the payload, not copies, so they carry a byte offset — anything
+// handing them to WebGPU has to pass the view rather than its buffer.
+export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
     // Parse the header: preview width and height, then the full-resolution
     // width and height, u32 little-endian.
     const header = new DataView(buffer);
@@ -39,4 +31,16 @@ export async function openImage(): Promise<ImagePayload | null> {
     const histB = new Uint32Array(buffer, histOffset + 512 * 4, 256);
 
     return { width, height, fullWidth, fullHeight, pixels, histR, histG, histB };
+}
+
+// Open an image, or return null if the user dismissed the picker. Any other
+// rejection means the backend got as far as releasing the image it held, so the
+// caller has to drop what it is showing rather than keep it.
+export async function openImage(): Promise<ImagePayload | null> {
+    try {
+        return parseImagePayload(await invoke<ArrayBuffer>("open_image_file"));
+    } catch (e) {
+        if (e === OPEN_CANCELLED) return null;
+        throw e;
+    }
 }
