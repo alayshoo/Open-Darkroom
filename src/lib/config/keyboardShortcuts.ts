@@ -13,11 +13,15 @@ interface ShortcutActions {
 export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, toggleDebugStats, toggleHistogram }: ShortcutActions) {
     return (e: KeyboardEvent) => {
         let handled = false;
-    
-        if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
+
+        // Shift changes e.key's case, so letter shortcuts compare on a
+        // normalised key.
+        const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+        if (e.ctrlKey && key === "z" && !e.shiftKey) {
             undo();
             handled = true;
-        } else if (e.ctrlKey && e.shiftKey && e.key === "z") {
+        } else if (e.ctrlKey && e.shiftKey && key === "z") {
             redo();
             handled = true;
         } else if (e.key === ".") {
@@ -26,10 +30,10 @@ export function createKeydownHandler({ undo, redo, movePage, changeMode, openIma
         } else if (e.key === ",") {
             movePage(false);
             handled = true;
-        } else if (e.key === "m") {
+        } else if (key === "m") {
             changeMode();
             handled = true;
-        } else if (e.ctrlKey && e.key === "o") {
+        } else if (e.ctrlKey && key === "o") {
             openImage();
             handled = true
         } else if (e.key === "F1") {
