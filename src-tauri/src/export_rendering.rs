@@ -12,7 +12,9 @@
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
-use crate::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
+use crate::color::{
+    build_srgb_to_linear_lut_f32, linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL,
+};
 
 pub const CALC_PARAMS_WGSL: &str =
     include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
@@ -29,6 +31,15 @@ pub const COLOR_SPACE_ENCODE_WGSL: &str =
 /// `WORKING_FORMAT` in `src/lib/types/gpuTypes.ts` — see the note there on why
 /// the intermediates are 32-bit float rather than 16.
 pub const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+/// Format the export uploads the source image in.
+///
+/// 32-bit float for the same reason the intermediates are: an f16 upload
+/// resolves about 13.4 of the 16 input bits, collapsing runs of roughly
+/// seventeen adjacent codes near white onto one value. That ceiling would follow
+/// the signal all the way to a 16-bit file. The preview keeps `rgba16float` —
+/// it renders to an 8-bit display, so there is nothing there to lose.
+pub const INPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Format of the sharpness textures. Must match `SHARP_FORMAT` in
 /// `src/lib/types/gpuTypes.ts`.
@@ -93,10 +104,10 @@ pub fn sharp_margin_rows(sliders: &SlidersPayload, width: u32, height: u32) -> u
 
 /// Rows to render per chunk, given the margin each one has to discard.
 ///
-/// Clarity's kernel reaches 180 rows, so a fixed 512-row chunk would spend more
-/// than half its work on margins. Growing the chunk with the margin keeps that
-/// overhead bounded; the ceiling is memory, since four full-width intermediates
-/// at 16 bytes a texel are live at once.
+/// Clarity's kernel reaches 180 rows, so a fixed chunk would spend more than
+/// half its work on margins. Growing the chunk with the margin keeps that
+/// overhead bounded; the ceiling is memory, since six full-width surfaces at 16
+/// bytes a texel are live at once.
 pub fn chunk_rows_for_margin(margin: u32) -> u32 {
     CHUNK_ROWS.max(margin * 4)
 }
@@ -118,7 +129,12 @@ pub const SLIDER_COUNT: usize = 30;
 pub const VIEW_BYTES: usize = 16;
 
 /// Rows rendered per GPU pass. Bounds peak VRAM for very large images.
-pub const CHUNK_ROWS: u32 = 512;
+///
+/// Every surface in the chain is 16 bytes a texel, so this is what keeps a
+/// 61 MP export inside a couple of hundred megabytes of VRAM. Chunking is free
+/// to tighten: each pass is per-pixel apart from the blur, which carries its own
+/// margin.
+pub const CHUNK_ROWS: u32 = 256;
 
 // ── Sliders payload ───────────────────────────────────────────────────────────
 
@@ -313,7 +329,7 @@ pub async fn render_image(
 ///
 /// When `bit_depth` is 8 the output texture is `Rgba8Unorm` and the returned
 /// buffer contains 3 × u8 per pixel.  When `bit_depth` is 16 the output
-/// texture is `Rgba16Float`; each channel is read back as an f16, converted to
+/// texture is `Rgba32Float`; each channel is read back as an f32, converted to
 /// a u16 (0–65535), and stored little-endian, giving 6 bytes per pixel.
 ///
 /// `pixels_u16` is interleaved at `width` × `height`, `channels` samples per
@@ -530,6 +546,9 @@ pub async fn render_image_with_chunk_rows(
         source: wgpu::ShaderSource::Wgsl(DEVELOP_WGSL.into()),
     });
 
+    // The export renders one to one, so the sampler only ever lands on texel
+    // centres and nearest is exactly linear. That lets the input stay
+    // `rgba32float`, which is unfilterable without an optional feature.
     let dev_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("dev_bgl"),
         entries: &[
@@ -537,7 +556,7 @@ pub async fn render_image_with_chunk_rows(
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
@@ -546,7 +565,7 @@ pub async fn render_image_with_chunk_rows(
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
@@ -570,7 +589,7 @@ pub async fn render_image_with_chunk_rows(
         });
 
     let output_format = if bit_depth >= 16 {
-        wgpu::TextureFormat::Rgba16Float
+        WORKING_FORMAT
     } else {
         wgpu::TextureFormat::Rgba8Unorm
     };
@@ -726,21 +745,21 @@ pub async fn render_image_with_chunk_rows(
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
 
     // ── 5. Process image chunk by chunk ───────────────────────────────────────
 
-    // Rgba8Unorm = 4 bytes/pixel, Rgba16Float = 8 bytes/pixel
-    let bytes_per_texel = if bit_depth >= 16 { 8u32 } else { 4u32 };
+    // Rgba8Unorm = 4 bytes/pixel, Rgba32Float = 16 bytes/pixel
+    let bytes_per_texel = if bit_depth >= 16 { 16u32 } else { 4u32 };
     let bytes_per_row_unpadded = width * bytes_per_texel;
     let padded_bytes_per_row = (bytes_per_row_unpadded + 255) & !255;
 
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
-    let lut = build_srgb_to_linear_lut_u16();
+    let lut = build_srgb_to_linear_lut_f32();
     let total_pixels = (width * height) as usize;
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
@@ -782,7 +801,7 @@ pub async fn render_image_with_chunk_rows(
 
         let src_u16 =
             &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels];
-        let chunk_f16_bytes = linearize_u16(src_u16, channels, &lut);
+        let chunk_bytes = linearize_u16_f32(src_u16, channels, &lut);
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),
@@ -790,7 +809,7 @@ pub async fn render_image_with_chunk_rows(
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
+            format: INPUT_FORMAT,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -802,10 +821,10 @@ pub async fn render_image_with_chunk_rows(
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &chunk_f16_bytes,
+            &chunk_bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width * LINEAR_BYTES_PER_PIXEL as u32),
+                bytes_per_row: Some(width * LINEAR_F32_BYTES_PER_PIXEL as u32),
                 rows_per_image: None,
             },
             wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
@@ -1011,19 +1030,22 @@ pub async fn render_image_with_chunk_rows(
                     ..row * padded_bytes_per_row as usize + bytes_per_row_unpadded as usize];
                 let dst_base = out_rgb_offset + row * width as usize * bytes_per_output_pixel;
                 if bit_depth >= 16 {
-                    // Each channel is an f16 (2 bytes LE); convert to u16 and store LE.
+                    // Each channel is an f32 (4 bytes LE); convert to u16 and store LE.
                     for px in 0..width as usize {
-                        let s = px * 8; // 8 bytes per Rgba16Float texel
-                        let r = half::f16::from_le_bytes([row_src[s],     row_src[s + 1]]);
-                        let g = half::f16::from_le_bytes([row_src[s + 2], row_src[s + 3]]);
-                        let b = half::f16::from_le_bytes([row_src[s + 4], row_src[s + 5]]);
-                        let r16 = (r.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
-                        let g16 = (g.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
-                        let b16 = (b.to_f32().clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                        let s = px * 16; // 16 bytes per Rgba32Float texel
                         let d = dst_base + px * 6;
-                        output_rgb[d..d + 2].copy_from_slice(&r16.to_le_bytes());
-                        output_rgb[d + 2..d + 4].copy_from_slice(&g16.to_le_bytes());
-                        output_rgb[d + 4..d + 6].copy_from_slice(&b16.to_le_bytes());
+                        for c in 0..3 {
+                            let o = s + c * 4;
+                            let v = f32::from_le_bytes([
+                                row_src[o],
+                                row_src[o + 1],
+                                row_src[o + 2],
+                                row_src[o + 3],
+                            ]);
+                            let v16 = (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                            output_rgb[d + c * 2..d + c * 2 + 2]
+                                .copy_from_slice(&v16.to_le_bytes());
+                        }
                     }
                 } else {
                     for px in 0..width as usize {

@@ -356,11 +356,12 @@ fn inversion_is_its_own_inverse() {
     // in sRGB code values the error near black looks enormous because the
     // transfer curve has a slope of ~13 there.
     //
-    // The budget is one f16 ULP at the white end: f16 spacing just below 1.0 is
-    // 2^-11 ≈ 4.9e-4, and converting that sRGB step to linear near white
-    // multiplies it by d(linear)/d(sRGB) = 2.4/1.055 ≈ 2.3, giving ~1.1e-3.
-    // That is the texture format's floor, not an error in the chain.
-    const TOLERANCE: f64 = 1.5e-3;
+    // The budget is the 16-bit intermediate, now that nothing narrower sits in
+    // the export path: one u16 sRGB step near white is 1/65535, and converting
+    // it to linear multiplies it by d(linear)/d(sRGB) = 2.4/1.055 ≈ 2.3, giving
+    // ~3.5e-5. Inversion is a subtraction in linear light, so that lands
+    // unchanged wherever the tone came from.
+    const TOLERANCE: f64 = 1.0e-4;
 
     for i in 0..(64 * 4) {
         for c in 0..3 {

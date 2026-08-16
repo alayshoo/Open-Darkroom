@@ -192,10 +192,11 @@ fn histograms_describe_the_full_resolution_image() {
 // ── Preview preparation ───────────────────────────────────────────────────────
 
 #[test]
-fn preview_uses_the_same_linearisation_as_export() {
-    // For an image inside the preview cap there is no resampling, so the
-    // preview bytes must be exactly what the export path would upload. This is
-    // the guarantee that sharing `linearize_rgba_u16` was supposed to buy.
+fn preview_uses_the_shared_linearisation() {
+    // For an image inside the preview cap there is no resampling, so the preview
+    // bytes must be exactly the shared conversion's output. The export uploads
+    // the same curve at f32 — `the_two_tables_describe_the_same_curve` in
+    // color.rs is what holds the two widths to one tone scale.
     let img = rgb_ramp(97, 13);
     let prepared = prepare(&img);
 

@@ -1,9 +1,10 @@
 // src-tauri/src/color.rs
 //
 // Colour-space conversion shared by the preview path (image_opening) and the
-// export path (export_rendering). Both upload `rgba16float` textures, so both
-// need the same u16 sRGB → f16 linear conversion — keeping a single copy is
-// what guarantees the on-screen preview and the exported file agree.
+// export path (export_rendering). The preview uploads `rgba16float` and the
+// export `rgba32float`, so the tables differ in width but not in curve —
+// keeping one definition of that curve is what guarantees the on-screen preview
+// and the exported file agree.
 
 use half::f16;
 use rayon::prelude::*;
@@ -14,21 +15,40 @@ pub const LUT_SIZE: usize = 65536;
 /// Bytes per pixel once linearised: 4 channels × f16.
 pub const LINEAR_BYTES_PER_PIXEL: usize = 8;
 
+/// Bytes per pixel once linearised at full width: 4 channels × f32.
+pub const LINEAR_F32_BYTES_PER_PIXEL: usize = 16;
+
+/// The sRGB electro-optical transfer function, over the unit interval.
+fn srgb_to_linear(s: f32) -> f32 {
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055_f32).powf(2.4)
+    }
+}
+
 /// sRGB u16 → linear f16 lookup table.
 ///
-/// Built once per image load / export and shared across the rayon workers, so
-/// the per-pixel cost is a single table lookup rather than a `powf`.
+/// Built once per image load and shared across the rayon workers, so the
+/// per-pixel cost is a single table lookup rather than a `powf`.
+///
+/// This is the preview's table. f16 resolves ~13.4 of the 16 input bits, which
+/// is far more than an 8-bit display can show and half the VRAM of f32; the
+/// export uses [`build_srgb_to_linear_lut_f32`] instead, where the missing bits
+/// do reach the file.
 pub fn build_srgb_to_linear_lut_u16() -> Vec<f16> {
     (0..LUT_SIZE)
-        .map(|i| {
-            let s = i as f32 / (LUT_SIZE - 1) as f32;
-            let linear = if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055_f32).powf(2.4)
-            };
-            f16::from_f32(linear)
-        })
+        .map(|i| f16::from_f32(srgb_to_linear(i as f32 / (LUT_SIZE - 1) as f32)))
+        .collect()
+}
+
+/// sRGB u16 → linear f32 lookup table.
+///
+/// The export's table. Every one of the 65536 input codes maps to a distinct
+/// value, so nothing is lost before the shader sees it.
+pub fn build_srgb_to_linear_lut_f32() -> Vec<f32> {
+    (0..LUT_SIZE)
+        .map(|i| srgb_to_linear(i as f32 / (LUT_SIZE - 1) as f32))
         .collect()
 }
 
@@ -47,12 +67,7 @@ pub fn build_srgb_to_linear_lut_u16() -> Vec<f16> {
 pub fn build_resample_lut() -> Vec<u16> {
     (0..LUT_SIZE)
         .map(|i| {
-            let s = i as f32 / (LUT_SIZE - 1) as f32;
-            let linear = if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055_f32).powf(2.4)
-            };
+            let linear = srgb_to_linear(i as f32 / (LUT_SIZE - 1) as f32);
             (linear * (LUT_SIZE - 1) as f32).round() as u16
         })
         .collect()
@@ -62,9 +77,9 @@ pub fn build_resample_lut() -> Vec<u16> {
 ///
 /// Images whose format declares no alpha channel are decoded and stored as three
 /// channels, which is a quarter less memory held for the life of the session.
-/// Everything uploaded to the GPU is still RGBA — `rgba16float` is the only
-/// 16-bit float texture format WebGPU offers — so the alpha is synthesised at
-/// the point of upload rather than carried through the buffer.
+/// Everything uploaded to the GPU is still RGBA — WebGPU offers no
+/// three-channel float texture format — so the alpha is synthesised at the
+/// point of upload rather than carried through the buffer.
 fn assert_channels(channels: usize) {
     debug_assert!(
         channels == 3 || channels == 4,
@@ -164,6 +179,45 @@ pub fn linearize_u16(src: &[u16], channels: usize, lut: &[f16]) -> Vec<u8> {
             chunk[2..4].copy_from_slice(&g.to_le_bytes());
             chunk[4..6].copy_from_slice(&b.to_le_bytes());
             chunk[6..8].copy_from_slice(&a.to_le_bytes());
+        });
+
+    out
+}
+
+/// Convert interleaved u16 sRGB pixels into little-endian RGBA f32 linear bytes,
+/// ready to upload as an `rgba32float` texture.
+///
+/// The export's counterpart to [`linearize_u16`], and identical to it but for
+/// the width of the destination. f16 spacing in the top linear octave is 4.9e-4
+/// while one 16-bit sRGB code near white is 3.5e-5 apart, so an f16 upload
+/// collapses runs of about seventeen adjacent input codes onto one value —
+/// visible as banding once the render is written back out at 16 bits.
+pub fn linearize_u16_f32(src: &[u16], channels: usize, lut: &[f32]) -> Vec<u8> {
+    assert_channels(channels);
+    debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
+    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+
+    let pixel_count = src.len() / channels;
+    let mut out = vec![0u8; pixel_count * LINEAR_F32_BYTES_PER_PIXEL];
+
+    out.par_chunks_exact_mut(LINEAR_F32_BYTES_PER_PIXEL)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let s = i * channels;
+            let a = if channels == 4 {
+                src[s + 3] as f32 / (LUT_SIZE - 1) as f32
+            } else {
+                1.0
+            };
+            let rgba = [
+                lut[src[s] as usize],
+                lut[src[s + 1] as usize],
+                lut[src[s + 2] as usize],
+                a,
+            ];
+            for (c, v) in rgba.iter().enumerate() {
+                chunk[c * 4..c * 4 + 4].copy_from_slice(&v.to_le_bytes());
+            }
         });
 
     out

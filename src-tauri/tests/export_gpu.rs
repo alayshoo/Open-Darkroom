@@ -108,8 +108,8 @@ fn awkward_widths_survive_row_padding() {
 
 #[test]
 fn awkward_dimensions_survive_at_16_bit() {
-    // 8 bytes per texel, so the padding boundary falls at different widths.
-    for width in [1u32, 3, 31, 32, 33, 63, 97] {
+    // 16 bytes per texel, so the padding boundary falls at different widths.
+    for width in [1u32, 3, 15, 16, 17, 31, 33, 97] {
         let img = rgb_ramp(width, 3);
         let out = pollster::block_on(render_image(
             img.as_raw(),
@@ -195,6 +195,64 @@ fn sixteen_bit_output_carries_more_levels_than_eight() {
         values.len(),
         narrow.len()
     );
+}
+
+/// The 16-bit path end to end, on the ramp that used to expose its ceiling.
+///
+/// Above linear 0.5 an f16 texture steps in 4.9e-4 while one 16-bit sRGB code is
+/// 3.5e-5 apart, so an f16 upload or render target collapses runs of about
+/// seventeen adjacent codes onto one value — roughly 11 real bits in a 16-bit
+/// container, and visible banding on any smooth highlight. Both surfaces are
+/// `rgba32float`, so the ramp has to survive code for code.
+#[test]
+fn a_highlight_ramp_keeps_every_sixteen_bit_code() {
+    // 256 consecutive codes just below white, where the collapse was worst.
+    let img = Rgba16Image::from_fn(256, 1, |x, _| {
+        let v = 65_280 + x as u16;
+        image::Rgba([v, v, v, u16::MAX])
+    });
+
+    let out = pollster::block_on(render_image(
+        img.as_raw(),
+        256,
+        1,
+        4,
+        &SlidersPayload::default(),
+        16,
+        |_| {},
+    ))
+    .expect("render");
+
+    let levels: Vec<u16> = out
+        .chunks_exact(6)
+        .map(|px| u16::from_le_bytes([px[0], px[1]]))
+        .collect();
+
+    // Neutral sliders are an identity, so each output code must track its input.
+    for (x, &got) in levels.iter().enumerate() {
+        let expected = 65_280 + x as i32;
+        assert!(
+            (got as i32 - expected).abs() <= 4,
+            "code {expected} came back as {got}"
+        );
+    }
+
+    let distinct: std::collections::HashSet<u16> = levels.iter().copied().collect();
+    assert!(
+        distinct.len() >= 200,
+        "256 consecutive input codes resolved to {} output levels — the ramp is \
+         being quantised somewhere in the chain",
+        distinct.len()
+    );
+
+    // A collapse shows up as a run of identical codes followed by a jump; the
+    // step between neighbours is what catches it.
+    let worst = levels
+        .windows(2)
+        .map(|w| (w[1] as i32 - w[0] as i32).abs())
+        .max()
+        .unwrap();
+    assert!(worst <= 4, "adjacent codes stepped by {worst}, not by 1");
 }
 
 // ── Progress reporting ────────────────────────────────────────────────────────

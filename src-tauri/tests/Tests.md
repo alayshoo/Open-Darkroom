@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 158 Rust tests, 23 TypeScript, 18 in-browser.
+Nothing is `#[ignore]`d. 166 Rust tests, 23 TypeScript, 18 in-browser.
 
 ---
 
@@ -62,7 +62,10 @@ The chain comparison stops after vibrance, because that is where the two files
 stop agreeing by design — develop hands off to `composite.wgsl` unclamped, while
 histogram clamps and bins.
 
-## L1 — `color.rs` (8)
+## L1 — `color.rs` (15)
+
+Two tables, one curve. The preview uploads `rgba16float`, the export
+`rgba32float` — see [below](#why-the-export-uploads-twice-as-wide-as-the-preview).
 
 | Test | Asserts |
 |---|---|
@@ -74,16 +77,37 @@ histogram clamps and bins.
 | `linearize_is_order_independent` | rayon parallelism has no data race |
 | `linearize_widens_three_channels_to_an_opaque_rgba` | RGB and opaque RGBA upload identically |
 | `a_three_channel_upload_is_fully_opaque` | the synthesised alpha is exactly 1.0 |
+| `the_f32_lut_spans_the_domain_and_is_strictly_increasing` | all 65536 codes stay distinct |
+| `the_f32_lut_resolves_highlights_the_f16_one_collapses` | the top octave, measured against f16 |
+| `the_two_tables_describe_the_same_curve` | f16 and f32 tables agree to one f16 ULP |
+| `linearize_f32_produces_sixteen_bytes_per_pixel` | output sizing |
+| `linearize_f32_maps_each_channel_through_the_lut` | no channel crossing; alpha not gamma-decoded |
+| `linearize_f32_is_order_independent` | rayon parallelism has no data race |
+| `linearize_f32_widens_three_channels_to_an_opaque_rgba` | RGB and opaque RGBA upload identically |
 
 ### Why a source can be three channels wide
 
 A file whose format declares no alpha — every JPEG, and RAW when it lands — is
 decoded and held as RGB, a quarter less memory resident for as long as the image
-is open. The GPU still wants RGBA, since `rgba16float` is the only 16-bit float
-texture format WebGPU offers, so the alpha is synthesised at the point of upload
-rather than carried through the buffer. Everything downstream of the decode takes
-the sample count as a parameter, and the tests that matter are the equivalence
-ones: the same pixels, stored either way, must come out the same.
+is open. The GPU still wants RGBA, so the alpha is synthesised at the point of
+upload rather than carried through the buffer. Everything downstream of the
+decode takes the sample count as a parameter, and the tests that matter are the
+equivalence ones: the same pixels, stored either way, must come out the same.
+
+### Why the export uploads twice as wide as the preview
+
+An f16 mantissa is 10 bits, so above linear 0.5 the spacing is 4.9e-4. One
+16-bit sRGB code near white is 3.5e-5 in linear light — fourteen times finer —
+so an f16 upload collapses runs of about seventeen adjacent input codes onto a
+single value, and 65536 input codes reach the shader as roughly 11k. That
+ceiling followed the signal all the way into the 16-bit TIFF, which carried
+about 11 real bits.
+
+The export therefore uploads `rgba32float` and renders to `rgba32float`, keeping
+every code distinct end to end. The preview keeps the f16 table: it renders to
+an 8-bit display, where the dropped bits cannot be seen and the halved VRAM can.
+Two tables mean two things to keep in step, which is what
+`the_two_tables_describe_the_same_curve` is for.
 
 ## L1 + L2 — `sharpness.rs` (31)
 
@@ -157,7 +181,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `histogram_channels_are_not_crossed` | R/G/B stay separate |
 | `histograms_do_not_depend_on_the_channel_count` | the stride is the only thing separating the bins |
 | `histograms_describe_the_full_resolution_image` | counted before downscaling, not after |
-| `preview_uses_the_same_linearisation_as_export` | preview and export share one code path |
+| `preview_uses_the_shared_linearisation` | the direct path uploads the shared conversion's bytes |
 | `preparing_a_three_channel_source_matches_its_rgba_equivalent` | both branches, resampled and not |
 | `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
@@ -302,7 +326,7 @@ is where Lightroom's Basic panel works. That is what puts the mask boundaries at
 sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
 real mid-grey instead of on a bright highlight.
 
-## L2 — `export_gpu.rs` (13)
+## L2 — `export_gpu.rs` (14)
 
 Export mechanics: the parts that break on unusual dimensions, not unusual sliders.
 
@@ -312,10 +336,11 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `no_seam_appears_at_a_chunk_boundary` | no step at a chunk edge |
 | `images_shorter_than_one_chunk_render_whole` | single-chunk path |
 | `awkward_widths_survive_row_padding` | 10 widths through 256-byte row padding |
-| `awkward_dimensions_survive_at_16_bit` | same at 8 bytes per texel |
+| `awkward_dimensions_survive_at_16_bit` | same at 16 bytes per texel |
 | `a_single_pixel_renders` | 1×1 image |
 | `eight_and_sixteen_bit_paths_agree` | 16-bit >> 8 == 8-bit |
 | `sixteen_bit_output_carries_more_levels_than_eight` | 16-bit actually resolves more |
+| `a_highlight_ramp_keeps_every_sixteen_bit_code` | 256 consecutive codes below white survive |
 | `progress_increases_and_finishes_at_one` | monotonic, ends at 1.0 |
 | `a_ragged_final_chunk_still_reports_completion` | short trailing chunk |
 | `malformed_input_is_rejected_before_touching_the_gpu` | 6 bad inputs, including a bad channel count |
