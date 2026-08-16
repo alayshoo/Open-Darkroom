@@ -12,6 +12,7 @@
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
+    import { settings } from "$lib/settings/settings.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
@@ -403,8 +404,9 @@
     });
 
     // Frame stats start visible in a dev run and hidden in a release build, so
-    // the numbers are there while working without shipping to a user. F1 flips
-    // it either way — a release build still needs to be measurable.
+    // the numbers are there while working without shipping to a user. A release
+    // build still needs to be measurable — turning the debug tools on in
+    // settings brings F1/F2 back.
     debugStats.enabled = import.meta.env.DEV;
 
     const handleKeydown = createKeydownHandler({
@@ -416,16 +418,23 @@
         copyAdjustments: handleCopyAdjustments,
         pasteAdjustments: handlePasteAdjustments,
         resetAdjustments: handleResetAdjustments,
+        // Both diagnostics hang off the settings master switch, so neither
+        // shortcut does anything until the debug tools are turned on.
         toggleDebugStats: () => {
+            if (!settings.debugTools) return;
             debugStats.enabled = !debugStats.enabled;
             if (!debugStats.enabled) debugStats.clear();
         },
         toggleHistogram: () => {
+            if (!settings.debugTools) return;
             debugStats.histogramEnabled = !debugStats.histogramEnabled;
             // The point of stopping it is to read the difference, so start the
             // comparison from a clean window rather than a mixed average.
             debugStats.clear();
         },
+        toggleSettings: () => settings.toggle(),
+        closeSettings: () => settings.close(),
+        isSettingsOpen: () => settings.open,
     });
 </script>
 
@@ -438,6 +447,7 @@
     copyAdjustments={handleCopyAdjustments}
     pasteAdjustments={handlePasteAdjustments}
     resetAdjustments={handleResetAdjustments}
+    openSettings={() => settings.show()}
 ></TitleBar>
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and
@@ -449,14 +459,14 @@
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
         </div>
-        {#if debugStats.enabled}
+        {#if settings.debugTools && debugStats.enabled}
             <DebugStatsOverlay />
         {/if}
     </div>
     <div class="side-bar flex w-[23%] flex-col gap-3">
         <div
             class="histogram-panel glass shrink-0 rounded-[12px]"
-            class:dimmed={!debugStats.histogramEnabled}
+            class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
         >
             <div class="histogram-container m-1.25">
                 <Histogram {sliders} {imagePayload} />

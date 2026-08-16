@@ -8,6 +8,7 @@
   import "$lib/components/window/TitleBar.svelte"
 
   import "@fontsource-variable/figtree";
+  import "@fontsource-variable/outfit";
 
   let { children } = $props();
 
@@ -19,6 +20,7 @@
   import { initializeGPU } from "$lib/gpu/gpuInit"
   import { setContext } from "svelte";
     import TitleBar from "$lib/components/window/TitleBar.svelte";
+    import SettingsModal from "$lib/components/settings/SettingsModal.svelte";
 
   let gpu = $state<GPUSession | null>(null);
   setContext("gpu", () => gpu);
@@ -41,6 +43,10 @@
     <p>Initializing GPU…</p>
   </div>
 {/if}
+
+<!-- Outside the GPU gate and above everything else, title bar included: it
+     overlays whichever page is up rather than belonging to one. -->
+<SettingsModal />
 
 
 <style>

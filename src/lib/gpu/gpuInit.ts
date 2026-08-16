@@ -31,7 +31,13 @@ export async function initializeGPU(): Promise<GPUSession> {
     // Format is the pixel format the display expects.
     const format = navigator.gpu.getPreferredCanvasFormat();
 
-    return { device, format, canTimestamp } ;
+    return {
+        device,
+        format,
+        canTimestamp,
+        adapterInfo: adapter.info ?? null,
+        adapterFeatures: [...adapter.features].sort(),
+    };
 }
 
 

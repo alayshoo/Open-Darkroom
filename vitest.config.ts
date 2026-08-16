@@ -24,6 +24,10 @@ export default defineConfig({
     projects: [
       {
         resolve: { alias },
+        // Runes work outside components too, and the settings store is one of
+        // them — so the `.svelte.ts` files this project imports are compiled
+        // here as well, without any of the browser project's cost.
+        plugins: [svelte()],
         test: {
           name: "unit",
           environment: "node",

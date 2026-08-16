@@ -8,6 +8,13 @@ export interface GPUSession {
     // Whether the device was created with `timestamp-query`. Only the frame
     // stats overlay reads it; the render chain does not depend on it.
     canTimestamp: boolean;
+    // The adapter behind the device. Kept only so the settings' debug panel can
+    // report what the app is actually running on — the adapter itself is not
+    // needed once the device exists.
+    adapterInfo: GPUAdapterInfo | null;
+    // Everything the adapter offers, as opposed to device.features, which is
+    // what was asked for.
+    adapterFeatures: string[];
 }
 
 

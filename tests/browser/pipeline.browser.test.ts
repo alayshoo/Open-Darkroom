@@ -116,6 +116,8 @@ beforeAll(async () => {
     device: await adapter.requestDevice(),
     format: "rgba8unorm",
     canTimestamp: false,
+    adapterInfo: null,
+    adapterFeatures: [],
   };
 });
 

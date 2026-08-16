@@ -11,6 +11,9 @@ interface ShortcutActions {
     resetAdjustments: () => void;
     toggleDebugStats: () => void;
     toggleHistogram: () => void;
+    toggleSettings: () => void;
+    closeSettings: () => void;
+    isSettingsOpen: () => boolean;
 }
 
 // Ctrl+C / Ctrl+V mean the ordinary thing while a field has focus, so the
@@ -23,7 +26,7 @@ function isTextField(target: EventTarget | null) {
     );
 }
 
-export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, copyAdjustments, pasteAdjustments, resetAdjustments, toggleDebugStats, toggleHistogram }: ShortcutActions) {
+export function createKeydownHandler({ undo, redo, movePage, changeMode, openImage, copyAdjustments, pasteAdjustments, resetAdjustments, toggleDebugStats, toggleHistogram, toggleSettings, closeSettings, isSettingsOpen }: ShortcutActions) {
     return (e: KeyboardEvent) => {
         let handled = false;
 
@@ -31,7 +34,17 @@ export function createKeydownHandler({ undo, redo, movePage, changeMode, openIma
         // normalised key.
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
-        if (e.ctrlKey && key === "z" && !e.shiftKey) {
+        // The settings modal takes the keyboard while it is up: only the
+        // bindings that dismiss it get through to the editing shortcuts below.
+        if (isSettingsOpen()) {
+            if (e.key === "Escape" || (e.ctrlKey && key === ",")) {
+                closeSettings();
+                handled = true;
+            }
+        } else if (e.ctrlKey && key === ",") {
+            toggleSettings();
+            handled = true;
+        } else if (e.ctrlKey && key === "z" && !e.shiftKey) {
             undo();
             handled = true;
         } else if (e.ctrlKey && e.shiftKey && key === "z") {

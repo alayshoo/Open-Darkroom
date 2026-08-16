@@ -3,6 +3,7 @@
     import { getCurrentWindow } from "@tauri-apps/api/window";
     import { onMount, onDestroy } from "svelte";
     import MenuButton from "./TitleBarMenuButton.svelte";
+    import { settings } from "$lib/settings/settings.svelte";
 
     import "$lib/styles/palette.css";
 
@@ -17,6 +18,7 @@
         copyAdjustments = () => {},
         pasteAdjustments = () => {},
         resetAdjustments = () => {},
+        openSettings = () => {},
     }: {
         title?: string;
         editable?: boolean;
@@ -26,6 +28,7 @@
         copyAdjustments?: () => void;
         pasteAdjustments?: () => void;
         resetAdjustments?: () => void;
+        openSettings?: () => void;
     } = $props();
 
     let isMaximized = $state(false);
@@ -65,7 +68,10 @@
 <!-- The bar itself is a drag region and a positioning context, nothing more:
      no fill, no border, no boxes around the controls. Without a bounding box
      to sit in, everything here runs a size up from the panel controls below. -->
-<div class="titlebar flex items-center justify-center">
+<div
+    class="titlebar flex items-center justify-center"
+    class:modal-open={settings.open}
+>
     <div data-tauri-drag-region class="drag absolute inset-0"></div>
 
     <!-- Leading group. Left edge on 12px, the same column the toolbar strip
@@ -92,7 +98,11 @@
                     { separator: true },
                     { label: "Export…", shortcut: "Ctrl+Shift+E" },
                     { separator: true },
-                    { label: "Settings", shortcut: "Ctrl+," },
+                    {
+                        label: "Settings",
+                        shortcut: "Ctrl+,",
+                        action: openSettings,
+                    },
                 ]}
             />
             <MenuButton
@@ -137,7 +147,7 @@
         bind:value={title}
         readonly={!editable}
         class="window-title h-6.5 rounded-[6px] px-2.5 py-1 border-2 border-transparent"
-        style="pointer-events: {editable ? 'auto' : 'none'}"
+        style="pointer-events: {editable && !settings.open ? 'auto' : 'none'}"
     />
 
     <!-- Trailing group. The buttons' hover fills end on 12px, matching the
@@ -250,13 +260,17 @@
         z-index: 998;
     }
 
+    /* Above the modal overlay, not below it: moving, maximising and closing the
+       window belong to the window rather than to whatever is on top of it, so
+       they stay sharp and live while a modal dims the app. The scrim below
+       stays under the overlay and dims with everything else. */
     .titlebar {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
         height: 38px;
-        z-index: 999;
+        z-index: 1001;
 
         font-family: "Figtree", sans-serif;
         font-size: 16px;
@@ -264,6 +278,19 @@
         /* Only the drag layer and the two control groups take the pointer; the
            rest of the band is inert. */
         pointer-events: none;
+    }
+
+    /* What the bar does keep back while a modal is up: the menus and the title
+       edit the document, so they dim with it. The drag layer underneath them
+       carries on, which is what makes the whole band draggable again. */
+    .titlebar.modal-open .menu-buttons,
+    .titlebar.modal-open .window-title {
+        opacity: 0.35;
+        pointer-events: none;
+    }
+
+    .menu-buttons {
+        transition: opacity 0.18s ease;
     }
 
     .drag {
@@ -338,6 +365,7 @@
             0 0 10px rgba(0, 0, 0, 0.45);
         transition:
             color 0.5s ease,
+            opacity 0.18s ease,
             border-color 0.2s cubic-bezier(0.2, 0, 0, 1),
             border-radius 0.2s cubic-bezier(0.2, 0, 0, 1),
             height 0.2s cubic-bezier(0.2, 0, 0, 1),

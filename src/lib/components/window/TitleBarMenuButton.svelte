@@ -138,7 +138,7 @@
     .menu-dropdown {
         top: calc(100% + 6px);
         left: 0;
-        min-width: 210px;
+        min-width: 242px;
         background: var(--bg3);
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 

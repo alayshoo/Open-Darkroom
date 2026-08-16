@@ -21,7 +21,8 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": false
+        "transparent": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-webgpu-developer-features"
       }
     ],
     "security": {
