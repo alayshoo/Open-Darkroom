@@ -76,32 +76,26 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     });
 
     // ── Storage buffer for histogram bins (GPU-side) ─────────────────
-    // Written atomically by the compute shader, then copied to staging for CPU
-    // readback. All three channels share one buffer: they are always produced
-    // and consumed together, so splitting them only multiplies the copies and
-    // the maps.
+    // Written atomically by the compute shader, then read in place by the scale
+    // and draw passes. All three channels share one buffer: they are always
+    // produced and consumed together, so splitting them would only multiply the
+    // clears and the bindings.
     const bins = device.createBuffer({
         label: "Histogram Bins",
         size: BINS_BUFFER_SIZE,
         usage:
             GPUBufferUsage.STORAGE |
-            GPUBufferUsage.COPY_SRC |
-            GPUBufferUsage.COPY_DST,  // needed for clearBuffer
-    });
-
-    // ── Staging buffer (MAP_READ) for GPU → CPU readback ─────────────
-    const staging = device.createBuffer({
-        label: "Histogram Staging",
-        // The bins, with the reduced scale appended after them.
-        size: BINS_BUFFER_SIZE + 4,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            GPUBufferUsage.COPY_SRC |  // readBins
+            GPUBufferUsage.COPY_DST,   // clearBuffer
     });
 
     // ── Scale: the tallest bin, reduced on the GPU ───────────────────
     const scaleBuffer = device.createBuffer({
         label: "Histogram Scale",
         size: 4,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        usage:
+            GPUBufferUsage.STORAGE |
+            GPUBufferUsage.COPY_SRC,  // readBins
     });
 
     const scaleLayout = device.createBindGroupLayout({
@@ -273,6 +267,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         }
     }
 
+    // Allocated on the first readback rather than with the buffers above, so a
+    // pipeline that never reads back never carries one — which is every
+    // pipeline the app makes.
+    let staging: GPUBuffer | null = null;
+
     /**
      * The bins, on the CPU.
      *
@@ -287,14 +286,21 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         b: Uint32Array;
         scale: number;
     }> {
+        const target = (staging ??= device.createBuffer({
+            label: "Histogram Staging",
+            // The bins, with the reduced scale appended after them.
+            size: BINS_BUFFER_SIZE + 4,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        }));
+
         const encoder = device.createCommandEncoder({ label: "Histogram Readback" });
-        encoder.copyBufferToBuffer(bins, 0, staging, 0, BINS_BUFFER_SIZE);
-        encoder.copyBufferToBuffer(scaleBuffer, 0, staging, BINS_BUFFER_SIZE, 4);
+        encoder.copyBufferToBuffer(bins, 0, target, 0, BINS_BUFFER_SIZE);
+        encoder.copyBufferToBuffer(scaleBuffer, 0, target, BINS_BUFFER_SIZE, 4);
         device.queue.submit([encoder.finish()]);
 
-        await staging.mapAsync(GPUMapMode.READ);
-        const all = new Uint32Array(staging.getMappedRange().slice(0));
-        staging.unmap();
+        await target.mapAsync(GPUMapMode.READ);
+        const all = new Uint32Array(target.getMappedRange().slice(0));
+        target.unmap();
 
         return {
             r: all.slice(0, NUM_BINS),
@@ -309,7 +315,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         timer.destroy();
         bins.destroy();
         scaleBuffer.destroy();
-        staging.destroy();
+        staging?.destroy();
     }
 
     return { render, readBins, destroy };
