@@ -13,8 +13,9 @@ use open_darkroom_lib::image_opening::Rgba16Image;
 
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
 use open_darkroom_lib::image_opening::{
-    build_payload, compute_histograms, downscale_to_max_edge, payload_len_for, prepare_image,
-    PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
+    build_payload, compute_histograms, downscale_to_max_edge, downscale_to_target_pixels,
+    payload_len_for, prepare_image, PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE,
+    OVERVIEW_TARGET_PIXELS, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
 };
 
 /// Prepare an RGBA fixture, which is the shape a source declaring alpha decodes to.
@@ -305,45 +306,82 @@ fn prepare_reports_both_resolutions() {
 /// The overview is what the live histogram reads, so it has to cover the whole
 /// frame at the source aspect ratio however far the preview sits from full size.
 #[test]
-fn overview_covers_the_whole_frame_within_its_own_cap() {
-    for (w, h) in [(3000u32, 1500u32), (1000, 500), (97, 13)] {
+fn overview_covers_the_whole_frame_at_the_source_aspect_ratio() {
+    for (w, h) in [(900u32, 600u32), (800, 800), (1600, 400), (2600, 400)] {
         let prepared = prepare(&gray_ramp(w, h));
+        let (ow, oh) = (prepared.overview_width, prepared.overview_height);
 
-        let scale = OVERVIEW_MAX_EDGE as f64 / w.max(h) as f64;
-        let expected = if scale >= 1.0 {
-            (w, h)
-        } else {
-            (
-                ((w as f64 * scale).round() as u32).max(1),
-                ((h as f64 * scale).round() as u32).max(1),
-            )
-        };
-
-        assert_eq!(
-            (prepared.overview_width, prepared.overview_height),
-            expected,
-            "{w}×{h}: overview dimensions"
+        let source_aspect = w as f64 / h as f64;
+        let overview_aspect = ow as f64 / oh as f64;
+        assert!(
+            (overview_aspect / source_aspect - 1.0).abs() < 0.01,
+            "{w}×{h}: overview {ow}×{oh} distorts the aspect ratio"
         );
         assert_eq!(
             prepared.overview_pixels.len(),
-            expected.0 as usize * expected.1 as usize * LINEAR_BYTES_PER_PIXEL,
+            ow as usize * oh as usize * LINEAR_BYTES_PER_PIXEL,
             "{w}×{h}: overview pixel count"
         );
     }
+}
+
+/// The budget is area, not edge length: whatever the aspect ratio, an oversized
+/// source lands on the same sample count, so the histogram off a panorama is as
+/// well fed as the one off a square.
+#[test]
+fn every_aspect_ratio_gets_the_same_overview_sample_count() {
+    for (w, h) in [(800u32, 800u32), (900, 600), (1600, 400), (2600, 400)] {
+        let prepared = prepare(&gray_ramp(w, h));
+        let pixels = prepared.overview_width as u64 * prepared.overview_height as u64;
+
+        let ratio = pixels as f64 / OVERVIEW_TARGET_PIXELS as f64;
+        assert!(
+            (0.99..=1.01).contains(&ratio),
+            "{w}×{h}: overview holds {pixels} pixels, off the {OVERVIEW_TARGET_PIXELS} budget"
+        );
+    }
+}
+
+/// The edge clamp is a safety valve for a stitched strip, not a second budget:
+/// it holds the texture inside the limits and gives up area to do it.
+#[test]
+fn an_extreme_aspect_ratio_is_clamped_to_the_edge_limit() {
+    let strip = gray_ramp(12800, 100);
+    let (_, w, h) = downscale_to_target_pixels(
+        strip.as_raw(),
+        12800,
+        100,
+        4,
+        OVERVIEW_TARGET_PIXELS,
+        OVERVIEW_MAX_EDGE,
+    );
+
+    assert_eq!((w, h), (OVERVIEW_MAX_EDGE, 32));
+}
+
+/// A source already inside both budgets is handed back untouched, so its bytes
+/// stay identical to what the export path would upload.
+#[test]
+fn a_source_within_the_budget_is_not_resampled() {
+    let src = vec![7u16; 400 * 400 * 4];
+    let (out, w, h) =
+        downscale_to_target_pixels(&src, 400, 400, 4, OVERVIEW_TARGET_PIXELS, OVERVIEW_MAX_EDGE);
+
+    assert_eq!((w, h), (400, 400));
+    assert_eq!(out, src);
 }
 
 /// The overview is downscaled off the full frame, not off the preview, so it
 /// carries the same average light — the distribution the histogram bins.
 #[test]
 fn the_overview_is_resampled_in_linear_light() {
-    let width = OVERVIEW_MAX_EDGE * 8;
-    let img: Rgba16Image = ImageBuffer::from_fn(width, 8, |x, y| {
+    let img: Rgba16Image = ImageBuffer::from_fn(4096, 1024, |x, y| {
         let v = if (x + y) % 2 == 0 { 255u8 } else { 0u8 };
         Rgba([u8_to_u16(v), u8_to_u16(v), u8_to_u16(v), u16::MAX])
     });
 
     let prepared = prepare(&img);
-    assert_eq!(prepared.overview_width, OVERVIEW_MAX_EDGE);
+    assert_eq!((prepared.overview_width, prepared.overview_height), (1024, 256));
 
     let mean: f64 = prepared
         .overview_pixels
@@ -361,7 +399,7 @@ fn the_overview_is_resampled_in_linear_light() {
     );
 }
 
-/// An image already inside the overview cap is never resampled, so both
+/// An image already inside the overview budget is never resampled, so both
 /// textures are the same pixels and neither drifts from the export path.
 #[test]
 fn a_small_source_gets_an_overview_identical_to_its_preview() {

@@ -21,13 +21,20 @@ pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 /// Longest edge of the preview handed to the frontend.
 pub const PREVIEW_MAX_EDGE: u32 = 2048;
 
-/// Longest edge of the overview handed to the frontend.
+/// Total pixels in the overview handed to the frontend.
 ///
 /// The overview always covers the whole frame, whatever the preview shows, so
-/// the live histogram describes the image rather than the viewport. A 256-bin
-/// distribution needs no more than this, and the small texture keeps the
-/// recompute cheap on every slider move.
-pub const OVERVIEW_MAX_EDGE: u32 = 512;
+/// the live histogram describes the image rather than the viewport. The budget
+/// is area rather than edge length because otherwise extreme aspect ratios would
+/// create low pixel sample counts.
+pub const OVERVIEW_TARGET_PIXELS: u32 = 512 * 512;
+
+/// Longest edge the overview may reach once the area budget is met.
+///
+/// A safety valve for extreme aspect ratios rather than a second budget: it
+/// keeps a stitched strip inside the texture limits and never binds on an
+/// ordinary frame.
+pub const OVERVIEW_MAX_EDGE: u32 = 4096;
 
 /// Bins in each per-channel histogram.
 pub const HIST_BINS: usize = 256;
@@ -98,16 +105,69 @@ pub fn downscale_to_max_edge(
     max_edge: u32,
 ) -> (Vec<u16>, u32, u32) {
     assert!(max_edge > 0, "max_edge must be non-zero");
-    assert!(
-        channels == 3 || channels == 4,
-        "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
-    );
 
     if width.max(height) <= max_edge {
         return (src.to_vec(), width, height);
     }
 
-    let scale = max_edge as f32 / width.max(height) as f32;
+    resample(
+        src,
+        width,
+        height,
+        channels,
+        max_edge as f32 / width.max(height) as f32,
+    )
+}
+
+/// Downscale to at most `target_pixels` in total, preserving aspect ratio, and
+/// return the pixels with their new dimensions. Images already within the
+/// budget are returned unchanged.
+///
+/// Budgeting area keeps the sample count, and so the resample factor and the
+/// cost of anything reading the result, independent of aspect ratio.
+/// `max_edge` caps the longest side afterwards, which only binds on aspect
+/// ratios past roughly 64:1. Both must be greater than zero.
+pub fn downscale_to_target_pixels(
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    target_pixels: u32,
+    max_edge: u32,
+) -> (Vec<u16>, u32, u32) {
+    assert!(target_pixels > 0, "target_pixels must be non-zero");
+    assert!(max_edge > 0, "max_edge must be non-zero");
+
+    let pixels = width as u64 * height as u64;
+    if pixels <= target_pixels as u64 && width.max(height) <= max_edge {
+        return (src.to_vec(), width, height);
+    }
+
+    let area_scale = (target_pixels as f64 / pixels as f64).sqrt() as f32;
+    let edge_scale = max_edge as f32 / width.max(height) as f32;
+
+    resample(
+        src,
+        width,
+        height,
+        channels,
+        area_scale.min(edge_scale).min(1.0),
+    )
+}
+
+/// Resample by `scale`, rounding to whole pixels and never below one.
+fn resample(
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    scale: f32,
+) -> (Vec<u16>, u32, u32) {
+    assert!(
+        channels == 3 || channels == 4,
+        "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
+    );
+
     let new_w = ((width as f32 * scale).round() as u32).max(1);
     let new_h = ((height as f32 * scale).round() as u32).max(1);
 
@@ -200,15 +260,16 @@ pub fn prepare_image(
     // and the export renders full-resolution and never resampled at all — so
     // the two disagreed by more than resolution.
     //
-    // Images already inside the cap are not resampled, and take the direct path
+    // Images already inside the budgets are not resampled, and take the direct path
     // so their bytes stay identical to what the export path would upload.
     //
     // A source small enough to skip both downscales needs no linear u16
     // intermediate at all; anything larger is resampled at least once, and the
     // decoded buffer is shared between the two.
     let long_edge = full_width.max(full_height);
-    let linear = (long_edge > OVERVIEW_MAX_EDGE)
-        .then(|| srgb_to_linear_u16(src, channels, &build_resample_lut()));
+    let resampled = long_edge > PREVIEW_MAX_EDGE
+        || full_width as u64 * full_height as u64 > OVERVIEW_TARGET_PIXELS as u64;
+    let linear = resampled.then(|| srgb_to_linear_u16(src, channels, &build_resample_lut()));
 
     let (preview_width, preview_height, preview_pixels) = match &linear {
         Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
@@ -226,8 +287,14 @@ pub fn prepare_image(
     // keeps describing the whole image once the preview becomes a crop tile.
     let (overview_width, overview_height, overview_pixels) = match &linear {
         Some(linear) => {
-            let (overview, w, h) =
-                downscale_to_max_edge(linear, full_width, full_height, channels, OVERVIEW_MAX_EDGE);
+            let (overview, w, h) = downscale_to_target_pixels(
+                linear,
+                full_width,
+                full_height,
+                channels,
+                OVERVIEW_TARGET_PIXELS,
+                OVERVIEW_MAX_EDGE,
+            );
             (w, h, linear_u16_to_f16_bytes(&overview, channels))
         }
         None => (preview_width, preview_height, preview_pixels.clone()),
