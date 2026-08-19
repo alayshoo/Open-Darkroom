@@ -135,12 +135,14 @@
         // Clean up previous image (untracked to avoid re-triggering this effect)
         untrack(() => image?.texture.destroy());
 
-        // Upload via the raw pixel path (same as PreviewImageCanvas)
+        // The overview, not the preview: a histogram describes the whole image
+        // regardless of what the viewport is showing, and the preview becomes a
+        // crop tile from the pyramid once zoom lands.
         image = uploadRawPixelsToGPU(
             gpu.device,
-            imagePayload.pixels,
-            imagePayload.width,
-            imagePayload.height,
+            imagePayload.overviewPixels,
+            imagePayload.overviewWidth,
+            imagePayload.overviewHeight,
         );
         requestRender();
     });

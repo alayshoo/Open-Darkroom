@@ -14,7 +14,7 @@ use open_darkroom_lib::image_opening::Rgba16Image;
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
 use open_darkroom_lib::image_opening::{
     build_payload, compute_histograms, downscale_to_max_edge, payload_len_for, prepare_image,
-    PreparedImage, HIST_BINS, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
+    PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE, PAYLOAD_HEADER_BYTES, PREVIEW_MAX_EDGE,
 };
 
 /// Prepare an RGBA fixture, which is the shape a source declaring alpha decodes to.
@@ -228,6 +228,15 @@ fn preparing_a_three_channel_source_matches_its_rgba_equivalent() {
             from_rgb.preview_pixels, from_rgba.preview_pixels,
             "{w}×{h}: preview pixels diverged when alpha was dropped"
         );
+        assert_eq!(
+            (from_rgb.overview_width, from_rgb.overview_height),
+            (from_rgba.overview_width, from_rgba.overview_height),
+            "{w}×{h}: overview dimensions"
+        );
+        assert_eq!(
+            from_rgb.overview_pixels, from_rgba.overview_pixels,
+            "{w}×{h}: overview pixels diverged when alpha was dropped"
+        );
         assert_eq!(from_rgb.histograms.r, from_rgba.histograms.r, "{w}×{h}: red");
         assert_eq!(from_rgb.histograms.g, from_rgba.histograms.g, "{w}×{h}: green");
         assert_eq!(from_rgb.histograms.b, from_rgba.histograms.b, "{w}×{h}: blue");
@@ -290,6 +299,80 @@ fn prepare_reports_both_resolutions() {
     );
 }
 
+// ── Overview preparation ──────────────────────────────────────────────────────
+
+/// The overview is what the live histogram reads, so it has to cover the whole
+/// frame at the source aspect ratio however far the preview sits from full size.
+#[test]
+fn overview_covers_the_whole_frame_within_its_own_cap() {
+    for (w, h) in [(3000u32, 1500u32), (1000, 500), (97, 13)] {
+        let prepared = prepare(&gray_ramp(w, h));
+
+        let scale = OVERVIEW_MAX_EDGE as f64 / w.max(h) as f64;
+        let expected = if scale >= 1.0 {
+            (w, h)
+        } else {
+            (
+                ((w as f64 * scale).round() as u32).max(1),
+                ((h as f64 * scale).round() as u32).max(1),
+            )
+        };
+
+        assert_eq!(
+            (prepared.overview_width, prepared.overview_height),
+            expected,
+            "{w}×{h}: overview dimensions"
+        );
+        assert_eq!(
+            prepared.overview_pixels.len(),
+            expected.0 as usize * expected.1 as usize * LINEAR_BYTES_PER_PIXEL,
+            "{w}×{h}: overview pixel count"
+        );
+    }
+}
+
+/// The overview is downscaled off the full frame, not off the preview, so it
+/// carries the same average light — the distribution the histogram bins.
+#[test]
+fn the_overview_is_resampled_in_linear_light() {
+    let width = OVERVIEW_MAX_EDGE * 8;
+    let img: Rgba16Image = ImageBuffer::from_fn(width, 8, |x, y| {
+        let v = if (x + y) % 2 == 0 { 255u8 } else { 0u8 };
+        Rgba([u8_to_u16(v), u8_to_u16(v), u8_to_u16(v), u16::MAX])
+    });
+
+    let prepared = prepare(&img);
+    assert_eq!(prepared.overview_width, OVERVIEW_MAX_EDGE);
+
+    let mean: f64 = prepared
+        .overview_pixels
+        .chunks_exact(LINEAR_BYTES_PER_PIXEL)
+        .skip(8)
+        .take(prepared.overview_width as usize - 16)
+        .map(|px| f16::from_le_bytes([px[2], px[3]]).to_f32() as f64)
+        .sum::<f64>()
+        / (prepared.overview_width as usize - 16) as f64;
+
+    assert!(
+        (mean - 0.5).abs() < 0.02,
+        "checkerboard averaged to linear {mean:.4} (sRGB {:.0}/255)",
+        linear_to_srgb(mean) * 255.0
+    );
+}
+
+/// An image already inside the overview cap is never resampled, so both
+/// textures are the same pixels and neither drifts from the export path.
+#[test]
+fn a_small_source_gets_an_overview_identical_to_its_preview() {
+    let prepared = prepare(&rgb_ramp(97, 13));
+
+    assert_eq!(
+        (prepared.overview_width, prepared.overview_height),
+        (prepared.preview_width, prepared.preview_height)
+    );
+    assert_eq!(prepared.overview_pixels, prepared.preview_pixels);
+}
+
 // ── Payload framing ───────────────────────────────────────────────────────────
 
 /// The header carries both resolutions so the frontend can tell how far the
@@ -320,15 +403,18 @@ fn payload_round_trips_through_the_frontend_layout() {
     let prepared = prepare(&img);
     let payload = build_payload(&prepared);
 
-    assert_eq!(payload.len(), payload_len_for(9, 5));
+    assert_eq!(payload.len(), payload_len_for(9, 5, 9, 5));
 
     // Parse exactly the way openImage.ts does.
     let width = u32::from_le_bytes(payload[0..4].try_into().unwrap());
     let height = u32::from_le_bytes(payload[4..8].try_into().unwrap());
     let full_width = u32::from_le_bytes(payload[8..12].try_into().unwrap());
     let full_height = u32::from_le_bytes(payload[12..16].try_into().unwrap());
+    let overview_width = u32::from_le_bytes(payload[16..20].try_into().unwrap());
+    let overview_height = u32::from_le_bytes(payload[20..24].try_into().unwrap());
     assert_eq!((width, height), (9, 5));
     assert_eq!((full_width, full_height), (9, 5));
+    assert_eq!((overview_width, overview_height), (9, 5));
 
     let pixel_bytes = width as usize * height as usize * LINEAR_BYTES_PER_PIXEL;
     assert_eq!(
@@ -336,7 +422,15 @@ fn payload_round_trips_through_the_frontend_layout() {
         &prepared.preview_pixels[..]
     );
 
-    let mut offset = PAYLOAD_HEADER_BYTES + pixel_bytes;
+    let overview_bytes =
+        overview_width as usize * overview_height as usize * LINEAR_BYTES_PER_PIXEL;
+    let overview_at = PAYLOAD_HEADER_BYTES + pixel_bytes;
+    assert_eq!(
+        &payload[overview_at..overview_at + overview_bytes],
+        &prepared.overview_pixels[..]
+    );
+
+    let mut offset = overview_at + overview_bytes;
     for (channel, expected) in [
         ("r", &prepared.histograms.r),
         ("g", &prepared.histograms.g),
@@ -368,5 +462,13 @@ fn payload_header_carries_preview_not_source_dimensions() {
     let height = u32::from_le_bytes(payload[4..8].try_into().unwrap());
 
     assert_eq!((width, height), (2048, 410));
-    assert_eq!(payload.len(), payload_len_for(width, height));
+    assert_eq!(
+        payload.len(),
+        payload_len_for(
+            width,
+            height,
+            prepared.overview_width,
+            prepared.overview_height
+        )
+    );
 }
