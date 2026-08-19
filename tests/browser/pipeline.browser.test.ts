@@ -738,21 +738,30 @@ function scatterChart(width: number, height: number): Uint8Array {
 
 /** Frame pixels the way `build_payload` in image_opening.rs does. */
 function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBuffer {
-  const HEADER = 16;
+  const HEADER = 24;
   const pixels = linearisePixels(rgb);
-  const buffer = new ArrayBuffer(HEADER + pixels.length + 3 * 256 * 4);
+  // The overview is not read here, but it has to be present at its declared
+  // size: it sits between the preview and the histograms.
+  const overviewBytes = width * height * 8;
+  const buffer = new ArrayBuffer(
+    HEADER + pixels.length + overviewBytes + 3 * 256 * 4,
+  );
   const view = new DataView(buffer);
 
   view.setUint32(0, width, true);
   view.setUint32(4, height, true);
   view.setUint32(8, width, true);
   view.setUint32(12, height, true);
+  view.setUint32(16, width, true);
+  view.setUint32(20, height, true);
   new Uint8Array(buffer, HEADER, pixels.length).set(pixels);
+  new Uint8Array(buffer, HEADER + pixels.length, overviewBytes).set(pixels);
 
   // Histograms are not read here, but they have to be present: they are what
   // makes the pixels an interior slice rather than the tail of the buffer.
+  const histAt = HEADER + pixels.length + overviewBytes;
   for (let i = 0; i < 3 * 256; i++) {
-    view.setUint32(HEADER + pixels.length + i * 4, i, true);
+    view.setUint32(histAt + i * 4, i, true);
   }
   return buffer;
 }

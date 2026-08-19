@@ -21,6 +21,14 @@ pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 /// Longest edge of the preview handed to the frontend.
 pub const PREVIEW_MAX_EDGE: u32 = 2048;
 
+/// Longest edge of the overview handed to the frontend.
+///
+/// The overview always covers the whole frame, whatever the preview shows, so
+/// the live histogram describes the image rather than the viewport. A 256-bin
+/// distribution needs no more than this, and the small texture keeps the
+/// recompute cheap on every slider move.
+pub const OVERVIEW_MAX_EDGE: u32 = 512;
+
 /// Bins in each per-channel histogram.
 pub const HIST_BINS: usize = 256;
 
@@ -29,9 +37,10 @@ pub const HIST_BINS: usize = 256;
 const HIST_BLOCK_PIXELS: usize = 1 << 16;
 
 /// Bytes preceding the pixel data in the frontend payload: preview width and
-/// height, then full-resolution width and height, u32 LE. The full dimensions
-/// are what anchors a slider specified in image pixels to a downscaled preview.
-pub const PAYLOAD_HEADER_BYTES: usize = 16;
+/// height, full-resolution width and height, then overview width and height,
+/// u32 LE. The full dimensions are what anchors a slider specified in image
+/// pixels to a downscaled preview.
+pub const PAYLOAD_HEADER_BYTES: usize = 24;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +74,9 @@ pub struct PreparedImage {
     pub preview_pixels: Vec<u8>,
     pub preview_width: u32,
     pub preview_height: u32,
+    pub overview_pixels: Vec<u8>,
+    pub overview_width: u32,
+    pub overview_height: u32,
     pub full_width: u32,
     pub full_height: u32,
     pub histograms: Histograms,
@@ -163,11 +175,12 @@ pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
     Histograms { r, g, b }
 }
 
-/// Build the preview texture and histograms for a decoded image.
+/// Build the preview and overview textures and the histograms for a decoded
+/// image.
 ///
 /// Borrows rather than consumes, so the caller can move the full-resolution
 /// buffer into the shared state afterwards without cloning it. `channels` is 3
-/// for a source with no alpha channel and 4 for one with; the preview is RGBA
+/// for a source with no alpha channel and 4 for one with; both textures are RGBA
 /// either way, since that is what the texture format requires.
 pub fn prepare_image(
     src: &[u16],
@@ -189,17 +202,36 @@ pub fn prepare_image(
     //
     // Images already inside the cap are not resampled, and take the direct path
     // so their bytes stay identical to what the export path would upload.
-    let (preview_width, preview_height, preview_pixels) =
-        if full_width.max(full_height) > PREVIEW_MAX_EDGE {
-            let linear = srgb_to_linear_u16(src, channels, &build_resample_lut());
+    //
+    // A source small enough to skip both downscales needs no linear u16
+    // intermediate at all; anything larger is resampled at least once, and the
+    // decoded buffer is shared between the two.
+    let long_edge = full_width.max(full_height);
+    let linear = (long_edge > OVERVIEW_MAX_EDGE)
+        .then(|| srgb_to_linear_u16(src, channels, &build_resample_lut()));
 
+    let (preview_width, preview_height, preview_pixels) = match &linear {
+        Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
             let (preview, w, h) =
-                downscale_to_max_edge(&linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
+                downscale_to_max_edge(linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
             (w, h, linear_u16_to_f16_bytes(&preview, channels))
-        } else {
+        }
+        _ => {
             let lut = build_srgb_to_linear_lut_u16();
             (full_width, full_height, linearize_u16(src, channels, &lut))
-        };
+        }
+    };
+
+    // The overview always comes off the full frame, never off the preview, so it
+    // keeps describing the whole image once the preview becomes a crop tile.
+    let (overview_width, overview_height, overview_pixels) = match &linear {
+        Some(linear) => {
+            let (overview, w, h) =
+                downscale_to_max_edge(linear, full_width, full_height, channels, OVERVIEW_MAX_EDGE);
+            (w, h, linear_u16_to_f16_bytes(&overview, channels))
+        }
+        None => (preview_width, preview_height, preview_pixels.clone()),
+    };
 
     // Histograms come from the full-resolution image, not the preview.
     let histograms = compute_histograms(src, channels);
@@ -208,6 +240,9 @@ pub fn prepare_image(
         preview_pixels,
         preview_width,
         preview_height,
+        overview_pixels,
+        overview_width,
+        overview_height,
         full_width,
         full_height,
         histograms,
@@ -220,18 +255,30 @@ pub fn prepare_image(
 /// |--------|---------------|-----------------------------------|
 /// | 0      | 4             | preview width, u32 LE             |
 /// | 4      | 4             | preview height, u32 LE            |
-/// | 8      | w × h × 8     | RGBA f16 LE preview pixels        |
+/// | 8      | 4             | full width, u32 LE                |
+/// | 12     | 4             | full height, u32 LE               |
+/// | 16     | 4             | overview width, u32 LE            |
+/// | 20     | 4             | overview height, u32 LE           |
+/// | 24     | w × h × 8     | RGBA f16 LE preview pixels        |
+/// | …      | ow × oh × 8   | RGBA f16 LE overview pixels       |
 /// | …      | 3 × 256 × 4   | R, G, B histogram bins, u32 LE    |
 pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
     let hist_bytes = 3 * HIST_BINS * 4;
-    let mut payload =
-        Vec::with_capacity(PAYLOAD_HEADER_BYTES + prepared.preview_pixels.len() + hist_bytes);
+    let mut payload = Vec::with_capacity(
+        PAYLOAD_HEADER_BYTES
+            + prepared.preview_pixels.len()
+            + prepared.overview_pixels.len()
+            + hist_bytes,
+    );
 
     payload.extend_from_slice(&prepared.preview_width.to_le_bytes());
     payload.extend_from_slice(&prepared.preview_height.to_le_bytes());
     payload.extend_from_slice(&prepared.full_width.to_le_bytes());
     payload.extend_from_slice(&prepared.full_height.to_le_bytes());
+    payload.extend_from_slice(&prepared.overview_width.to_le_bytes());
+    payload.extend_from_slice(&prepared.overview_height.to_le_bytes());
     payload.extend_from_slice(&prepared.preview_pixels);
+    payload.extend_from_slice(&prepared.overview_pixels);
 
     let h = &prepared.histograms;
     for &v in h.r.iter().chain(h.g.iter()).chain(h.b.iter()) {
@@ -241,10 +288,18 @@ pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
     payload
 }
 
-/// Expected payload length for a preview of the given dimensions.
-pub fn payload_len_for(preview_width: u32, preview_height: u32) -> usize {
+/// Expected payload length for a preview and overview of the given dimensions.
+pub fn payload_len_for(
+    preview_width: u32,
+    preview_height: u32,
+    overview_width: u32,
+    overview_height: u32,
+) -> usize {
+    let pixels = |w: u32, h: u32| (w as usize) * (h as usize) * LINEAR_BYTES_PER_PIXEL;
+
     PAYLOAD_HEADER_BYTES
-        + (preview_width as usize) * (preview_height as usize) * LINEAR_BYTES_PER_PIXEL
+        + pixels(preview_width, preview_height)
+        + pixels(overview_width, overview_height)
         + 3 * HIST_BINS * 4
 }
 

@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 166 Rust tests, 23 TypeScript, 18 in-browser.
+Nothing is `#[ignore]`d. 169 Rust tests, 25 TypeScript, 18 in-browser.
 
 ---
 
@@ -167,7 +167,7 @@ correct — a single-pass render clamps at those edges too, so the results agree
 `chunk_size_does_not_change_a_sharpened_render` is what holds that to bit
 equality, and it is the test that fails first if the arithmetic drifts.
 
-## L1 — `image_prep.rs` (17)
+## L1 — `image_prep.rs` (20)
 
 | Test | Asserts |
 |---|---|
@@ -185,6 +185,9 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `preparing_a_three_channel_source_matches_its_rgba_equivalent` | both branches, resampled and not |
 | `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
+| `overview_covers_the_whole_frame_within_its_own_cap` | the histogram's texture is the whole frame, at its own size |
+| `the_overview_is_resampled_in_linear_light` | the overview averages light too, so the bins do |
+| `a_small_source_gets_an_overview_identical_to_its_preview` | nothing inside the cap is resampled twice |
 | `payload_header_carries_the_full_resolution_of_a_downscaled_preview` | the anchor for pixel-denominated sliders |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
@@ -363,12 +366,12 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_webp_lossless_flag_reaches_the_encoder` | lossless exact, lossy not |
 | `an_unsupported_tiff_bit_depth_is_reported` | 12-bit errors by name |
 
-## L1 — `tests/unit/` (23, TypeScript)
+## L1 — `tests/unit/` (25, TypeScript)
 
 | Test | Asserts |
 |---|---|
 | `calcMatrixHelpers` × 5 | identity, diagonals, column-major order, non-commutativity, shape |
-| `openImage` × 7 | header, pixel slicing, R/G/B histogram order, no region overlap, odd sizes |
+| `openImage` × 9 | header, pixel slicing, the overview region, R/G/B histogram order, no region overlap, odd sizes |
 | `sharpnessPage` × 12 | the sharpness controls' ranges, defaults, steps and history wiring |
 
 ## L3 — `tests/browser/` (18, real WebGPU)

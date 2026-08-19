@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const { openImage } = await import("$lib/utils/openImage");
 
 const HIST_BINS = 256;
-const HEADER = 16;
+const HEADER = 24;
 
 /** Open and assert a payload came back; the null path has its own test. */
 async function open(): Promise<ImagePayload> {
@@ -30,20 +30,31 @@ function payload(
   fillPixel: (i: number) => number,
   histSeed = 0,
   full: [number, number] = [width, height],
+  overview: [number, number] = [width, height],
+  fillOverview: (i: number) => number = () => 0,
 ): ArrayBuffer {
   const pixelBytes = width * height * 8;
-  const buffer = new ArrayBuffer(HEADER + pixelBytes + 3 * HIST_BINS * 4);
+  const overviewBytes = overview[0] * overview[1] * 8;
+  const buffer = new ArrayBuffer(
+    HEADER + pixelBytes + overviewBytes + 3 * HIST_BINS * 4,
+  );
   const view = new DataView(buffer);
 
   view.setUint32(0, width, true);
   view.setUint32(4, height, true);
   view.setUint32(8, full[0], true);
   view.setUint32(12, full[1], true);
+  view.setUint32(16, overview[0], true);
+  view.setUint32(20, overview[1], true);
 
   const pixels = new Uint8Array(buffer, HEADER, pixelBytes);
   for (let i = 0; i < pixelBytes; i++) pixels[i] = fillPixel(i);
 
-  const histOffset = HEADER + pixelBytes;
+  const overviewAt = HEADER + pixelBytes;
+  const overviewPixels = new Uint8Array(buffer, overviewAt, overviewBytes);
+  for (let i = 0; i < overviewBytes; i++) overviewPixels[i] = fillOverview(i);
+
+  const histOffset = overviewAt + overviewBytes;
   for (let channel = 0; channel < 3; channel++) {
     for (let bin = 0; bin < HIST_BINS; bin++) {
       const at = histOffset + (channel * HIST_BINS + bin) * 4;
@@ -127,6 +138,36 @@ describe("openImage", () => {
     expect(image.pixels).toHaveLength(8);
     expect([...image.pixels]).toEqual(Array(8).fill(0xff));
     expect(image.histR[0]).toBe(7);
+  });
+
+  it("slices the overview out from behind the preview", async () => {
+    // The overview is the whole frame at its own smaller size, so its region is
+    // sized from its own header entry rather than the preview's.
+    invoke.mockResolvedValue(
+      payload(2048, 1024, () => 0x11, 0, [3000, 1500], [512, 256], (i) => i % 256),
+    );
+
+    const image = await open();
+
+    expect(image.overviewWidth).toBe(512);
+    expect(image.overviewHeight).toBe(256);
+    expect(image.overviewPixels).toHaveLength(512 * 256 * 8);
+    expect(image.overviewPixels[0]).toBe(0);
+    expect(image.overviewPixels[1]).toBe(1);
+    expect(image.overviewPixels[255]).toBe(255);
+  });
+
+  it("keeps the histograms readable behind both pixel regions", async () => {
+    invoke.mockResolvedValue(
+      payload(4, 3, () => 0xff, 7, [4, 3], [2, 1], () => 0xee),
+    );
+
+    const image = await open();
+
+    expect(image.overviewPixels).toHaveLength(2 * 1 * 8);
+    expect([...image.overviewPixels]).toEqual(Array(16).fill(0xee));
+    expect(image.histR[0]).toBe(7);
+    expect(image.histB[255]).toBe(2255 + 7);
   });
 
   it("handles a preview whose dimensions are not powers of two", async () => {
