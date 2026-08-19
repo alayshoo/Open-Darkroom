@@ -104,8 +104,8 @@ pub fn sharp_margin_rows(sliders: &SlidersPayload, width: u32, height: u32) -> u
 
 /// Rows to render per chunk, given the margin each one has to discard.
 ///
-/// Clarity's kernel reaches 180 rows, so a fixed chunk would spend more than
-/// half its work on margins. Growing the chunk with the margin keeps that
+/// Clarity's kernel reaches 180 rows, so a fixed 512-row chunk would spend more
+/// than half its work on margins. Growing the chunk with the margin keeps that
 /// overhead bounded; the ceiling is memory, since six full-width surfaces at 16
 /// bytes a texel are live at once.
 pub fn chunk_rows_for_margin(margin: u32) -> u32 {
@@ -129,12 +129,7 @@ pub const SLIDER_COUNT: usize = 30;
 pub const VIEW_BYTES: usize = 16;
 
 /// Rows rendered per GPU pass. Bounds peak VRAM for very large images.
-///
-/// Every surface in the chain is 16 bytes a texel, so this is what keeps a
-/// 61 MP export inside a couple of hundred megabytes of VRAM. Chunking is free
-/// to tighten: each pass is per-pixel apart from the blur, which carries its own
-/// margin.
-pub const CHUNK_ROWS: u32 = 256;
+pub const CHUNK_ROWS: u32 = 512;
 
 // ── Sliders payload ───────────────────────────────────────────────────────────
 
