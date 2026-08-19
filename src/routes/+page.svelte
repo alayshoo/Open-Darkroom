@@ -454,7 +454,7 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="toolbar glass shrink-0 w-8 rounded-[8px]"></div>
+    <div class="toolbar shrink-0"></div>
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
@@ -1252,29 +1252,33 @@
             inset 20px 30px 60px -42px rgba(255, 255, 255, 0.17);
     }
 
-    /* The toolbar is a 42px strip, so the same rim reads twice as bright per
-       unit of width as it does on the wide panels. Its shadow is mirrored to
-       cast left, away from the canvas, and sits lighter than the right-hand
-       panels' since there is far less panel to lift.
-
-       Mirroring the shadow puts this panel's light source in the upper right,
-       where every other panel's is in the upper left, so both highlights have
-       to mirror with it or the strip ends up lit from two directions at once:
-       the rim gradient flips about the vertical axis (360 - 142) and the inset
-       smear moves to the top-right corner. */
+    /* Not a panel: a band of the backdrop colour fading out to the right, so a
+       zoomed image runs under it and dies away into the grey instead of meeting
+       an edge. It bleeds past the shell's insets to the window's left and bottom
+       and up behind the title bar scrim, since a soft falloff with a hard seam
+       around it would defeat the point. The box itself is the icon column; the
+       falloff is painted past its right edge. */
     .toolbar {
-        --panel-angle: 218deg;
-        --rim-hi: 0.13;
-        --rim-mid: 0.07;
-        --rim-lo: 0.05;
-        --rim-end: 0.08;
-        box-shadow:
-            -6px 10px 22px -2px rgba(0, 0, 0, 0.33),
-            -2px 3px 8px -1px rgba(0, 0, 0, 0.24),
-            inset -16px 21px 50px -38px rgba(255, 255, 255, 0.16);
-        min-width: 42px;
+        position: relative;
+        margin: -44px 0 -12px -12px;
+        min-width: 54px;
         z-index: 10;
         pointer-events: auto;
+    }
+
+    .toolbar::before {
+        content: "";
+        position: absolute;
+        inset: 0 -48px 0 0;
+        background: linear-gradient(
+            to right,
+            var(--canvasBackdrop) 0%,
+            var(--canvasBackdrop) 42%,
+            color-mix(in srgb, var(--canvasBackdrop) 55%, transparent) 68%,
+            color-mix(in srgb, var(--canvasBackdrop) 18%, transparent) 85%,
+            transparent 100%
+        );
+        pointer-events: none;
     }
 
     .side-bar {
