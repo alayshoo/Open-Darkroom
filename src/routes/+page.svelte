@@ -133,6 +133,14 @@
         page.scrollBy({ top: e.deltaY, behavior: "auto" });
     }
 
+    /* Mouse side buttons page the strip. Without the preventDefault they walk
+       the webview's history instead. */
+    function handlePagerSideButton(e: MouseEvent) {
+        if (e.button !== 3 && e.button !== 4) return;
+        e.preventDefault();
+        if (e.type === "pointerdown") movePage(e.button === 4);
+    }
+
     function scrollToPage(index: number) {
         const el = isDarkroom ? pagerElDarkroom : pagerElNormal;
         el?.scrollTo({
@@ -506,6 +514,9 @@
                             onscroll={handleNormalPagerScroll}
                             onwheel={handlePagerWheel}
                             onwheelcapture={handlePagerWheel}
+                            onpointerdown={handlePagerSideButton}
+                            onauxclick={handlePagerSideButton}
+                            role="group"
                             transition:slideX={{ direction: -1 }}
                         >
                             <!-- Sharpness Panel -->
@@ -1057,6 +1068,9 @@
                             onscroll={handleDarkroomPagerScroll}
                             onwheel={handlePagerWheel}
                             onwheelcapture={handlePagerWheel}
+                            onpointerdown={handlePagerSideButton}
+                            onauxclick={handlePagerSideButton}
+                            role="group"
                             transition:slideX={{ direction: 1 }}
                         >
                             <div class="controls-page">

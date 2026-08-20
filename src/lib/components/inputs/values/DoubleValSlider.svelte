@@ -39,6 +39,8 @@
     }
 
     function handlePointerDown(e: PointerEvent) {
+        // Drags start on the primary button only, so side/middle clicks pass through.
+        if (e.button !== 0) return;
         const slider = (e.currentTarget as HTMLElement).closest(".slider-container") as HTMLDivElement;
         const rect = slider.getBoundingClientRect();
         const clickX = e.clientX - rect.left;

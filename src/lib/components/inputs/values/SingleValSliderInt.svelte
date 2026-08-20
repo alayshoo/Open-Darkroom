@@ -94,6 +94,8 @@
     });
 
     function handlePointerDown(e: PointerEvent) {
+        // Drags start on the primary button only, so side/middle clicks pass through.
+        if (e.button !== 0) return;
 
         isDragging = true;
         onInteractionStart();
