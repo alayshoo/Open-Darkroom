@@ -736,9 +736,11 @@ function scatterChart(width: number, height: number): Uint8Array {
   return rgb;
 }
 
+/** Six u32s: preview, full-resolution and overview dimensions. */
+const HEADER = 24;
+
 /** Frame pixels the way `build_payload` in image_opening.rs does. */
 function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBuffer {
-  const HEADER = 24;
   const pixels = linearisePixels(rgb);
   // The overview is not read here, but it has to be present at its declared
   // size: it sits between the preview and the histograms.
@@ -796,7 +798,7 @@ describe("image integrity", () => {
     expect(payload.width).toBe(INTEGRITY_WIDTH);
     expect(payload.height).toBe(INTEGRITY_HEIGHT);
     // The pixels are a window into the payload, not a buffer of their own.
-    expect(payload.pixels.byteOffset).toBe(16);
+    expect(payload.pixels.byteOffset).toBe(HEADER);
 
     const out = await develop(source, defaultSlidersRGB, 1, {
       width: payload.width,
