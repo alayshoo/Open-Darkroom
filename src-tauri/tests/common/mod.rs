@@ -36,6 +36,36 @@ pub const EXPORT_RENDERING_RS: &str = include_str!("../../src/export_rendering.r
 pub const OPEN_IMAGE_TS: &str = include_str!("../../../src/lib/utils/openImage.ts");
 pub const WORKING_SPACE_TS: &str = include_str!("../../../src/lib/gpu/workingSpace.ts");
 
+// ── The working space ─────────────────────────────────────────────────
+
+/// Linear Rec.2020 → linear sRGB, column-major. Must match
+/// M_WORKING_TO_DESTINATION in src/lib/gpu/shaders/chunks/outputTransform.wgsl;
+/// `a_neutral_render_round_trips_through_the_working_space` in export_gpu.rs is
+/// what fails if the shader's copy moves.
+pub const WORKING_TO_SRGB: [f64; 9] = [
+    1.6604910, -0.1245505, -0.0181508, //
+    -0.5876411, 1.1328999, -0.1005789, //
+    -0.0728499, -0.0083494, 1.1187297,
+];
+
+/// BT.2020 luminance weights, matching LUMA in chunks/luma.wgsl and LR/LG/LB in
+/// calcParams.wgsl. `the_two_luminance_vectors_describe_the_same_working_space`
+/// in shader_contracts.rs is what keeps those two honest.
+pub const WORKING_LUMA: [f64; 3] = [0.2627002, 0.6779981, 0.0593017];
+
+/// The library's source → working matrix for an untagged file, widened for
+/// reference maths. Taken from the constant the app ships rather than restated,
+/// so there is nothing here to drift.
+pub fn srgb_to_working_f64() -> [f64; 9] {
+    std::array::from_fn(|i| open_darkroom_lib::icc::SRGB_TO_WORKING[i] as f64)
+}
+
+/// Apply a column-major 3x3 to a colour.
+
+pub fn apply_matrix(m: &[f64; 9], v: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|row| (0..3).map(|col| m[col * 3 + row] * v[col]).sum())
+}
+
 // ── Reference colour maths ────────────────────────────────────────────────────
 //
 // Independent f64 reimplementations of the transfer functions the shaders use,

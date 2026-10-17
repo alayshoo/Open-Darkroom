@@ -6,12 +6,15 @@
 
 mod common;
 
-use common::{noise, rgb_ramp, solid, u8_to_u16};
+use common::{
+    apply_matrix, linear_to_srgb, noise, rgb_ramp, solid, srgb_to_linear, u8_to_u16,
+    WORKING_TO_SRGB,
+};
 
 use open_darkroom_lib::export_rendering::{
     render_image, render_image_with_chunk_rows, SlidersPayload, CHUNK_ROWS,
 };
-use open_darkroom_lib::icc::SourceSpace;
+use open_darkroom_lib::icc::{SourceSpace, IDENTITY};
 use open_darkroom_lib::image_opening::Rgba16Image;
 
 fn render8(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
@@ -501,3 +504,65 @@ fn a_neutral_render_round_trips_through_the_working_space() {
         }
     }
 }
+
+/// Every other export test renders through `SourceSpace::default()`, where the
+/// source matrix and the output transform are inverses and the round trip hides
+/// whether the uniform was read at all. A buffer never bound, bound at the
+/// wrong index, or packed without the column padding would leave the matrix at
+/// zero or garbage, and the neutral round trip would be the first thing to go
+/// quiet about it.
+///
+/// So this renders a file that declares itself already in the working space.
+/// The source matrix is then the identity and only the output transform runs,
+/// which is a conversion with a closed form the export has to match.
+#[test]
+fn the_export_applies_the_source_matrix_it_is_given() {
+    let probes: [[u8; 3]; 4] = [[180, 120, 60], [120, 60, 180], [90, 140, 110], [128, 128, 128]];
+
+    let img: Rgba16Image = image::ImageBuffer::from_fn(probes.len() as u32, 1, |x, _| {
+        let p = probes[x as usize];
+        image::Rgba([u8_to_u16(p[0]), u8_to_u16(p[1]), u8_to_u16(p[2]), u16::MAX])
+    });
+
+    let mut already_working = SourceSpace::default();
+    already_working.to_working = IDENTITY;
+
+    let (w, h) = img.dimensions();
+    let out = pollster::block_on(render_image(
+        img.as_raw(),
+        w,
+        h,
+        4,
+        &SlidersPayload::default(),
+        &already_working,
+        8,
+        |_| {},
+    ))
+    .expect("render");
+
+    for (i, probe) in probes.iter().enumerate() {
+        let linear: [f64; 3] = std::array::from_fn(|c| srgb_to_linear(probe[c] as f64 / 255.0));
+        let dst = apply_matrix(&WORKING_TO_SRGB, linear);
+        let want: [u8; 3] =
+            std::array::from_fn(|c| (linear_to_srgb(dst[c].clamp(0.0, 1.0)) * 255.0).round() as u8);
+
+        for c in 0..3 {
+            let got = out[i * 3 + c];
+            assert!(
+                (got as i32 - want[c] as i32).abs() <= 2,
+                "probe {i} channel {c}: expected {} +/- 2, got {got} (whole pixel                  {:?}, wanted {want:?}) - the identity source matrix was not the                  matrix the export used",
+                want[c],
+                [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]]
+            );
+        }
+    }
+
+    // A neutral is the one probe both matrices agree on, so if it alone passed
+    // the matrix could still be anything. Say so rather than relying on order.
+    let grey = [out[9], out[10], out[11]];
+    assert!(
+        grey.iter().all(|&c| (c as i32 - 128).abs() <= 2),
+        "the neutral probe should survive either way, got {grey:?}"
+    );
+}
+

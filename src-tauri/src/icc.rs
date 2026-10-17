@@ -174,7 +174,10 @@ impl SourceSpace {
         )
         .map_err(|e| format!("Failed to build the working-space profile: {e}"))?;
 
-        let transform = Transform::new(
+        // The pixel type has to be three wide, not one: lcms2 checks it against
+        // the format's bytes per pixel and panics on a mismatch, so a `u16`
+        // element type against RGB_16 never reaches the conversion at all.
+        let transform: Transform<[u16; 3], [u16; 3]> = Transform::new(
             &profile,
             PixelFormat::RGB_16,
             &working,
@@ -186,24 +189,19 @@ impl SourceSpace {
         // Transformed three-wide and rewoven afterwards: lcms2 does not carry
         // an extra channel through unless told to, and alpha has no business in
         // a colour transform anyway.
-        let pixels = src.len() / channels;
-        let mut rgb: Vec<u16> = if channels == 3 {
-            src.to_vec()
-        } else {
-            src.chunks_exact(channels)
-                .flat_map(|px| [px[0], px[1], px[2]])
-                .collect()
-        };
+        let mut rgb: Vec<[u16; 3]> = src
+            .chunks_exact(channels)
+            .map(|px| [px[0], px[1], px[2]])
+            .collect();
         transform.transform_in_place(&mut rgb);
 
-        if channels == 3 {
-            return Ok(Some(rgb));
-        }
-
         let mut out = vec![0u16; src.len()];
-        for i in 0..pixels {
-            out[i * 4..i * 4 + 3].copy_from_slice(&rgb[i * 3..i * 3 + 3]);
-            out[i * 4 + 3] = src[i * channels + 3];
+        for (i, px) in rgb.iter().enumerate() {
+            let at = i * channels;
+            out[at..at + 3].copy_from_slice(px);
+            if channels == 4 {
+                out[at + 3] = src[at + 3];
+            }
         }
         Ok(Some(out))
     }

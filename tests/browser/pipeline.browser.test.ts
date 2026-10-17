@@ -655,6 +655,49 @@ describe("histogram compute", () => {
     expect(centroid(bins.r)).toBeLessThan(centroid(bins.g));
     expect(centroid(bins.g)).toBeLessThan(centroid(bins.b));
   });
+
+  // The histogram runs its own copy of the develop chain, so it can agree with
+  // the shader it was copied from and still describe a different image than the
+  // one on screen. It did: it binned the working space while the preview showed
+  // the destination, and the two disagreed by twenty code values on saturated
+  // content without either looking wrong.
+  //
+  // Both now end in the shared output transform, which is what this checks
+  // numerically rather than by looking for the chunk's text. Saturated colours
+  // are the point: a neutral lands in the same bin either way.
+  it("bins the same values the preview renders", async () => {
+    const probes: [number, number, number][] = [
+      [220, 40, 40],
+      [40, 200, 90],
+      [60, 70, 210],
+      [200, 180, 40],
+    ];
+
+    const sliders: Sliders = { ...defaultSlidersRGB, saturation: 25, vibrance: 40 };
+
+    for (const [r, g, b] of probes) {
+      const rgb = solid(r, g, b);
+      const rendered = await develop(rgb, sliders);
+      const bins = await histogram(rgb, sliders);
+
+      // A solid colour splits one vote between two adjacent bins, so the
+      // weighted centre of each channel is where the preview's value landed.
+      const channels: [string, Uint32Array, number][] = [
+        ["red", bins.r, rendered[0]],
+        ["green", bins.g, rendered[1]],
+        ["blue", bins.b, rendered[2]],
+      ];
+
+      for (const [name, channel, value] of channels) {
+        expect(sum(channel), `${name} lost votes on ${[r, g, b]}`).toBe(TOTAL_WEIGHT);
+        expect(
+          centroid(channel),
+          `${name} on ${[r, g, b]}: the preview rendered ${value}, the bins centre on ` +
+            `${centroid(channel).toFixed(2)} — the two are measuring different images`,
+        ).toBeCloseTo(value, 0);
+      }
+    }
+  });
 });
 
 describe("histogram scale reduction", () => {

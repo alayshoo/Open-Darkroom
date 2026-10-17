@@ -15,19 +15,10 @@
 
 mod common;
 
-/// Linear Rec.2020 → linear sRGB, column-major. Must match
-/// M_WORKING_TO_DESTINATION in src/lib/gpu/shaders/chunks/outputTransform.wgsl;
-/// `a_neutral_render_round_trips_through_the_working_space` in export_gpu.rs is
-/// what fails if the shader's copy moves.
-const WORKING_TO_SRGB: [f64; 9] = [
-    1.6604910, -0.1245505, -0.0181508,
-    -0.5876411, 1.1328999, -0.1005789,
-    -0.0728499, -0.0083494, 1.1187297,
-];
-
 use common::{
-    develop, develop_patch, develop_patches, gray_ramp, linear_to_srgb, mixed_ramp, srgb_to_linear,
-    through_linear, u8_to_u16,
+    apply_matrix, develop, develop_patch, develop_patches, gray_ramp, linear_to_srgb, mixed_ramp,
+    srgb_to_linear, srgb_to_working_f64, through_linear, u8_to_u16, WORKING_LUMA,
+    WORKING_TO_SRGB,
 };
 
 use image::{ImageBuffer, Rgba};
@@ -1238,6 +1229,67 @@ fn vibrance_boosts_muted_colours_more_than_vivid_ones() {
         muted_gain > vivid_gain,
         "vibrance should favour muted colours: muted gained {muted_gain}, vivid gained {vivid_gain}"
     );
+}
+
+/// Which saturation vibrance weights by is not a detail: it is measured in the
+/// destination space, not the working one. Measured in Rec.2020 every sRGB
+/// colour reads less saturated than it is, and the vivid ones lose the most —
+/// enough to boost a vivid colour harder than a muted one, which is the
+/// opposite of what vibrance is for.
+///
+/// The comparison above cannot see that, because it only orders two patches far
+/// apart. This follows one saturated patch through the whole chain in f64 and
+/// predicts it both ways. The two predictions are a dozen code values apart, so
+/// matching one rules out the other rather than merely being consistent with it.
+#[test]
+fn vibrance_measures_saturation_in_the_destination_space() {
+    // Saturated in hue but mid in lightness, so nothing clips on the way out
+    // and the two predictions stay distinguishable.
+    let patch = [200u8, 40, 160];
+    let sliders = SlidersPayload {
+        vibrance: 100.0,
+        ..defaults()
+    };
+
+    // With every other slider neutral the chain reduces to: decode, into the
+    // working space, vibrance, back out to the destination.
+    let linear: [f64; 3] = std::array::from_fn(|c| srgb_to_linear(patch[c] as f64 / 255.0));
+    let working = apply_matrix(&srgb_to_working_f64(), linear);
+    let luma: f64 = (0..3).map(|c| WORKING_LUMA[c] * working[c]).sum();
+
+    // `params.vibrance` is the slider over 100.
+    let predict = |measured: [f64; 3]| -> [u8; 3] {
+        let (max_c, min_c) = (
+            measured.iter().cloned().fold(f64::MIN, f64::max),
+            measured.iter().cloned().fold(f64::MAX, f64::min),
+        );
+        let pixel_sat = (max_c - min_c) / max_c.max(1e-4);
+        let factor = 1.0 + 1.0 * (1.0 - pixel_sat);
+        let boosted: [f64; 3] = std::array::from_fn(|c| luma + factor * (working[c] - luma));
+        let dst = apply_matrix(&WORKING_TO_SRGB, boosted);
+        std::array::from_fn(|c| (linear_to_srgb(dst[c].clamp(0.0, 1.0)) * 255.0).round() as u8)
+    };
+
+    // The destination measurement: what the shader does, and what it should do.
+    let in_destination = predict(apply_matrix(&WORKING_TO_SRGB, working).map(|v| v.max(0.0)));
+    // The working-space measurement: the bug this replaced.
+    let in_working = predict(working);
+
+    assert!(
+        (0..3).any(|c| (in_destination[c] as i32 - in_working[c] as i32).abs() > 2 * TOL),
+        "the fixture no longer tells the two measurements apart: {in_destination:?} vs          {in_working:?} — pick a patch where they diverge"
+    );
+
+    let got = develop_patch(patch, &sliders);
+    for c in 0..3 {
+        assert!(
+            close(got[c], in_destination[c]),
+            "channel {c}: expected {} (saturation read in the destination), got {} —              reading it in the working space would give {}",
+            in_destination[c],
+            got[c],
+            in_working[c]
+        );
+    }
 }
 
 #[test]
