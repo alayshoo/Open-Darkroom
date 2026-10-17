@@ -259,7 +259,7 @@ pub fn prepare_image(
     full_height: u32,
     channels: usize,
     space: &SourceSpace,
-) -> PreparedImage {
+) -> Result<PreparedImage, String> {
     // Histograms describe what is in the file, so they are binned off the
     // source code values before any conversion touches them.
     let histograms = compute_histograms(src, channels);
@@ -268,7 +268,11 @@ pub fn prepare_image(
     // here in full. There are no separable channels for the darkroom block to
     // address in that case, so nothing is lost by converting early — every
     // other source keeps its own primaries until the GPU has run that block.
-    let baked = space.bake(src, channels);
+    //
+    // A failure here cannot be swallowed: the rest of the pipeline is already
+    // committed to the pixels being in the working space, so carrying on would
+    // render the source's own encoding as if it were linear.
+    let baked = space.bake(src, channels)?;
     let src: &[u16] = baked.as_deref().unwrap_or(src);
     // Resampling happens in linear light, so the image is gamma-decoded before
     // it is downscaled rather than after.
@@ -325,7 +329,7 @@ pub fn prepare_image(
         None => (preview_width, preview_height, preview_pixels.clone()),
     };
 
-    PreparedImage {
+    Ok(PreparedImage {
         preview_pixels,
         preview_width,
         preview_height,
@@ -337,7 +341,7 @@ pub fn prepare_image(
         histograms,
         to_working: space.to_working,
         baked: space.baked,
-    }
+    })
 }
 
 /// Serialise a [`PreparedImage`] into the byte layout `openImage.ts` parses:
@@ -461,7 +465,7 @@ pub(crate) async fn open_image_file(
         (img.into_rgb16().into_raw(), 3)
     };
 
-    let prepared = prepare_image(&samples, full_width, full_height, channels, &space);
+    let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
 
     // Store the original full-resolution image for export. This happens after
     // `prepare_image` so the buffer can be moved into the state rather than

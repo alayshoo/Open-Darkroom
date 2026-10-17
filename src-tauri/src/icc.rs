@@ -137,19 +137,27 @@ impl SourceSpace {
 
     /// Convert interleaved u16 source pixels into interleaved *linear Rec.2020*
     /// u16 pixels, for a profile that could not be split into curves and a
-    /// matrix. `None` on every other path, where [`Self::luts`] does the work.
+    /// matrix. `Ok(None)` on every other path, where [`Self::luts`] does the
+    /// work; `Err` only when this path was the one to take and it failed, which
+    /// has to reach the caller — the pixels are untouched source values while
+    /// everything downstream has been told they are linear working-space ones.
     ///
     /// The result is u16 rather than float so that it lands in the same
     /// resampling path as every other image. That quantises, and clips whatever
     /// the profile places outside Rec.2020 — acceptable here because a LUT
     /// profile maps into a bounded gamut to begin with, and because the
     /// alternative is a second resampling path for the rarest input.
-    pub fn bake(&self, src: &[u16], channels: usize) -> Option<Vec<u16>> {
+    pub fn bake(&self, src: &[u16], channels: usize) -> Result<Option<Vec<u16>>, String> {
         if !self.baked {
-            return None;
+            return Ok(None);
         }
 
-        let profile = Profile::new_icc(self.icc.as_deref()?).ok()?;
+        let icc = self
+            .icc
+            .as_deref()
+            .ok_or("colour profile missing from a baked source space")?;
+        let profile =
+            Profile::new_icc(icc).map_err(|e| format!("Failed to read colour profile: {e}"))?;
         let linear = ToneCurve::new(1.0);
         let working = Profile::new_rgb(
             &CIExyY {
@@ -164,7 +172,7 @@ impl SourceSpace {
             },
             &[&linear, &linear, &linear],
         )
-        .ok()?;
+        .map_err(|e| format!("Failed to build the working-space profile: {e}"))?;
 
         let transform = Transform::new(
             &profile,
@@ -173,7 +181,7 @@ impl SourceSpace {
             PixelFormat::RGB_16,
             Intent::RelativeColorimetric,
         )
-        .ok()?;
+        .map_err(|e| format!("Failed to build the colour conversion: {e}"))?;
 
         // Transformed three-wide and rewoven afterwards: lcms2 does not carry
         // an extra channel through unless told to, and alpha has no business in
@@ -189,7 +197,7 @@ impl SourceSpace {
         transform.transform_in_place(&mut rgb);
 
         if channels == 3 {
-            return Some(rgb);
+            return Ok(Some(rgb));
         }
 
         let mut out = vec![0u16; src.len()];
@@ -197,7 +205,7 @@ impl SourceSpace {
             out[i * 4..i * 4 + 3].copy_from_slice(&rgb[i * 3..i * 3 + 3]);
             out[i * 4 + 3] = src[i * channels + 3];
         }
-        Some(out)
+        Ok(Some(out))
     }
 }
 

@@ -281,7 +281,6 @@ impl Default for ViewPayload {
     }
 }
 
-/// Pack the view into the uniform buffer matching the WGSL `View` struct.
 /// Pack the source → working-space matrix into the `SourceSpace` uniform.
 ///
 /// A WGSL `mat3x3<f32>` is three 16-byte columns, not nine packed floats: each
@@ -298,6 +297,7 @@ pub fn source_space_to_bytes(space: &SourceSpace) -> [u8; SOURCE_SPACE_BYTES as 
     bytes
 }
 
+/// Pack the view into the uniform buffer matching the WGSL `View` struct.
 pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
     let mut bytes = [0u8; VIEW_BYTES];
     bytes[0..4].copy_from_slice(&v.render_scale.to_le_bytes());
@@ -365,7 +365,7 @@ pub async fn render_image_with_chunk_rows(
     // A profile the GPU cannot be handed as a matrix is applied here instead,
     // over the whole buffer rather than per chunk: the conversion is per pixel,
     // so splitting it would only multiply the lcms2 transforms.
-    let baked = space.bake(pixels_u16, channels);
+    let baked = space.bake(pixels_u16, channels)?;
     let pixels_u16: &[u16] = baked.as_deref().unwrap_or(pixels_u16);
     let t = Instant::now();
 

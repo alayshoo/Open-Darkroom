@@ -539,6 +539,59 @@ fn the_shaders_that_need_the_tone_maths_get_it() {
     }
 }
 
+/// `LUMA` and calcParams' `LR`/`LG`/`LB` are the same luminance vector of the
+/// same working space, declared twice because one is a chunk the adjustment
+/// shaders include and the other feeds a matrix calcParams builds on the GPU.
+///
+/// They have disagreed before: the working space moved to Rec.2020 and only
+/// calcParams followed, so the saturation matrix collapsed a colour to one grey
+/// while vibrance mixed it towards another. Neither looks wrong on a neutral,
+/// which is what every render with default sliders is.
+#[test]
+fn the_two_luminance_vectors_describe_the_same_working_space() {
+    let weights = |source: &str, names: [&str; 3]| -> [f32; 3] {
+        names.map(|name| {
+            source
+                .split(&format!("{name}: f32 = "))
+                .nth(1)
+                .unwrap_or_else(|| panic!("no {name} declaration"))
+                .split(';')
+                .next()
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("{name} is not a float: {e}"))
+        })
+    };
+
+    let constants = weights(CALC_PARAMS_WGSL, ["LR", "LG", "LB"]);
+
+    let chunk: Vec<f32> = DEVELOP_WGSL
+        .split("const LUMA = vec3f(")
+        .nth(1)
+        .expect("develop.wgsl declares no const LUMA")
+        .split(')')
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|t| t.trim().parse().expect("LUMA component is not a float"))
+        .collect();
+
+    assert_eq!(chunk.len(), 3, "expected three components, got {chunk:?}");
+    for i in 0..3 {
+        assert_eq!(
+            chunk[i], constants[i],
+            "luma component {i}: chunks/luma.wgsl says {}, calcParams.wgsl says {}",
+            chunk[i], constants[i]
+        );
+    }
+
+    // And both are the working space's, not the sRGB space the chain used to
+    // run in — equal-but-wrong is the other way this drifts.
+    const BT2020: [f32; 3] = [0.2627002, 0.6779981, 0.0593017];
+    assert_eq!(chunk[..], BT2020[..], "the weights are not BT.2020's");
+}
+
 /// The preview is rendered through the output transform and the histogram is
 /// measured through it, so the two have to be the same transform. They were
 /// briefly not: the histogram binned the working space while the screen showed

@@ -130,6 +130,23 @@ fn an_unreadable_profile_falls_back_to_converting_on_the_cpu() {
     );
 }
 
+/// And when that CPU conversion is the path taken and it then fails, the open
+/// has to fail with it. The pixels are still the source's own code values at
+/// that point, while `baked` has already told the GPU and the frontend that
+/// they are linear working-space ones — so carrying on renders the file's
+/// encoding as if it were light, in the wrong primaries, with nothing saying so.
+#[test]
+fn a_failed_cpu_conversion_fails_the_open() {
+    let space = SourceSpace::resolve(Some(b"not an icc profile at all".to_vec()));
+    let img: ImageBuffer<Rgba<u16>, Vec<u16>> =
+        ImageBuffer::from_pixel(4, 3, Rgba([1000u16, 2000, 3000, u16::MAX]));
+
+    let err = prepare_image(img.as_raw(), 4, 3, 4, &space)
+        .err()
+        .expect("an unusable profile cannot be converted, and must not be ignored");
+    assert!(err.contains("colour profile"), "unhelpful error: {err}");
+}
+
 // ── Per-channel curves ────────────────────────────────────────────────────────
 
 /// A profile may carry three different transfer curves, and each channel has to
@@ -226,7 +243,7 @@ fn the_payload_carries_the_matrix_and_the_baked_flag() {
         ImageBuffer::from_pixel(4, 3, Rgba([1000u16, 2000, 3000, u16::MAX]));
 
     let space = SourceSpace::default();
-    let prepared = prepare_image(img.as_raw(), 4, 3, 4, &space);
+    let prepared = prepare_image(img.as_raw(), 4, 3, 4, &space).expect("prepare");
     let payload = build_payload(&prepared);
 
     assert!(payload.len() > PAYLOAD_HEADER_BYTES);
