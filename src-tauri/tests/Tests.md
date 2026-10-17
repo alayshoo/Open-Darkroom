@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 196 Rust tests, 83 TypeScript, 27 in-browser.
+Nothing is `#[ignore]`d. 200 Rust tests, 83 TypeScript, 27 in-browser.
 
 ---
 
@@ -192,7 +192,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
-## L1 — `source_space.rs` (16)
+## L1 — `source_space.rs` (20)
 
 What a file says its own numbers mean, and how that reaches the GPU. Nothing
 downstream can tell a mistake here from a deliberate look: a transposed matrix, a
@@ -209,11 +209,15 @@ decomposing to the identity is a real assertion and not a tautology.
 | `an_untagged_file_is_srgb_and_converts_on_the_gpu` | no profile means sRGB, matrix path |
 | `a_tagged_srgb_profile_agrees_with_the_untagged_constant` | a real sRGB profile decomposes to `SRGB_TO_WORKING` |
 | `a_rec2020_profile_decomposes_to_the_identity` | which a transpose cannot survive |
-| `an_unreadable_profile_falls_back_to_converting_on_the_cpu` | garbage bytes take the baked path |
-| `a_profile_that_is_not_rgb_takes_the_cpu_path` | grey and Lab profiles are not three primaries |
+| `an_unreadable_profile_falls_back_to_srgb` | garbage bytes are no profile, so they are an untagged file |
+| `a_greyscale_profile_undoes_its_own_curve_on_every_channel` | one TRC for three channels, identity matrix, matrix path kept |
+| `a_profile_the_decoder_already_rendered_falls_back_to_srgb` | Lab/CMYK/XYZ describe numbers we no longer hold |
 | `a_profile_missing_a_colorant_takes_the_cpu_path` | all six tags or none |
-| `a_failed_cpu_conversion_fails_the_open` | an unreadable profile is not silently ignored |
-| `a_conversion_that_cannot_be_built_fails_the_open` | and neither is one lcms2 refuses — see below |
+| `a_conversion_that_cannot_be_built_fails_the_open` | a profile lcms2 refuses is not silently ignored — see below |
+| `a_lut_profile_bakes_to_the_same_place_the_matrix_path_reaches` | 6 probes, lcms2's grid against three curves and a 3x3 |
+| `baking_carries_alpha_through_untouched` | alpha survives the three-wide reweaving |
+| `baking_agrees_between_three_and_four_channel_sources` | both shapes reach the same colours |
+| `a_lut_profile_opens_through_the_baked_path` | the whole open, flag and matrix included |
 | `the_baked_path_hands_the_upload_an_identity_curve` | no second decode over already-linear data |
 | `a_baked_source_sets_the_payload_flag_and_sends_the_identity` | the flag and matrix the frontend reads |
 | `each_channel_goes_through_its_own_curve` | three gammas, routed and applied in order |
@@ -223,14 +227,45 @@ decomposing to the identity is a real assertion and not a tautology.
 | `the_uniform_pads_each_matrix_column_to_sixteen_bytes` | a `mat3x3<f32>` is three vec4 columns |
 | `the_payload_carries_the_matrix_and_the_baked_flag` | at the offsets `openImage.ts` reads |
 
-### What the baked path still has no fixture for
+### Which path a profile takes
 
-`bake` exists for a scanner's A2B0 LUT profile, and that is the one input no test
-drives. lcms2's safe API cannot build one — a `Pipeline` can only be created empty
-and concatenated, never given stages — so a real LUT profile wants committing as a
-test asset. What is covered is everything around it: the classification that sends
-a profile down that path, the identity curve it hands the upload, the payload it
-produces, and the refusal when lcms2 cannot build the conversion.
+`bake` hands lcms2 `PixelFormat::RGB_16`, so it can only convert a profile whose
+own colour space is RGB. The decoder has already produced three or four channels
+of u16 whatever the profile says, so what decides the path is whether the profile
+still describes that buffer:
+
+| Profile | Path | Why |
+|---|---|---|
+| none, or unreadable bytes | sRGB on the GPU | what an untagged file means in practice |
+| RGB, curves + colorants | its own matrix, on the GPU | the darkroom block keeps the file's channels |
+| RGB, A2B0 only | baked on the CPU | no separable channels to preserve |
+| greyscale | its own TRC, identity matrix | one channel replicated across three; a neutral stays neutral |
+| Lab, CMYK, XYZ | sRGB on the GPU | the decoder rendered these to RGB on its own terms |
+
+Greyscale keeps the matrix path on purpose: a scanned black-and-white negative is
+the case, and the per-channel black, white and gamma still address the three
+channels the decoder made.
+
+### The LUT profile fixture
+
+`tests/fixtures/srgb-lut.icc` is the input `bake` exists for: an RGB profile
+carrying its conversion as an A2B0 pipeline rather than as curves and colorants,
+which is the shape a scanner's profile has.
+
+lcms2's safe API cannot build one from stages — a `Pipeline` is only ever created
+empty and concatenated — so `examples/make_lut_profile.rs` borrows one. It builds
+a device link for sRGB → Lab, which holds exactly such a pipeline, and rehouses
+that pipeline in an ordinary input profile. Regenerate with:
+
+```
+cargo run --example make_lut_profile
+```
+
+It describes sRGB on purpose. That is what lets the baked conversion be checked
+against the matrix path rather than against a restatement of itself, and the two
+agree to 5e-4 of full scale — a tenth of an 8-bit code value, which is the grid's
+own interpolation error. A coarse grid keeps the committed file at 30 KB; the
+default precalculation writes 216 KB for no accuracy a test can use.
 
 That refusal is also the guard on the pixel type. lcms2 checks a transform's
 element type against the format's bytes per pixel with a plain `assert_eq!`, so a

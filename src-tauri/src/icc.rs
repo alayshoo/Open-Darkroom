@@ -47,6 +47,17 @@ const XYZ_D50_TO_WORKING: [[f32; 3]; 3] = [
 const WORKING_PRIMARIES: [[f64; 2]; 3] = [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]];
 const D65: [f64; 2] = [0.3127, 0.3290];
 
+/// Where an RGB profile keeps its transfer curves, one tag per channel.
+const RGB_TRC: [TagSignature; 3] = [
+    TagSignature::RedTRCTag,
+    TagSignature::GreenTRCTag,
+    TagSignature::BlueTRCTag,
+];
+
+/// A greyscale profile keeps one curve for its single channel. The decoder hands
+/// us three, so that curve is the curve for all of them.
+const GREY_TRC: [TagSignature; 3] = [TagSignature::GrayTRCTag; 3];
+
 /// How a source image's numbers reach linear working-space values.
 #[derive(Clone)]
 pub struct SourceSpace {
@@ -60,6 +71,10 @@ pub struct SourceSpace {
     /// the CPU did the whole conversion and the darkroom block runs in the
     /// working space rather than the source's own primaries.
     pub baked: bool,
+    /// Which tags [`Self::luts`] reads the transfer curves from, which depends
+    /// on how many channels the profile describes rather than how many the
+    /// decoder produced.
+    curves: [TagSignature; 3],
 }
 
 impl Default for SourceSpace {
@@ -70,40 +85,75 @@ impl Default for SourceSpace {
             icc: None,
             to_working: SRGB_TO_WORKING,
             baked: false,
+            curves: RGB_TRC,
         }
     }
 }
 
 impl SourceSpace {
     /// Resolve what a file's profile means. `None` is sRGB.
+    ///
+    /// The decoder has already produced three or four channels of u16 whatever
+    /// the profile says, so what matters here is whether the profile still
+    /// describes that buffer. An RGB one does. A greyscale one describes its
+    /// single channel, which the decoder replicated across all three. Anything
+    /// else was rendered to RGB on the decoder's own terms on the way out, and
+    /// the profile describes numbers we no longer hold.
     pub fn resolve(icc: Option<Vec<u8>>) -> Self {
         let Some(bytes) = icc else {
             return Self::default();
         };
 
-        match decompose(&bytes) {
-            Some(to_working) => Self {
-                icc: Some(bytes),
-                to_working,
-                baked: false,
+        // Unreadable: there is nothing to decompose, and nothing lcms2 could
+        // convert either, so the answer an untagged file gets beats a
+        // conversion certain to fail.
+        let Ok(profile) = Profile::new_icc(&bytes) else {
+            return Self::default();
+        };
+
+        match profile.color_space() {
+            ColorSpaceSignature::RgbData => match decompose(&profile) {
+                Some(to_working) => Self {
+                    icc: Some(bytes),
+                    to_working,
+                    baked: false,
+                    curves: RGB_TRC,
+                },
+                // A LUT profile has no separable channels to preserve, so there
+                // is nothing to lose by converting it here in full.
+                None => Self {
+                    icc: Some(bytes),
+                    to_working: IDENTITY,
+                    baked: true,
+                    curves: RGB_TRC,
+                },
             },
-            // A LUT profile has no separable channels to preserve, so there is
-            // nothing to lose by converting it here in full.
-            None => Self {
+            // Greyscale keeps the matrix path, which matters for a scanned
+            // black-and-white negative: the per-channel black, white and gamma
+            // still address the three channels the decoder made, and they are
+            // equal going in. The pixels are neutral by construction and a
+            // neutral stays neutral under relative colorimetric, so there are
+            // no primaries to convert, only the profile's own curve to undo.
+            ColorSpaceSignature::GrayData => Self {
                 icc: Some(bytes),
                 to_working: IDENTITY,
-                baked: true,
+                baked: false,
+                curves: GREY_TRC,
             },
+            // Lab, CMYK, XYZ: the buffer is the decoder's RGB rendering of
+            // those numbers rather than the numbers, and nothing here can undo
+            // that step. sRGB is the assumption every untagged file gets.
+            _ => Self::default(),
         }
     }
 
     /// Per-channel tables mapping a u16 source code value to linear light in the
     /// source's own primaries, each entry passed through `map`.
     ///
-    /// The three channels get their own table because a profile may carry three
-    /// different curves. In practice they are equal, but reading one and
+    /// The three channels get their own table because an RGB profile may carry
+    /// three different curves. In practice they are equal, but reading one and
     /// applying it to all three would be an assumption with nothing enforcing
-    /// it.
+    /// it. A greyscale profile carries one curve, and all three read it.
     pub fn luts<T>(&self, map: impl Fn(f32) -> T) -> [Vec<T>; 3] {
         let unit = |i: usize| i as f32 / (LUT_SIZE - 1) as f32;
 
@@ -114,14 +164,9 @@ impl SourceSpace {
 
         let curves = self.icc.as_deref().and_then(|bytes| {
             let profile = Profile::new_icc(bytes).ok()?;
-            let trc = [
-                TagSignature::RedTRCTag,
-                TagSignature::GreenTRCTag,
-                TagSignature::BlueTRCTag,
-            ];
             // Evaluated eagerly: a Profile is not Sync, and 3 × 65536 float
             // evaluations cost far less than the decode around them.
-            Some(trc.map(|sig| match profile.read_tag(sig) {
+            Some(self.curves.map(|sig| match profile.read_tag(sig) {
                 Tag::ToneCurve(curve) => (0..LUT_SIZE).map(|i| curve.eval(unit(i))).collect(),
                 _ => (0..LUT_SIZE).map(|i| srgb_to_linear(unit(i))).collect(),
             }))
@@ -215,16 +260,10 @@ fn xy_y(xy: [f64; 2]) -> CIExyY {
     }
 }
 
-/// Read a profile as three transfer curves plus a primaries matrix, returning
-/// source RGB → linear Rec.2020. `None` for anything that is not that shape —
-/// a scanner's LUT profile, a CMYK profile, a profile missing a tag.
-fn decompose(bytes: &[u8]) -> Option<Matrix3> {
-    let profile = Profile::new_icc(bytes).ok()?;
-
-    if profile.color_space() != ColorSpaceSignature::RgbData {
-        return None;
-    }
-
+/// Read an RGB profile as three transfer curves plus a primaries matrix,
+/// returning source RGB → linear Rec.2020. `None` for anything that is not that
+/// shape — a scanner's LUT profile, or a profile missing a tag.
+fn decompose(profile: &Profile) -> Option<Matrix3> {
     // All six tags have to be present: the colorants give the matrix, the
     // curves the transfer function. A profile carrying only an A2B pipeline has
     // neither, and is the case `bake` exists for.
