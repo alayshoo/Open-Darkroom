@@ -739,8 +739,11 @@ function scatterChart(width: number, height: number): Uint8Array {
   return rgb;
 }
 
-/** Six u32s: preview, full-resolution and overview dimensions. */
-const HEADER = 24;
+/**
+ * Six u32s of dimensions, the source → working matrix, then the flags word.
+ * Must match PAYLOAD_HEADER_BYTES in image_opening.rs.
+ */
+const HEADER = 64;
 
 /** Frame pixels the way `build_payload` in image_opening.rs does. */
 function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBuffer {
@@ -759,6 +762,9 @@ function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBu
   view.setUint32(12, height, true);
   view.setUint32(16, width, true);
   view.setUint32(20, height, true);
+  // An untagged file's matrix, which is what the backend sends for one.
+  for (let i = 0; i < 9; i++) view.setFloat32(24 + i * 4, SRGB_TO_WORKING[i], true);
+  view.setUint32(60, 0, true);
   new Uint8Array(buffer, HEADER, pixels.length).set(pixels);
   new Uint8Array(buffer, HEADER + pixels.length, overviewBytes).set(pixels);
 
