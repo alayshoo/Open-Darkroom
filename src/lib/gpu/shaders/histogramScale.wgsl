@@ -9,8 +9,7 @@
 // One workgroup reduces all 768 bins, so this is a single dispatch of a single
 // group — the whole point is that the answer never leaves the GPU.
 
-const BINS_PER_CHANNEL: u32 = 256u;
-const BIN_TOTAL:        u32 = 768u;
+//!include "chunks/histogramBins.wgsl"
 const THREADS:          u32 = 256u;
 
 @group(0) @binding(0) var<storage, read>       bins:  array<u32, BIN_TOTAL>;

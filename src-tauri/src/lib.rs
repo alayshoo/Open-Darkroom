@@ -5,6 +5,7 @@
 pub mod color;
 pub mod image_opening;
 pub mod export_rendering;
+pub mod shaders;
 pub mod export_encoding;
 mod export;
 

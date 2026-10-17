@@ -60,51 +60,14 @@ struct View {
     _pad0:        f32,   // 12
 }                        // total: 16 bytes
 
-struct Params {
-    dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
-    red_gamma:      f32,          //  64
-    green_gamma:    f32,          //  68
-    blue_gamma:     f32,          //  72
-    out_black:      f32,          //  76
-    out_scale:      f32,          //  80
-    _pad1:          f32,          //  84
-    _pad2:          f32,          //  88
-    _pad3:          f32,          //  92  (align wb_matrix to 96)
-    wb_matrix:      mat3x3<f32>,  //  96 — 48 bytes
-    exposure:       f32,          // 144
-    contrast:       f32,          // 148
-    brightness:     f32,          // 152
-    highlights:     f32,          // 156
-    shadows:        f32,          // 160
-    whites:         f32,          // 164
-    blacks:         f32,          // 168
-    _pad4:          f32,          // 172  (align hueSat_matrix to 176)
-    hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
-    vibrance:       f32,          // 240
-    _pad5:          f32,          // 244
-    _pad6:          f32,          // 248
-    _pad7:          f32,          // 252
-}                                 // total: 256 bytes
+//!include "chunks/params.wgsl"
 
 // Parameters for the sharpness stage, kept apart from Params because a
 // different set of shaders reads them: calcSharpTexture.wgsl and composite.wgsl
 // need these and none of the develop chain, while histogram.wgsl needs the
 // develop chain and none of these. Splitting the two keeps each shader's
 // declaration to the bytes it actually uses.
-struct SharpParams {
-    usm_amount:           f32,   //  0  (1.0 = add the full band)
-    usm_sigma:            f32,   //  4  (texture pixels, already floored)
-    usm_luma_threshold:   f32,   //  8
-    usm_detail_threshold: f32,   // 12
-    texture_amount:       f32,   // 16
-    texture_sigma_lo:     f32,   // 20
-    texture_sigma_hi:     f32,   // 24
-    clarity_amount:       f32,   // 28
-    clarity_sigma:        f32,   // 32
-    _pad0:                f32,   // 36
-    _pad1:                f32,   // 40
-    _pad2:                f32,   // 44
-}                                // total: 48 bytes
+//!include "chunks/sharpParams.wgsl"
 
 @group(0) @binding(0) var<uniform> sliders: Sliders;
 @group(0) @binding(1) var<storage, read_write> params: Params;

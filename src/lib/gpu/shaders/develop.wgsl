@@ -9,90 +9,11 @@
 @group(0) @binding(1) var texSampler: sampler;
 
 // Uniform buffer = small, read-only data shared across all pixels.
-// Params must equate to a multiple of 16 bytes, each f32 is 4 bytes, mat3x3<f32> is 48 bytes
-struct Params {
-  dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
-  red_gamma:      f32,          //  64
-  green_gamma:    f32,          //  68
-  blue_gamma:     f32,          //  72
-  out_black:      f32,          //  76
-  out_scale:      f32,          //  80
-  _pad1:          f32,          //  84
-  _pad2:          f32,          //  88
-  _pad3:          f32,          //  92  (align wb_matrix to 16)
-  wb_matrix:      mat3x3<f32>,  //  96 — 48 bytes (3 cols × 16)
-  exposure:       f32,          // 144
-  contrast:       f32,          // 148
-  brightness:     f32,          // 152
-  highlights:     f32,          // 156
-  shadows:        f32,          // 160
-  whites:         f32,          // 164
-  blacks:         f32,          // 168
-  _pad4:          f32,          // 172  (align hueSat_matrix to 16)
-  hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
-  vibrance:       f32,          // 240
-  _pad5:          f32,          // 244
-  _pad6:          f32,          // 248
-  _pad7:          f32,          // 252
-}                               // total: 256 bytes
+//!include "chunks/params.wgsl"
 @group(0) @binding(2) var<storage, read> params: Params;
 
-// ===================== Shared tone maths — must match histogram.wgsl =====================
-
-// BT.709 luminance coefficients
-const LUMA = vec3f(0.2126, 0.7152, 0.0722);
-
-// Mid-grey in the encoded domain. Contrast pivots here, so this is the one tone
-// that does not move when the contrast slider does.
-const TONE_PIVOT: f32 = 0.5;
-
-// Midtone slope at contrast +100. The one free parameter in the curve below.
-const CONTRAST_BASE: f32 = 3.0;
-
-// sRGB transfer functions. Values outside 0..1 are passed through the linear
-// segment rather than clamped: the chain carries highlight headroom and the
-// occasional out-of-gamut negative all the way to the final clamp, and losing
-// either here would clip detail the later steps can still recover.
-fn encode_srgb(c: vec3f) -> vec3f {
-  let lo = c * 12.92;
-  let hi = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
-  return select(hi, lo, c < vec3f(0.0031308));
-}
-
-fn decode_srgb(c: vec3f) -> vec3f {
-  let lo = c / 12.92;
-  let hi = pow(max((c + 0.055) / 1.055, vec3f(0.0)), vec3f(2.4));
-  return select(hi, lo, c < vec3f(0.04045));
-}
-
-// Contrast as a power curve on each side of the pivot.
-//
-//   k > 1  steepens the midtones  (positive contrast)
-//   k < 1  flattens them          (negative contrast)
-//
-// Every property that matters follows from the shape. Both branches fix 0, the
-// pivot and 1, so mid-grey holds and the endpoints survive every slider
-// position — contrast +100 still reaches true black and true white. The two
-// branches meet with slope k on both sides, so there is no seam at the pivot.
-// It is monotone for every k > 0, so no setting can double the tone curve back
-// on itself. And since k = base^contrast, contrast -50 is the exact inverse of
-// contrast +50.
-//
-// This replaced `mix(rgb, sigmoid(rgb), contrast)`, which failed all four: it
-// pivoted on linear 0.5 (sRGB 188, so adding contrast darkened most of the
-// frame), it could not reach black or white at +100 (0 → 19, 255 → 254), and
-// below contrast -67 it ran backwards, folding smooth gradients.
-fn contrast_curve(x: f32, k: f32) -> f32 {
-  // Outside the display range the curve is undefined (a power of a negative
-  // number); those tones are headroom and are clamped at the end anyway.
-  if (x <= 0.0 || x >= 1.0) { return x; }
-
-  if (x < TONE_PIVOT) {
-    return TONE_PIVOT * pow(x / TONE_PIVOT, k);
-  }
-  return 1.0 - (1.0 - TONE_PIVOT) * pow((1.0 - x) / (1.0 - TONE_PIVOT), k);
-}
-// ========================== (update both files together) ==========================
+//!include "chunks/luma.wgsl"
+//!include "chunks/tone.wgsl"
 
 // ---------- Vertex Shader ----------
 // Runs once per vertex (6 vertices = 2 triangles = full screen quad).

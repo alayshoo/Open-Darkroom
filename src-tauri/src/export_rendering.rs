@@ -16,16 +16,10 @@ use crate::color::{
     build_srgb_to_linear_lut_f32, linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL,
 };
 
-pub const CALC_PARAMS_WGSL: &str =
-    include_str!("../../src/lib/gpu/shaders/calcParams.wgsl");
-pub const DEVELOP_WGSL: &str =
-    include_str!("../../src/lib/gpu/shaders/develop.wgsl");
-pub const CALC_SHARP_TEXTURE_WGSL: &str =
-    include_str!("../../src/lib/gpu/shaders/calcSharpTexture.wgsl");
-pub const COMPOSITE_WGSL: &str =
-    include_str!("../../src/lib/gpu/shaders/composite.wgsl");
-pub const COLOR_SPACE_ENCODE_WGSL: &str =
-    include_str!("../../src/lib/gpu/shaders/colorSpaceEncode.wgsl");
+pub use crate::shaders::{
+    CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
+    DEVELOP_WGSL,
+};
 
 /// Format the render chain hands between its stages. Must match
 /// `WORKING_FORMAT` in `src/lib/types/gpuTypes.ts` — see the note there on why

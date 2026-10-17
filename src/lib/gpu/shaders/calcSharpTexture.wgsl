@@ -32,21 +32,7 @@
 // Clarity's kernel is an order of magnitude wider than texture's, so sharing one
 // would multiply the cost of the three narrow bands by that ratio for nothing.
 
-// Must match SharpParams in calcParams.wgsl and composite.wgsl
-struct SharpParams {
-    usm_amount:           f32,   //  0
-    usm_sigma:            f32,   //  4
-    usm_luma_threshold:   f32,   //  8
-    usm_detail_threshold: f32,   // 12
-    texture_amount:       f32,   // 16
-    texture_sigma_lo:     f32,   // 20
-    texture_sigma_hi:     f32,   // 24
-    clarity_amount:       f32,   // 28
-    clarity_sigma:        f32,   // 32
-    _pad0:                f32,   // 36
-    _pad1:                f32,   // 40
-    _pad2:                f32,   // 44
-}                                // total: 48 bytes
+//!include "chunks/sharpParams.wgsl"
 
 // The texture this pass blurs: the developed image for the horizontal pass, the
 // horizontal pass's own output for the vertical one.
@@ -57,8 +43,7 @@ struct SharpParams {
 @group(0) @binding(1) var developedTexture: texture_2d<f32>;
 @group(0) @binding(2) var<storage, read> sharp: SharpParams;
 
-// BT.709 luminance coefficients
-const LUMA = vec3f(0.2126, 0.7152, 0.0722);
+//!include "chunks/luma.wgsl"
 
 // A Gaussian is numerically dead past three standard deviations, so that is
 // where the kernel is truncated. This bound is what the widest sigma any band

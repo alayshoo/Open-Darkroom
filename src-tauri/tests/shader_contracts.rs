@@ -13,8 +13,8 @@ mod common;
 use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS};
 
 use open_darkroom_lib::export_rendering::{
-    CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COMPOSITE_WGSL, DEVELOP_WGSL, PARAMS_BYTES,
-    SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
+    CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
+    DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
 };
 use open_darkroom_lib::image_opening::OPEN_CANCELLED;
 
@@ -31,6 +31,16 @@ fn typescript_matches_the_cancelled_open_sentinel() {
         "openImage.ts does not declare OPEN_CANCELLED = {quoted}"
     );
 }
+
+/// Every shader the export path compiles, flattened by build.rs.
+const SHADERS: [(&str, &str); 6] = [
+    ("calcParams.wgsl", CALC_PARAMS_WGSL),
+    ("develop.wgsl", DEVELOP_WGSL),
+    ("calcSharpTexture.wgsl", CALC_SHARP_TEXTURE_WGSL),
+    ("composite.wgsl", COMPOSITE_WGSL),
+    ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
+    ("histogram.wgsl", HISTOGRAM_WGSL),
+];
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
 
@@ -304,24 +314,6 @@ fn rust_default_sliders_match_the_frontend_defaults() {
     }
 }
 
-// ── Params: identical in all three shaders ────────────────────────────────────
-
-#[test]
-fn params_struct_is_identical_across_every_shader() {
-    let from_calc = wgsl_struct(CALC_PARAMS_WGSL, "Params");
-    let from_develop = wgsl_struct(DEVELOP_WGSL, "Params");
-    let from_histogram = wgsl_struct(HISTOGRAM_WGSL, "Params");
-
-    assert_eq!(
-        from_calc, from_develop,
-        "Params drifted between calcParams.wgsl and develop.wgsl"
-    );
-    assert_eq!(
-        from_calc, from_histogram,
-        "Params drifted between calcParams.wgsl and histogram.wgsl"
-    );
-}
-
 #[test]
 fn params_struct_matches_the_declared_size() {
     let fields = wgsl_struct(CALC_PARAMS_WGSL, "Params");
@@ -330,26 +322,6 @@ fn params_struct_matches_the_declared_size() {
         struct_size(&fields),
         PARAMS_BYTES as usize,
         "PARAMS_BYTES disagrees with the WGSL Params struct: {fields:#?}"
-    );
-}
-
-/// SharpParams is written by calcParams.wgsl and read by the two shaders of the
-/// sharpness stage, so it is declared three times. It is kept apart from Params
-/// precisely so that neither struct has to carry fields its readers never touch —
-/// which only pays off while all three copies agree.
-#[test]
-fn sharp_params_struct_is_identical_across_every_shader() {
-    let from_calc = wgsl_struct(CALC_PARAMS_WGSL, "SharpParams");
-    let from_blur = wgsl_struct(CALC_SHARP_TEXTURE_WGSL, "SharpParams");
-    let from_composite = wgsl_struct(COMPOSITE_WGSL, "SharpParams");
-
-    assert_eq!(
-        from_calc, from_blur,
-        "SharpParams drifted between calcParams.wgsl and calcSharpTexture.wgsl"
-    );
-    assert_eq!(
-        from_calc, from_composite,
-        "SharpParams drifted between calcParams.wgsl and composite.wgsl"
     );
 }
 
@@ -436,18 +408,6 @@ fn develop_chain(source: &str, label: &str) -> Vec<String> {
     )
 }
 
-/// Pull the tone maths the two shaders both need — the transfer functions and the
-/// contrast curve. These live at module scope rather than inside the chain, so
-/// the chain comparison alone would not notice one copy drifting.
-fn tone_maths(source: &str, label: &str) -> Vec<String> {
-    wgsl_region(
-        source,
-        label,
-        "// ===================== Shared tone maths",
-        "// ========================== (update both files together) ==========================",
-    )
-}
-
 #[test]
 fn develop_and_histogram_apply_the_same_chain() {
     let develop = develop_chain(DEVELOP_WGSL, "develop.wgsl");
@@ -480,47 +440,56 @@ fn develop_and_histogram_apply_the_same_chain() {
     }
 }
 
-/// The chain calls into `encode_srgb`, `decode_srgb` and `contrast_curve`, and
-/// each shader carries its own copy. Identical call sites over different maths
-/// would be invisible to the test above.
+// ── The include resolver ──────────────────────────────────────────────────────
+
+/// Every shader reaching this test came through build.rs, so an unresolved
+/// directive means the resolver silently skipped one — and WGSL would see a
+/// comment where a declaration should be.
 #[test]
-fn develop_and_histogram_share_the_same_tone_maths() {
-    let develop = tone_maths(DEVELOP_WGSL, "develop.wgsl");
-    let histogram = tone_maths(HISTOGRAM_WGSL, "histogram.wgsl");
-
-    assert!(
-        develop.len() > 20,
-        "tone maths extraction looks wrong — only {} lines",
-        develop.len()
-    );
-
-    // The contrast pivot and its base decide the whole shape of the curve, so
-    // they are named here: a silent edit to either in one file only would change
-    // what the histogram claims about the image.
-    for needle in ["TONE_PIVOT", "CONTRAST_BASE", "fn contrast_curve", "fn encode_srgb"] {
+fn no_shader_still_carries_an_unresolved_include() {
+    for (label, source) in SHADERS {
         assert!(
-            develop.iter().any(|l| l.contains(needle)),
-            "the shared tone maths no longer defines {needle}"
+            !source.contains("//!include"),
+            "{label} still carries an unresolved include directive"
         );
     }
+}
 
-    if develop != histogram {
-        let mut report = String::from(
-            "develop.wgsl and histogram.wgsl no longer share the same tone maths.\n\
-             The histogram would describe an image the preview never renders.\n\n",
-        );
-        for (i, (d, h)) in develop.iter().zip(histogram.iter()).enumerate() {
-            if d != h {
-                report.push_str(&format!("line {i}:\n  develop:   {d}\n  histogram: {h}\n"));
+/// The tone maths used to live twice, guarded by a test comparing the copies.
+/// There is one copy now, so what needs proving is that the shaders that used
+/// to carry it still see it.
+#[test]
+fn the_shaders_that_need_the_tone_maths_get_it() {
+    for (label, source) in [("develop.wgsl", DEVELOP_WGSL), ("histogram.wgsl", HISTOGRAM_WGSL)] {
+        for needle in [
+            "TONE_PIVOT",
+            "CONTRAST_BASE",
+            "fn contrast_curve",
+            "fn encode_srgb",
+            "fn decode_srgb",
+            "const LUMA",
+        ] {
+            assert!(
+                source.contains(needle),
+                "{label} no longer sees {needle} — check its includes"
+            );
+        }
+    }
+}
+
+/// The structs are declared in a chunk and bound per shader, so a shader can
+/// lose the declaration while still naming the type.
+#[test]
+fn every_shader_that_binds_a_struct_also_declares_it() {
+    for (label, source) in SHADERS {
+        for name in ["Params", "SharpParams"] {
+            if !source.contains(&format!(": {name};")) {
+                continue;
             }
+            assert!(
+                source.contains(&format!("struct {name} {{")),
+                "{label} binds {name} without declaring it — check its includes"
+            );
         }
-        if develop.len() != histogram.len() {
-            report.push_str(&format!(
-                "\nlength differs: develop has {} lines, histogram has {}\n",
-                develop.len(),
-                histogram.len()
-            ));
-        }
-        panic!("{report}");
     }
 }

@@ -11,11 +11,7 @@
 // Output is premultiplied and transparent wherever no channel reaches, so the
 // panel's own background shows through exactly as it did behind the 2D canvas.
 
-const BINS_PER_CHANNEL: u32 = 256u;
-const BIN_TOTAL:        u32 = 768u;
-const R_BASE:           u32 = 0u;
-const G_BASE:           u32 = 256u;
-const B_BASE:           u32 = 512u;
+//!include "chunks/histogramBins.wgsl"
 
 @group(0) @binding(0) var<storage, read> bins:  array<u32, BIN_TOTAL>;
 @group(0) @binding(1) var<storage, read> scale: array<u32, 1>;

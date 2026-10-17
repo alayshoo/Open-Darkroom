@@ -14,9 +14,13 @@ import { playwright } from "@vitest/browser-playwright";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath } from "node:url";
 
+import { wgslInclude } from "./scripts/wgslInclude.js";
+
 const alias = {
   $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
 };
+
+const shaderRoot = fileURLToPath(new URL("./src/lib/gpu/shaders", import.meta.url));
 
 export default defineConfig({
   resolve: { alias },
@@ -39,7 +43,7 @@ export default defineConfig({
         // The pipelines report their timings into a runes-backed store, so the
         // `.svelte.ts` files they import have to be compiled rather than read
         // as plain TypeScript.
-        plugins: [svelte()],
+        plugins: [wgslInclude({ shaderRoot }), svelte()],
         test: {
           name: "browser",
           include: ["tests/browser/**/*.test.ts"],
