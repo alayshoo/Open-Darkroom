@@ -418,29 +418,33 @@
     debugStats.enabled = import.meta.env.DEV;
 
     const handleKeydown = createKeydownHandler({
-        undo: undo,
-        redo: redo,
-        movePage: movePage,
-        changeMode: handleModeToggle,
-        openImage: handleOpenImage,
-        copyAdjustments: handleCopyAdjustments,
-        pasteAdjustments: handlePasteAdjustments,
-        resetAdjustments: handleResetAdjustments,
-        // Both diagnostics hang off the settings master switch, so neither
-        // shortcut does anything until the debug tools are turned on.
-        toggleDebugStats: () => {
-            if (!settings.debugTools) return;
-            debugStats.enabled = !debugStats.enabled;
-            if (!debugStats.enabled) debugStats.clear();
+        handlers: {
+            pagePrev: () => movePage(false),
+            pageNext: () => movePage(true),
+            undo: undo,
+            redo: redo,
+            changeMode: handleModeToggle,
+            openImage: handleOpenImage,
+            copyAdjustments: handleCopyAdjustments,
+            pasteAdjustments: handlePasteAdjustments,
+            resetAdjustments: handleResetAdjustments,
+            // Both diagnostics hang off the settings master switch, so neither
+            // shortcut does anything until the debug tools are turned on.
+            toggleDebugStats: () => {
+                if (!settings.debugTools) return;
+                debugStats.enabled = !debugStats.enabled;
+                if (!debugStats.enabled) debugStats.clear();
+            },
+            toggleHistogram: () => {
+                if (!settings.debugTools) return;
+                debugStats.histogramEnabled = !debugStats.histogramEnabled;
+                // The point of stopping it is to read the difference, so start
+                // the comparison from a clean window rather than a mixed
+                // average.
+                debugStats.clear();
+            },
+            toggleSettings: () => settings.toggle(),
         },
-        toggleHistogram: () => {
-            if (!settings.debugTools) return;
-            debugStats.histogramEnabled = !debugStats.histogramEnabled;
-            // The point of stopping it is to read the difference, so start the
-            // comparison from a clean window rather than a mixed average.
-            debugStats.clear();
-        },
-        toggleSettings: () => settings.toggle(),
         closeSettings: () => settings.close(),
         isSettingsOpen: () => settings.open,
     });
@@ -455,7 +459,7 @@
     copyAdjustments={handleCopyAdjustments}
     pasteAdjustments={handlePasteAdjustments}
     resetAdjustments={handleResetAdjustments}
-    openSettings={() => settings.show()}
+    openSettings={(section) => settings.show(section)}
 ></TitleBar>
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and

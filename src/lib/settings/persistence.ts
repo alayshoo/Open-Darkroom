@@ -24,6 +24,12 @@ export const SETTINGS_FILE = "settings.json";
  */
 export const DEFAULTS = {
     debugTools: import.meta.env.DEV,
+    /**
+     * Rebound keyboard shortcuts, keyed by action id — only the actions the
+     * user has actually changed. The reader below can vouch for the type and
+     * no more, so shortcuts.svelte.ts checks the shape it gets back.
+     */
+    shortcuts: {} as Record<string, string[]>,
 };
 
 export type Persisted = typeof DEFAULTS;

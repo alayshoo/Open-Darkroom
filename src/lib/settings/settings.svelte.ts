@@ -19,7 +19,7 @@ class Settings {
     open = $state(false);
 
     /** Which section's panel is showing, by its id in the section registry. */
-    section = $state("debug");
+    section = $state("shortcuts");
 
     /**
      * Master switch for the diagnostic tools — the frame stats overlay and the

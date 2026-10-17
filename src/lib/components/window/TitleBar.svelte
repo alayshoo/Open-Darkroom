@@ -4,6 +4,7 @@
     import { onMount, onDestroy } from "svelte";
     import MenuButton from "./TitleBarMenuButton.svelte";
     import { settings } from "$lib/settings/settings.svelte";
+    import { shortcuts } from "$lib/settings/shortcuts.svelte";
 
     import "$lib/styles/palette.css";
 
@@ -18,7 +19,7 @@
         copyAdjustments = () => {},
         pasteAdjustments = () => {},
         resetAdjustments = () => {},
-        openSettings = () => {},
+        openSettings = (_section?: string) => {},
     }: {
         title?: string;
         editable?: boolean;
@@ -28,7 +29,7 @@
         copyAdjustments?: () => void;
         pasteAdjustments?: () => void;
         resetAdjustments?: () => void;
-        openSettings?: () => void;
+        openSettings?: (section?: string) => void;
     } = $props();
 
     let isMaximized = $state(false);
@@ -94,36 +95,48 @@
             <MenuButton
                 label="File"
                 items={[
-                    { label: "Open…", shortcut: "Ctrl+O", action: open },
+                    {
+                        label: "Open…",
+                        shortcut: shortcuts.display("openImage"),
+                        action: open,
+                    },
                     { separator: true },
                     { label: "Export…", shortcut: "Ctrl+Shift+E" },
                     { separator: true },
                     {
                         label: "Settings",
-                        shortcut: "Ctrl+,",
-                        action: openSettings,
+                        shortcut: shortcuts.display("toggleSettings"),
+                        action: () => openSettings(),
                     },
                 ]}
             />
             <MenuButton
                 label="Edit"
                 items={[
-                    { label: "Undo", shortcut: "Ctrl+Z", action: undo },
-                    { label: "Redo", shortcut: "Ctrl+Shift+Z", action: redo },
+                    {
+                        label: "Undo",
+                        shortcut: shortcuts.display("undo"),
+                        action: undo,
+                    },
+                    {
+                        label: "Redo",
+                        shortcut: shortcuts.display("redo"),
+                        action: redo,
+                    },
                     { separator: true },
                     {
                         label: "Copy Adjustments",
-                        shortcut: "Ctrl+C",
+                        shortcut: shortcuts.display("copyAdjustments"),
                         action: copyAdjustments,
                     },
                     {
                         label: "Paste Adjustments",
-                        shortcut: "Ctrl+V",
+                        shortcut: shortcuts.display("pasteAdjustments"),
                         action: pasteAdjustments,
                     },
                     {
                         label: "Reset Adjustments",
-                        shortcut: "Ctrl+Alt+R",
+                        shortcut: shortcuts.display("resetAdjustments"),
                         action: resetAdjustments,
                     },
                 ]}
@@ -132,7 +145,10 @@
                 label="Help"
                 items={[
                     { label: "Documentation" },
-                    { label: "Keyboard Shortcuts", shortcut: "Ctrl+/" },
+                    {
+                        label: "Keyboard Shortcuts",
+                        action: () => openSettings("shortcuts"),
+                    },
                     { separator: true },
                     { label: "Report a Bug…" },
                     { label: "About Open Darkroom" },
