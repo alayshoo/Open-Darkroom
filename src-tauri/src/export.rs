@@ -47,7 +47,7 @@ pub(crate) async fn export_image(
         ExportFormat::Tiff => ensure_extension(path, "tiff"),
     };
 
-    let (pixels_u16, width, height, channels) = {
+    let (pixels_u16, width, height, channels, space) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
         (
@@ -55,6 +55,7 @@ pub(crate) async fn export_image(
             img.width,
             img.height,
             img.channels,
+            img.space.clone(),
         )
     };
 
@@ -76,6 +77,7 @@ pub(crate) async fn export_image(
         height,
         channels,
         &sliders,
+        &space,
         bit_depth,
         move |progress| {
             let _ = progress_handle.emit("export:progress", progress);

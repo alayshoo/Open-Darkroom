@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const { openImage } = await import("$lib/utils/openImage");
 
 const HIST_BINS = 256;
-const HEADER = 24;
+const HEADER = 64;
 
 /** Open and assert a payload came back; the null path has its own test. */
 async function open(): Promise<ImagePayload> {
@@ -22,6 +22,9 @@ async function open(): Promise<ImagePayload> {
   if (!image) throw new Error("expected a payload, got a cancelled open");
   return image;
 }
+
+/** Column-major, as the backend sends it for a file already in the working space. */
+const IDENTITY_MATRIX = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 /** Build a payload exactly as `build_payload` does in image_opening.rs. */
 function payload(
@@ -32,6 +35,8 @@ function payload(
   full: [number, number] = [width, height],
   overview: [number, number] = [width, height],
   fillOverview: (i: number) => number = () => 0,
+  srcToWorking: number[] = IDENTITY_MATRIX,
+  baked = false,
 ): ArrayBuffer {
   const pixelBytes = width * height * 8;
   const overviewBytes = overview[0] * overview[1] * 8;
@@ -46,6 +51,8 @@ function payload(
   view.setUint32(12, full[1], true);
   view.setUint32(16, overview[0], true);
   view.setUint32(20, overview[1], true);
+  for (let i = 0; i < 9; i++) view.setFloat32(24 + i * 4, srcToWorking[i], true);
+  view.setUint32(60, baked ? 1 : 0, true);
 
   const pixels = new Uint8Array(buffer, HEADER, pixelBytes);
   for (let i = 0; i < pixelBytes; i++) pixels[i] = fillPixel(i);
@@ -181,4 +188,41 @@ describe("openImage", () => {
     expect(image.histR).toHaveLength(HIST_BINS);
   });
 
+});
+
+describe("the source colour space", () => {
+  beforeEach(() => invoke.mockReset());
+
+  it("reads the matrix in the order the backend wrote it", async () => {
+    // Deliberately asymmetric: a transposed read of a symmetric matrix is
+    // indistinguishable from a correct one.
+    const matrix = [0.6, 0.1, 0.02, 0.3, 0.9, 0.08, 0.04, 0.01, 0.95];
+    invoke.mockResolvedValue(
+      payload(2, 2, () => 0, 0, [2, 2], [2, 2], () => 0, matrix),
+    );
+
+    const got = await open();
+    expect(Array.from(got.srcToWorking)).toEqual(
+      matrix.map((v) => Math.fround(v)),
+    );
+    expect(got.colourBaked).toBe(false);
+  });
+
+  it("reads the baked flag", async () => {
+    invoke.mockResolvedValue(
+      payload(2, 2, () => 0, 0, [2, 2], [2, 2], () => 0, IDENTITY_MATRIX, true),
+    );
+
+    expect((await open()).colourBaked).toBe(true);
+  });
+
+  it("still finds the pixels after the enlarged header", async () => {
+    // The header grew from 24 to 64 bytes. Reading it at the old size puts the
+    // first pixel 40 bytes into the matrix, which looks like a plausible image.
+    invoke.mockResolvedValue(payload(2, 2, (i) => (i % 251) + 1));
+
+    const got = await open();
+    expect(got.pixels.byteOffset).toBe(64);
+    expect(got.pixels[0]).toBe(1);
+  });
 });

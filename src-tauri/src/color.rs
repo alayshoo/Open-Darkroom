@@ -18,8 +18,19 @@ pub const LINEAR_BYTES_PER_PIXEL: usize = 8;
 /// Bytes per pixel once linearised at full width: 4 channels × f32.
 pub const LINEAR_F32_BYTES_PER_PIXEL: usize = 16;
 
+/// The same table for all three channels.
+///
+/// The conversion functions below take one table per channel, because a profile
+/// may carry three different transfer curves. Most sources carry one.
+pub fn same_curve<T: Clone>(lut: &[T]) -> [Vec<T>; 3] {
+    std::array::from_fn(|_| lut.to_vec())
+}
+
 /// The sRGB electro-optical transfer function, over the unit interval.
-fn srgb_to_linear(s: f32) -> f32 {
+///
+/// The curve a file with no embedded profile is decoded with, and the fallback
+/// whenever a profile carries no usable curve of its own.
+pub fn srgb_to_linear(s: f32) -> f32 {
     if s <= 0.04045 {
         s / 12.92
     } else {
@@ -52,27 +63,6 @@ pub fn build_srgb_to_linear_lut_f32() -> Vec<f32> {
         .collect()
 }
 
-/// sRGB u16 → linear u16 lookup table.
-///
-/// The preview is resampled before it reaches the GPU, and resampling has to
-/// happen in linear light — see `prepare_image` for what averaging the encoding
-/// instead costs. `fast_image_resize` has no f16 pixel type, so linear u16 is
-/// the widest format both it and the RGBA16 buffer layout speak.
-///
-/// The quantisation that costs is confined to the preview and sits below
-/// anything visible. One linear u16 step is 1.5e-5, while the darkest tone an
-/// 8-bit source can carry — sRGB 1/255 — is linear 3.0e-4, twenty steps up. A
-/// true 16-bit source loses its bottom six code values of 65536. The export
-/// path never resamples and never reads this table.
-pub fn build_resample_lut() -> Vec<u16> {
-    (0..LUT_SIZE)
-        .map(|i| {
-            let linear = srgb_to_linear(i as f32 / (LUT_SIZE - 1) as f32);
-            (linear * (LUT_SIZE - 1) as f32).round() as u16
-        })
-        .collect()
-}
-
 /// Samples per pixel a source buffer may carry: RGB, or RGB with alpha.
 ///
 /// Images whose format declares no alpha channel are decoded and stored as three
@@ -87,15 +77,29 @@ fn assert_channels(channels: usize) {
     );
 }
 
-/// Gamma-decode interleaved u16 sRGB pixels into interleaved u16 *linear*
-/// pixels, ready to be resampled. The channel count is preserved.
+/// Decode interleaved u16 source pixels into interleaved u16 *linear* pixels,
+/// ready to be resampled. The channel count is preserved.
 ///
-/// Alpha carries no gamma encoding, so where present it is passed through
-/// untouched rather than sent through `lut`.
-pub fn srgb_to_linear_u16(src: &[u16], channels: usize, lut: &[u16]) -> Vec<u16> {
+/// The preview is resampled before it reaches the GPU, and resampling has to
+/// happen in linear light — see `prepare_image` for what averaging the encoding
+/// instead costs. `fast_image_resize` has no f16 pixel type, so linear u16 is
+/// the widest format both it and the RGBA16 buffer layout speak.
+///
+/// The quantisation that costs is confined to the preview and sits below
+/// anything visible. One linear u16 step is 1.5e-5, while the darkest tone an
+/// 8-bit source can carry — sRGB 1/255 — is linear 3.0e-4, twenty steps up. A
+/// true 16-bit source loses its bottom six code values of 65536. The export
+/// path never resamples and never takes this route.
+///
+/// Alpha carries no transfer encoding, so where present it is passed through
+/// untouched rather than sent through a curve.
+pub fn to_linear_u16(src: &[u16], channels: usize, luts: &[Vec<u16>; 3]) -> Vec<u16> {
     assert_channels(channels);
     debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
-    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+    debug_assert!(
+        luts.iter().all(|l| l.len() == LUT_SIZE),
+        "every curve must cover the full u16 domain"
+    );
 
     let mut out = vec![0u16; src.len()];
 
@@ -103,9 +107,9 @@ pub fn srgb_to_linear_u16(src: &[u16], channels: usize, lut: &[u16]) -> Vec<u16>
         .enumerate()
         .for_each(|(i, chunk)| {
             let s = i * channels;
-            chunk[0] = lut[src[s] as usize];
-            chunk[1] = lut[src[s + 1] as usize];
-            chunk[2] = lut[src[s + 2] as usize];
+            chunk[0] = luts[0][src[s] as usize];
+            chunk[1] = luts[1][src[s + 1] as usize];
+            chunk[2] = luts[2][src[s + 2] as usize];
             if channels == 4 {
                 chunk[3] = src[s + 3];
             }
@@ -155,10 +159,13 @@ pub fn linear_u16_to_f16_bytes(src: &[u16], channels: usize) -> Vec<u8> {
 ///
 /// `src.len()` is expected to be a multiple of `channels`; any trailing partial
 /// pixel is ignored.
-pub fn linearize_u16(src: &[u16], channels: usize, lut: &[f16]) -> Vec<u8> {
+pub fn linearize_u16(src: &[u16], channels: usize, luts: &[Vec<f16>; 3]) -> Vec<u8> {
     assert_channels(channels);
     debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
-    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+    debug_assert!(
+        luts.iter().all(|l| l.len() == LUT_SIZE),
+        "every curve must cover the full u16 domain"
+    );
 
     let pixel_count = src.len() / channels;
     let mut out = vec![0u8; pixel_count * LINEAR_BYTES_PER_PIXEL];
@@ -167,9 +174,9 @@ pub fn linearize_u16(src: &[u16], channels: usize, lut: &[f16]) -> Vec<u8> {
         .enumerate()
         .for_each(|(i, chunk)| {
             let s = i * channels;
-            let r = lut[src[s] as usize];
-            let g = lut[src[s + 1] as usize];
-            let b = lut[src[s + 2] as usize];
+            let r = luts[0][src[s] as usize];
+            let g = luts[1][src[s + 1] as usize];
+            let b = luts[2][src[s + 2] as usize];
             let a = if channels == 4 {
                 f16::from_f32(src[s + 3] as f32 / (LUT_SIZE - 1) as f32)
             } else {
@@ -192,10 +199,13 @@ pub fn linearize_u16(src: &[u16], channels: usize, lut: &[f16]) -> Vec<u8> {
 /// while one 16-bit sRGB code near white is 3.5e-5 apart, so an f16 upload
 /// collapses runs of about seventeen adjacent input codes onto one value —
 /// visible as banding once the render is written back out at 16 bits.
-pub fn linearize_u16_f32(src: &[u16], channels: usize, lut: &[f32]) -> Vec<u8> {
+pub fn linearize_u16_f32(src: &[u16], channels: usize, luts: &[Vec<f32>; 3]) -> Vec<u8> {
     assert_channels(channels);
     debug_assert_eq!(src.len() % channels, 0, "input must be whole pixels");
-    debug_assert_eq!(lut.len(), LUT_SIZE, "lut must cover the full u16 domain");
+    debug_assert!(
+        luts.iter().all(|l| l.len() == LUT_SIZE),
+        "every curve must cover the full u16 domain"
+    );
 
     let pixel_count = src.len() / channels;
     let mut out = vec![0u8; pixel_count * LINEAR_F32_BYTES_PER_PIXEL];
@@ -210,9 +220,9 @@ pub fn linearize_u16_f32(src: &[u16], channels: usize, lut: &[f32]) -> Vec<u8> {
                 1.0
             };
             let rgba = [
-                lut[src[s] as usize],
-                lut[src[s + 1] as usize],
-                lut[src[s + 2] as usize],
+                luts[0][src[s] as usize],
+                luts[1][src[s + 1] as usize],
+                luts[2][src[s + 2] as usize],
                 a,
             ];
             for (c, v) in rgba.iter().enumerate() {

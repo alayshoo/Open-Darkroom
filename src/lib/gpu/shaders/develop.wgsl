@@ -14,6 +14,7 @@
 
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
+//!include "chunks/outputTransform.wgsl"
 
 // ---------- Vertex Shader ----------
 // Runs once per vertex (6 vertices = 2 triangles = full screen quad).
@@ -82,7 +83,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   // remap is the order a Levels dialog and a scanner both use.
   rgb = rgb * params.out_scale + params.out_black;
 
-  // 4. White balance (Bradford CAT, pre-computed on CPU)
+  // 4. Source → working space, composed with white balance (Bradford CAT).
+  //
+  // This is the line the darkroom block ends at. Above it the channels are the
+  // file's own, which is what lets steps 1-3 address the film's three dye layers
+  // separately; below it they are the working space's. calcParams folds the two
+  // matrices into one because both are linear and run back to back.
   rgb = params.wb_matrix * rgb;
 
   // 5. Exposure — a stop is a multiplication of light, so it stays linear
@@ -155,8 +161,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   // saturation enough to put a 1.62x boost on an already-saturated pixel.
   let vib_rgb = max(rgb, vec3f(0.0));
   let luma_vib = dot(vib_rgb, LUMA);
-  let maxC = max(vib_rgb.r, max(vib_rgb.g, vib_rgb.b));
-  let minC = min(vib_rgb.r, min(vib_rgb.g, vib_rgb.b));
+
+  // Saturation is measured in the destination space, not the working one: it
+  // asks how colourful the pixel looks, and the working space is wider than
+  // anything it will be shown in. Measured in Rec.2020 the vivid colours lose
+  // the most, enough to boost a vivid red harder than a muted one. Only the
+  // measurement moves; the boost still happens in the working space.
+  let seen = max(M_WORKING_TO_DESTINATION * vib_rgb, vec3f(0.0));
+  let maxC = max(seen.r, max(seen.g, seen.b));
+  let minC = min(seen.r, min(seen.g, seen.b));
   let pixelSat = (maxC - minC) / max(maxC, 1e-4);
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);

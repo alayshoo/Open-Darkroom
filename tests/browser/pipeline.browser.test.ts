@@ -35,6 +35,7 @@ import {
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
 import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
+import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -192,6 +193,7 @@ async function develop(
   ]);
 
   calcParams.updateSliders(sliders);
+  calcParams.updateSourceSpace(SRGB_TO_WORKING);
   if (renderScale !== undefined) calcParams.updateView(renderScale, FULL_WIDTH, FULL_HEIGHT);
 
   const encoder = gpu.device.createCommandEncoder();
@@ -286,6 +288,7 @@ async function histogram(
 ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array; scale: number }> {
   const pipeline = createHistogramPipeline(gpu);
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
+  pipeline.setSourceSpace(SRGB_TO_WORKING);
   try {
     // No target: the app draws the curves from the bins on the GPU, but what is
     // under test here is the binning, so this stops at the buffer.

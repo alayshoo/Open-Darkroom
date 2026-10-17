@@ -12,9 +12,8 @@
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
-use crate::color::{
-    build_srgb_to_linear_lut_f32, linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL,
-};
+use crate::color::{linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL};
+use crate::icc::SourceSpace;
 
 pub use crate::shaders::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
@@ -42,6 +41,10 @@ pub const SHARP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 /// Size of the `SharpParams` struct written by calcParams.wgsl and read by
 /// calcSharpTexture.wgsl / composite.wgsl.
 pub const SHARP_PARAMS_BYTES: u64 = 48;
+
+/// Size of the `SourceSpace` uniform read by calcParams.wgsl: one
+/// `mat3x3<f32>`, three 16-byte columns.
+pub const SOURCE_SPACE_BYTES: u64 = 48;
 
 /// Smallest sigma the blur kernel is given, and the widest radius it can ask
 /// for. Both mirror `MIN_SIGMA` in calcParams.wgsl and `MAX_RADIUS` in
@@ -279,6 +282,22 @@ impl Default for ViewPayload {
 }
 
 /// Pack the view into the uniform buffer matching the WGSL `View` struct.
+/// Pack the source → working-space matrix into the `SourceSpace` uniform.
+///
+/// A WGSL `mat3x3<f32>` is three 16-byte columns, not nine packed floats: each
+/// column is padded to a vec4. Writing it tightly puts the second column four
+/// bytes early and silently skews every colour.
+pub fn source_space_to_bytes(space: &SourceSpace) -> [u8; SOURCE_SPACE_BYTES as usize] {
+    let mut bytes = [0u8; SOURCE_SPACE_BYTES as usize];
+    for col in 0..3 {
+        for row in 0..3 {
+            let at = col * 16 + row * 4;
+            bytes[at..at + 4].copy_from_slice(&space.to_working[col * 3 + row].to_le_bytes());
+        }
+    }
+    bytes
+}
+
 pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
     let mut bytes = [0u8; VIEW_BYTES];
     bytes[0..4].copy_from_slice(&v.render_scale.to_le_bytes());
@@ -292,12 +311,14 @@ pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
 ///
 /// See [`render_image_with_chunk_rows`]; this uses the default [`CHUNK_ROWS`].
+#[allow(clippy::too_many_arguments)]
 pub async fn render_image(
     pixels_u16: &[u16],
     width: u32,
     height: u32,
     channels: usize,
     sliders: &SlidersPayload,
+    space: &SourceSpace,
     bit_depth: u8,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
@@ -307,6 +328,7 @@ pub async fn render_image(
         height,
         channels,
         sliders,
+        space,
         bit_depth,
         chunk_rows_for_margin(sharp_margin_rows(sliders, width, height)),
         on_progress,
@@ -335,10 +357,16 @@ pub async fn render_image_with_chunk_rows(
     height: u32,
     channels: usize,
     sliders: &SlidersPayload,
+    space: &SourceSpace,
     bit_depth: u8,
     chunk_rows: u32,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
+    // A profile the GPU cannot be handed as a matrix is applied here instead,
+    // over the whole buffer rather than per chunk: the conversion is per pixel,
+    // so splitting it would only multiply the lcms2 transforms.
+    let baked = space.bake(pixels_u16, channels);
+    let pixels_u16: &[u16] = baked.as_deref().unwrap_or(pixels_u16);
     let t = Instant::now();
 
     // ── 0. Validate inputs ────────────────────────────────────────────────────
@@ -417,6 +445,12 @@ pub async fn render_image_with_chunk_rows(
         source: wgpu::ShaderSource::Wgsl(CALC_PARAMS_WGSL.into()),
     });
 
+    let source_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("source_buf"),
+        contents: &source_space_to_bytes(space),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let calc_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("calc_bgl"),
         entries: &[
@@ -455,6 +489,16 @@ pub async fn render_image_with_chunk_rows(
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -507,6 +551,10 @@ pub async fn render_image_with_chunk_rows(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: view_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: source_buf.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -748,7 +796,7 @@ pub async fn render_image_with_chunk_rows(
 
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
-    let lut = build_srgb_to_linear_lut_f32();
+    let luts = space.luts(|v| v);
     let total_pixels = (width * height) as usize;
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
@@ -790,7 +838,7 @@ pub async fn render_image_with_chunk_rows(
 
         let src_u16 =
             &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels];
-        let chunk_bytes = linearize_u16_f32(src_u16, channels, &lut);
+        let chunk_bytes = linearize_u16_f32(src_u16, channels, &luts);
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),

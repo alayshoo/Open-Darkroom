@@ -8,12 +8,13 @@ use std::time::Instant;
 use tauri::ipc::Response;
 use tauri_plugin_dialog::DialogExt;
 
-use image::{ImageBuffer, Rgba};
+use half::f16;
+use image::{ImageBuffer, ImageDecoder, Rgba};
 
 use crate::color::{
-    build_resample_lut, build_srgb_to_linear_lut_u16, linear_u16_to_f16_bytes, linearize_u16,
-    srgb_to_linear_u16, LINEAR_BYTES_PER_PIXEL,
+    linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
 };
+use crate::icc::{Matrix3, SourceSpace};
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
@@ -43,11 +44,11 @@ pub const HIST_BINS: usize = 256;
 /// finer would cost more in carrying the 3 KB of counters around than it saves.
 const HIST_BLOCK_PIXELS: usize = 1 << 16;
 
-/// Bytes preceding the pixel data in the frontend payload: preview width and
-/// height, full-resolution width and height, then overview width and height,
-/// u32 LE. The full dimensions are what anchors a slider specified in image
-/// pixels to a downscaled preview.
-pub const PAYLOAD_HEADER_BYTES: usize = 24;
+/// Bytes preceding the pixel data in the frontend payload: the six dimensions
+/// as u32 LE, the source → working-space matrix as 9 f32 LE, then a flags word.
+/// The full dimensions are what anchors a slider specified in image pixels to a
+/// downscaled preview.
+pub const PAYLOAD_HEADER_BYTES: usize = 64;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,10 @@ pub struct OriginalImage {
     /// it did. Sources without alpha are stored three-wide, which is a quarter
     /// less memory held for as long as the image is open.
     pub channels: usize,
+    /// What the file said its numbers mean. Held for the life of the image
+    /// because export has to decode the same buffer the same way, at its own
+    /// table width.
+    pub space: SourceSpace,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -87,6 +92,12 @@ pub struct PreparedImage {
     pub full_width: u32,
     pub full_height: u32,
     pub histograms: Histograms,
+    /// Source RGB → linear Rec.2020, for the GPU to apply after the darkroom
+    /// block. Identity when the conversion was baked in below.
+    pub to_working: Matrix3,
+    /// Set when the profile had to be applied on the CPU, so the darkroom block
+    /// runs in the working space rather than the source's own primaries.
+    pub baked: bool,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -247,7 +258,18 @@ pub fn prepare_image(
     full_width: u32,
     full_height: u32,
     channels: usize,
+    space: &SourceSpace,
 ) -> PreparedImage {
+    // Histograms describe what is in the file, so they are binned off the
+    // source code values before any conversion touches them.
+    let histograms = compute_histograms(src, channels);
+
+    // A profile that could not be split into curves and a matrix is applied
+    // here in full. There are no separable channels for the darkroom block to
+    // address in that case, so nothing is lost by converting early — every
+    // other source keeps its own primaries until the GPU has run that block.
+    let baked = space.bake(src, channels);
+    let src: &[u16] = baked.as_deref().unwrap_or(src);
     // Resampling happens in linear light, so the image is gamma-decoded before
     // it is downscaled rather than after.
     //
@@ -269,7 +291,10 @@ pub fn prepare_image(
     let long_edge = full_width.max(full_height);
     let resampled = long_edge > PREVIEW_MAX_EDGE
         || full_width as u64 * full_height as u64 > OVERVIEW_TARGET_PIXELS as u64;
-    let linear = resampled.then(|| srgb_to_linear_u16(src, channels, &build_resample_lut()));
+    let linear = resampled.then(|| {
+        let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
+        to_linear_u16(src, channels, &luts)
+    });
 
     let (preview_width, preview_height, preview_pixels) = match &linear {
         Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
@@ -278,8 +303,8 @@ pub fn prepare_image(
             (w, h, linear_u16_to_f16_bytes(&preview, channels))
         }
         _ => {
-            let lut = build_srgb_to_linear_lut_u16();
-            (full_width, full_height, linearize_u16(src, channels, &lut))
+            let luts = space.luts(f16::from_f32);
+            (full_width, full_height, linearize_u16(src, channels, &luts))
         }
     };
 
@@ -300,9 +325,6 @@ pub fn prepare_image(
         None => (preview_width, preview_height, preview_pixels.clone()),
     };
 
-    // Histograms come from the full-resolution image, not the preview.
-    let histograms = compute_histograms(src, channels);
-
     PreparedImage {
         preview_pixels,
         preview_width,
@@ -313,6 +335,8 @@ pub fn prepare_image(
         full_width,
         full_height,
         histograms,
+        to_working: space.to_working,
+        baked: space.baked,
     }
 }
 
@@ -326,7 +350,9 @@ pub fn prepare_image(
 /// | 12     | 4             | full height, u32 LE               |
 /// | 16     | 4             | overview width, u32 LE            |
 /// | 20     | 4             | overview height, u32 LE           |
-/// | 24     | w × h × 8     | RGBA f16 LE preview pixels        |
+/// | 24     | 36            | source → working matrix, 9 f32 LE |
+/// | 60     | 4             | flags, u32 LE: bit 0 = baked      |
+/// | 64     | w × h × 8     | RGBA f16 LE preview pixels        |
 /// | …      | ow × oh × 8   | RGBA f16 LE overview pixels       |
 /// | …      | 3 × 256 × 4   | R, G, B histogram bins, u32 LE    |
 pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
@@ -344,6 +370,10 @@ pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
     payload.extend_from_slice(&prepared.full_height.to_le_bytes());
     payload.extend_from_slice(&prepared.overview_width.to_le_bytes());
     payload.extend_from_slice(&prepared.overview_height.to_le_bytes());
+    for v in prepared.to_working {
+        payload.extend_from_slice(&v.to_le_bytes());
+    }
+    payload.extend_from_slice(&u32::from(prepared.baked).to_le_bytes());
     payload.extend_from_slice(&prepared.preview_pixels);
     payload.extend_from_slice(&prepared.overview_pixels);
 
@@ -406,7 +436,19 @@ pub(crate) async fn open_image_file(
 
     let overall_start = Instant::now();
 
-    let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
+    let open_err = |e: image::ImageError| format!("Failed to open image: {e}");
+    let mut decoder = image::ImageReader::open(&path)
+        .map_err(|e| format!("Failed to open image: {e}"))?
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to open image: {e}"))?
+        .into_decoder()
+        .map_err(open_err)?;
+
+    // The profile has to come off the decoder before building the image
+    // consumes it. No profile means sRGB, which is what an untagged file means
+    // in practice and what every file was assumed to be before this.
+    let space = SourceSpace::resolve(decoder.icc_profile().ok().flatten());
+    let img = image::DynamicImage::from_decoder(decoder).map_err(open_err)?;
 
     let (full_width, full_height) = (img.width(), img.height());
 
@@ -419,7 +461,7 @@ pub(crate) async fn open_image_file(
         (img.into_rgb16().into_raw(), 3)
     };
 
-    let prepared = prepare_image(&samples, full_width, full_height, channels);
+    let prepared = prepare_image(&samples, full_width, full_height, channels, &space);
 
     // Store the original full-resolution image for export. This happens after
     // `prepare_image` so the buffer can be moved into the state rather than
@@ -431,15 +473,18 @@ pub(crate) async fn open_image_file(
             width: full_width,
             height: full_height,
             channels,
+            space,
         });
     }
 
     let payload = build_payload(&prepared);
 
     println!(
-        "open_image_file: total backend time = {} ms, payload size = {} bytes",
+        "open_image_file: total backend time = {} ms, payload size = {} bytes, \
+         colour converted on {}",
         overall_start.elapsed().as_millis(),
-        payload.len()
+        payload.len(),
+        if prepared.baked { "CPU" } else { "GPU" }
     );
 
     Ok(Response::new(payload))

@@ -14,10 +14,12 @@ use std::sync::OnceLock;
 use image::{ImageBuffer, Rgba};
 use wgpu::util::DeviceExt;
 
-use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16};
+use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, same_curve};
+use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::export_rendering::{
     render_image, sliders_to_bytes, view_to_bytes, SlidersPayload, ViewPayload, PARAMS_BYTES,
     SHARP_PARAMS_BYTES,
+    source_space_to_bytes,
 };
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 
@@ -32,6 +34,7 @@ pub const CALC_PARAMS_PIPELINE_TS: &str =
 pub const IMG_PARAMETERS_TS: &str = include_str!("../../../src/lib/types/imgParameters.ts");
 pub const EXPORT_RENDERING_RS: &str = include_str!("../../src/export_rendering.rs");
 pub const OPEN_IMAGE_TS: &str = include_str!("../../../src/lib/utils/openImage.ts");
+pub const WORKING_SPACE_TS: &str = include_str!("../../../src/lib/gpu/workingSpace.ts");
 
 // ── Reference colour maths ────────────────────────────────────────────────────
 //
@@ -196,14 +199,23 @@ pub fn mixed_ramp(width: u32) -> Rgba16Image {
 /// Render `img` with `sliders` at 8 bits and return the RGB bytes.
 pub fn develop(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 8, |_| {}))
+    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, &SourceSpace::default(), 8, |_| {}))
         .expect("render should succeed")
 }
 
 /// Render `img` with `sliders` at 16 bits, returning one u16 per channel.
 pub fn develop16(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u16> {
     let (w, h) = img.dimensions();
-    let bytes = pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 16, |_| {}))
+    let bytes = pollster::block_on(render_image(
+        img.as_raw(),
+        w,
+        h,
+        4,
+        sliders,
+        &SourceSpace::default(),
+        16,
+        |_| {},
+    ))
         .expect("render should succeed");
     bytes
         .chunks_exact(2)
@@ -368,6 +380,17 @@ fn calc_params_buffer(sliders: &SlidersPayload, extra_usage: wgpu::BufferUsages)
     calc_buffers(sliders, &ViewPayload::default(), extra_usage).0
 }
 
+/// Run calcParams.wgsl with a chosen source space and read the `Params` back.
+pub fn run_calc_params_with_space(sliders: &SlidersPayload, space: &SourceSpace) -> Params {
+    read_params(calc_buffers_in(
+        sliders,
+        &ViewPayload::default(),
+        space,
+        wgpu::BufferUsages::COPY_SRC,
+    )
+    .0)
+}
+
 /// Run calcParams.wgsl for `sliders` at `view`, returning both the `Params` and
 /// the `SharpParams` buffers it writes.
 fn calc_buffers(
@@ -375,11 +398,29 @@ fn calc_buffers(
     view: &ViewPayload,
     extra_usage: wgpu::BufferUsages,
 ) -> (wgpu::Buffer, wgpu::Buffer) {
+    calc_buffers_in(sliders, view, &SourceSpace::default(), extra_usage)
+}
+
+fn calc_buffers_in(
+    sliders: &SlidersPayload,
+    view: &ViewPayload,
+    space: &SourceSpace,
+    extra_usage: wgpu::BufferUsages,
+) -> (wgpu::Buffer, wgpu::Buffer) {
     let (device, queue) = device();
 
     let slider_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("test_slider_buf"),
         contents: &sliders_to_bytes(sliders),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    // The fixtures are sRGB images uploaded through the sRGB curve, so the
+    // default source space — sRGB primaries into the working space — is what
+    // makes the chain mean what these tests assert about it.
+    let source_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("test_source_buf"),
+        contents: &source_space_to_bytes(space),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -438,6 +479,10 @@ fn calc_buffers(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: sharp_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: source_buf.as_entire_binding(),
             },
         ],
     });
@@ -518,9 +563,11 @@ pub fn run_calc_sharp(
 
 /// Run calcParams.wgsl and read the resulting `Params` struct back.
 pub fn run_calc_params(sliders: &SlidersPayload) -> Params {
-    let (device, queue) = device();
+    read_params(calc_params_buffer(sliders, wgpu::BufferUsages::COPY_SRC))
+}
 
-    let params_buf = calc_params_buffer(sliders, wgpu::BufferUsages::COPY_SRC);
+fn read_params(params_buf: wgpu::Buffer) -> Params {
+    let (device, queue) = device();
 
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("test_params_staging"),
@@ -557,7 +604,7 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
 
     // Upload the image exactly the way the preview path does.
     let lut = build_srgb_to_linear_lut_u16();
-    let linear = linearize_u16(img.as_raw(), 4, &lut);
+    let linear = linearize_u16(img.as_raw(), 4, &same_curve(&lut));
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("test_hist_tex"),

@@ -188,6 +188,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     // ── Public API ───────────────────────────────────────────────────
 
+    function setSourceSpace(srcToWorking: Float32Array) {
+        calcParams.updateSourceSpace(srcToWorking);
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
@@ -318,5 +322,5 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         staging?.destroy();
     }
 
-    return { render, readBins, destroy };
+    return { setSourceSpace, render, readBins, destroy };
 }

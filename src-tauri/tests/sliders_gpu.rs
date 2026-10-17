@@ -15,6 +15,16 @@
 
 mod common;
 
+/// Linear Rec.2020 → linear sRGB, column-major. Must match
+/// M_WORKING_TO_DESTINATION in src/lib/gpu/shaders/chunks/outputTransform.wgsl;
+/// `a_neutral_render_round_trips_through_the_working_space` in export_gpu.rs is
+/// what fails if the shader's copy moves.
+const WORKING_TO_SRGB: [f64; 9] = [
+    1.6604910, -0.1245505, -0.0181508,
+    -0.5876411, 1.1328999, -0.1005789,
+    -0.0728499, -0.0083494, 1.1187297,
+];
+
 use common::{
     develop, develop_patch, develop_patches, gray_ramp, linear_to_srgb, mixed_ramp, srgb_to_linear,
     through_linear, u8_to_u16,
@@ -400,14 +410,30 @@ fn tint_moves_green_against_the_slider() {
         );
 
         let factor = 2f64.powf(-tint as f64 / 100.0);
-        // luma of the transformed white, which is what calcParams divides by.
-        let norm = 1.0 / (0.2126 + 0.7152 * factor + 0.0722);
+        // Luma of the transformed white, which is what calcParams divides by.
+        // BT.2020's weights, because the normalisation happens in the working
+        // space — using BT.709's here would silently predict the wrong
+        // brightness and call a correct render a failure.
+        let norm = 1.0 / (0.2627002 + 0.6779981 * factor + 0.0593017);
         let lin = srgb_to_linear(160.0 / 255.0);
         let encode =
             |l: f64| (linear_to_srgb(l.clamp(0.0, 1.0)) * 255.0).round() as u8;
 
-        let want_green = encode(lin * factor * norm);
-        let want_other = encode(lin * norm);
+        // A neutral enters the working space unchanged — white maps to white —
+        // so tint acts on (lin, lin, lin) there. What comes back out is no
+        // longer neutral, so the output transform mixes the channels and the
+        // prediction has to mix them too.
+        let working = [lin * norm, lin * factor * norm, lin * norm];
+        let dst: Vec<u8> = (0..3)
+            .map(|row| {
+                encode(
+                    (0..3)
+                        .map(|col| WORKING_TO_SRGB[col * 3 + row] * working[col])
+                        .sum(),
+                )
+            })
+            .collect();
+        let (want_other, want_green) = (dst[0], dst[1]);
 
         assert!(
             close(got[1], want_green),
@@ -415,8 +441,18 @@ fn tint_moves_green_against_the_slider() {
             got[1]
         );
         assert!(
-            close(got[0], want_other) && close(got[2], want_other),
-            "tint {tint} should move red and blue together to ~{want_other}, got {got:?}"
+            close(got[2], dst[2]),
+            "tint {tint} ({label}) should put blue at ~{}, got {} ({got:?})",
+            dst[2],
+            got[2]
+        );
+        // Red and blue no longer move together: tint scales green in the
+        // working space, and the gamut matrix mixes that change back into the
+        // other two by different amounts.
+        assert!(
+            close(got[0], want_other),
+            "tint {tint} ({label}) should put red at ~{want_other}, got {} ({got:?})",
+            got[0]
         );
         // The cast itself: positive tint pushes green down relative to the rest.
         if tint > 0.0 {
@@ -1290,22 +1326,57 @@ fn vibrance_does_not_resurrect_crushed_shadows() {
 
 // ── Hue ───────────────────────────────────────────────────────────────────────
 
-/// The rotation is about the (1,1,1) axis, so 120° is an exact permutation of
-/// the primaries. That makes it the one hue angle with a closed-form answer.
+/// The rotation is about the (1,1,1) axis, which is the neutral axis of
+/// whichever space it runs in — the working space, not the file's. So 120° is
+/// an exact permutation of the *working* primaries and no longer of the file's:
+/// an sRGB red comes back a blue that is not the file's blue. That is the price
+/// of a working space wider than the destination, not a fault in the rotation.
+///
+/// What survives in any basis is the geometry, and it is what a wrong axis or a
+/// flipped sign would break: a full turn is the identity, a neutral has no hue
+/// to move, and +120 carries red towards blue while -120 carries it towards
+/// green.
 #[test]
-fn a_hundred_and_twenty_degrees_permutes_the_primaries() {
+fn hue_rotates_about_the_neutral_axis() {
     let red = [220u8, 40, 40];
-    let sliders = SlidersPayload {
-        hue: 120.0,
-        ..defaults()
+    let at = |deg: f32| {
+        develop_patch(
+            red,
+            &SlidersPayload {
+                hue: deg,
+                ..defaults()
+            },
+        )
     };
 
-    let got = develop_patch(red, &sliders);
-    let want = [red[1], red[2], red[0]]; // R→B, G→R, B→G
-
+    let (full, none) = (at(360.0), at(0.0));
     assert!(
-        (0..3).all(|c| close(got[c], want[c])),
-        "hue +120 on {red:?}: expected a channel rotation to {want:?}, got {got:?}"
+        (0..3).all(|c| close(full[c], none[c])),
+        "a full turn should be the identity: {full:?} vs {none:?}"
+    );
+
+    let grey = develop_patch(
+        [128; 3],
+        &SlidersPayload {
+            hue: 120.0,
+            ..defaults()
+        },
+    );
+    let grey_plain = develop_patch([128; 3], &defaults());
+    assert!(
+        (0..3).all(|c| close(grey[c], grey_plain[c])),
+        "a neutral has no hue to rotate: {grey:?} vs {grey_plain:?}"
+    );
+
+    let plus = at(120.0);
+    assert!(
+        plus[2] > plus[0] && plus[2] > plus[1],
+        "hue +120 on a red should land in blue, got {plus:?}"
+    );
+    let minus = at(-120.0);
+    assert!(
+        minus[1] > minus[0] && minus[1] > minus[2],
+        "hue -120 on a red should land in green, got {minus:?}"
     );
 }
 

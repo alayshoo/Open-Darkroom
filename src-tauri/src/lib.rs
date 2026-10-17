@@ -3,6 +3,7 @@
 // Modules are public so the integration tests in `tests/` can drive the
 // pipeline directly, without a running Tauri app.
 pub mod color;
+pub mod icc;
 pub mod image_opening;
 pub mod export_rendering;
 pub mod shaders;

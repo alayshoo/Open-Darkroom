@@ -17,18 +17,30 @@
 
 mod common;
 
-use common::{device, read_buffer};
+use common::{device, read_buffer, run_calc_params_with_space};
+use open_darkroom_lib::icc::{SourceSpace, IDENTITY};
 
-use open_darkroom_lib::export_rendering::{CALC_PARAMS_WGSL, PARAMS_BYTES, SLIDERS_BYTES};
+use open_darkroom_lib::export_rendering::{
+    SlidersPayload, CALC_PARAMS_WGSL, PARAMS_BYTES, SLIDERS_BYTES,
+};
 use wgpu::util::DeviceExt;
 
 // ── Published reference values ────────────────────────────────────────────────
 
-/// CIE 1931 XYZ of the D65 white point, the illuminant sRGB is defined against.
-const D65_XYZ: [f64; 3] = [0.95047, 1.00000, 1.08883];
+/// CIE 1931 XYZ of the D65 white point, the illuminant the working space is
+/// defined against, derived from the chromaticity BT.2020 specifies:
+/// x = 0.3127, y = 0.3290, so X = x/y and Z = (1 - x - y)/y.
+///
+/// Deliberately not the [0.95047, 1.0, 1.08883] that the published sRGB matrix
+/// sums to. That triple is the measured D65 tristimulus, which sits 2.3e-4 away
+/// in Z from the rounded chromaticity the standards actually define the
+/// primaries against. Either is "D65"; mixing them silently tilts every matrix
+/// derived from one against a test written for the other.
+const D65_XYZ: [f64; 3] = [0.9504559, 1.00000, 1.0890578];
 
-/// ITU-R BT.709 luminance coefficients.
-const BT709: [f64; 3] = [0.2126, 0.7152, 0.0722];
+/// ITU-R BT.2020 luminance coefficients. The working space is linear Rec.2020,
+/// so these — not BT.709's — are what the shader's weights have to match.
+const BT2020: [f64; 3] = [0.2627, 0.6780, 0.0593];
 
 /// Tabulated chromaticities of a Planckian (blackbody) radiator under the CIE
 /// 1931 2° observer. 2856 K is CIE standard illuminant A.
@@ -282,9 +294,9 @@ fn the_xyz_and_rgb_matrices_are_a_true_inverse_pair() {
     assert_identity("M_XYZ_TO_RGB · M_RGB_TO_XYZ", &out[3..6]);
 }
 
-/// sRGB is defined against D65: its primaries must sum to that white point.
-/// This is what identifies `M_RGB_TO_XYZ` as the sRGB matrix rather than some
-/// other RGB space's, which the round-trip test above cannot tell apart.
+/// Rec.2020 is defined against D65: its primaries must sum to that white point.
+/// This is what identifies `M_RGB_TO_XYZ` as a D65 matrix rather than some
+/// D50 space's, which the round-trip test above cannot tell apart.
 #[test]
 fn the_rgb_to_xyz_matrix_maps_white_to_d65() {
     let white = run_probe("probe_matrices", &[], 9)[6];
@@ -297,28 +309,74 @@ fn the_rgb_to_xyz_matrix_maps_white_to_d65() {
     }
 }
 
-/// The Y row of the sRGB matrix *is* the BT.709 luminance vector, and the
+/// The Y row of the working-space matrix *is* its luminance vector, and the
 /// shader also keeps it as three separate constants for the saturation and
-/// white-balance maths. Both must agree with the standard, and with each other.
+/// white-balance maths. Both must agree with the standard, and with each other
+/// — the white-balance normalisation divides by the luma of a transformed
+/// neutral, which is only brightness-preserving because these sum to 1.
 #[test]
-fn the_luminance_coefficients_are_bt709() {
+fn the_luminance_coefficients_are_bt2020() {
     let out = run_probe("probe_matrices", &[], 9);
     let (y_row, constants) = (out[7], out[8]);
 
     for i in 0..3 {
         // The matrix carries seven decimals where BT.709 publishes four.
         assert!(
-            (y_row[i] as f64 - BT709[i]).abs() < 2e-4,
+            (y_row[i] as f64 - BT2020[i]).abs() < 2e-4,
             "M_RGB_TO_XYZ Y row component {i}: expected ~{}, got {}",
-            BT709[i],
+            BT2020[i],
             y_row[i]
         );
         assert!(
-            (constants[i] as f64 - BT709[i]).abs() < 1e-6,
+            (constants[i] as f64 - BT2020[i]).abs() < 1e-5,
             "LR/LG/LB component {i}: expected {}, got {}",
-            BT709[i],
+            BT2020[i],
             constants[i]
         );
+    }
+}
+
+/// The source → working-space conversion is folded into `wb_matrix` rather than
+/// applied as its own step, which is only correct if it is composed on the right:
+/// the darkroom block runs in the source's own primaries, so the conversion has
+/// to happen before white balance, not after.
+///
+/// Composed the wrong way round the product is still a plausible matrix and the
+/// image still renders — in the wrong colours, with no error anywhere. The two
+/// orders only differ for an asymmetric matrix, which is why this uses one.
+#[test]
+fn the_source_matrix_is_composed_before_white_balance() {
+    // Off-neutral, so the white-balance half is not itself the identity.
+    let sliders = SlidersPayload {
+        wb_temp: 7000.0,
+        wb_tint: 20.0,
+        ..SlidersPayload::default()
+    };
+
+    // Column-major, deliberately asymmetric.
+    const SKEW: [f32; 9] = [0.9, 0.1, 0.0, 0.2, 0.8, 0.1, 0.05, 0.0, 1.1];
+
+    let mut plain = SourceSpace::default();
+    plain.to_working = IDENTITY;
+    let mut skewed = SourceSpace::default();
+    skewed.to_working = SKEW;
+
+    let wb = run_calc_params_with_space(&sliders, &plain).wb_matrix();
+    let composed = run_calc_params_with_space(&sliders, &skewed).wb_matrix();
+
+    // Both accessors are column-major: A[c][r] is row r, column c. So
+    // (WB · SKEW)[c][r] = Σ_k WB[k][r] · SKEW[c·3 + k].
+    for c in 0..3 {
+        for r in 0..3 {
+            let want: f32 = (0..3).map(|k| wb[k][r] * SKEW[c * 3 + k]).sum();
+            assert!(
+                (composed[c][r] - want).abs() < 1e-4,
+                "wb_matrix column {c} row {r}: expected {want} (wb · source), got {} \
+                 — a reversed product or a transpose applies the source \
+                 conversion on the wrong side",
+                composed[c][r]
+            );
+        }
     }
 }
 

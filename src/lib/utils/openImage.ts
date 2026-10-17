@@ -8,6 +8,10 @@ import { type ImagePayload } from "$lib/types/imagePayload";
 // OPEN_CANCELLED in image_opening.rs.
 const OPEN_CANCELLED = "open:cancelled";
 
+// Bytes before the pixel data. Must match PAYLOAD_HEADER_BYTES in
+// image_opening.rs.
+const HEADER_BYTES = 64;
+
 // Split the backend payload into its regions. The pixels and histograms are
 // views onto the payload, not copies, so they carry a byte offset — anything
 // handing them to WebGPU has to pass the view rather than its buffer.
@@ -22,12 +26,17 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
     const overviewWidth = header.getUint32(16, true);
     const overviewHeight = header.getUint32(20, true);
 
+    // The source → working-space matrix, then the flags word.
+    const srcToWorking = new Float32Array(9);
+    for (let i = 0; i < 9; i++) srcToWorking[i] = header.getFloat32(24 + i * 4, true);
+    const colourBaked = (header.getUint32(60, true) & 1) !== 0;
+
     // Pixel data: width * height * 8 bytes (4 channels × f16), preview first
     // and the overview straight after it.
     const pixelByteLength = width * height * 8;
-    const pixels = new Uint8Array(buffer, 24, pixelByteLength);
+    const pixels = new Uint8Array(buffer, HEADER_BYTES, pixelByteLength);
 
-    const overviewOffset = 24 + pixelByteLength;
+    const overviewOffset = HEADER_BYTES + pixelByteLength;
     const overviewByteLength = overviewWidth * overviewHeight * 8;
     const overviewPixels = new Uint8Array(buffer, overviewOffset, overviewByteLength);
 
@@ -49,6 +58,8 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
         histR,
         histG,
         histB,
+        srcToWorking,
+        colourBaked,
     };
 }
 

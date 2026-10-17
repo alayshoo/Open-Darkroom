@@ -10,7 +10,7 @@ use common::{linear_to_srgb, srgb_to_linear, u8_to_u16, EXTREME_VALUES};
 
 use open_darkroom_lib::color::{
     build_srgb_to_linear_lut_f32, build_srgb_to_linear_lut_u16, linearize_u16, linearize_u16_f32,
-    LINEAR_BYTES_PER_PIXEL, LINEAR_F32_BYTES_PER_PIXEL, LUT_SIZE,
+    same_curve, LINEAR_BYTES_PER_PIXEL, LINEAR_F32_BYTES_PER_PIXEL, LUT_SIZE,
 };
 
 #[test]
@@ -74,7 +74,7 @@ fn linearize_produces_eight_bytes_per_pixel() {
     let lut = build_srgb_to_linear_lut_u16();
     let input = vec![0u16; 4 * 7];
 
-    let out = linearize_u16(&input, 4, &lut);
+    let out = linearize_u16(&input, 4, &same_curve(&lut));
 
     assert_eq!(out.len(), 7 * LINEAR_BYTES_PER_PIXEL);
 }
@@ -91,7 +91,7 @@ fn linearize_maps_each_channel_through_the_lut() {
         input.extend_from_slice(&[v, next, other, u16::MAX]);
     }
 
-    let out = linearize_u16(&input, 4, &lut);
+    let out = linearize_u16(&input, 4, &same_curve(&lut));
 
     for (px, chunk) in out.chunks_exact(LINEAR_BYTES_PER_PIXEL).enumerate() {
         for c in 0..3 {
@@ -119,11 +119,11 @@ fn linearize_is_order_independent() {
     // would show up as pixels influenced by their neighbours.
     let lut = build_srgb_to_linear_lut_u16();
 
-    let single = linearize_u16(&[300, 20_000, 65_535, u16::MAX], 4, &lut);
+    let single = linearize_u16(&[300, 20_000, 65_535, u16::MAX], 4, &same_curve(&lut));
 
     let mut padded = vec![0u16; 4 * 500];
     padded[4 * 250..4 * 251].copy_from_slice(&[300, 20_000, 65_535, u16::MAX]);
-    let batch = linearize_u16(&padded, 4, &lut);
+    let batch = linearize_u16(&padded, 4, &same_curve(&lut));
 
     let at = 250 * LINEAR_BYTES_PER_PIXEL;
     assert_eq!(
@@ -152,8 +152,8 @@ fn linearize_widens_three_channels_to_an_opaque_rgba() {
         rgba.extend_from_slice(&[v, next, other, u16::MAX]);
     }
 
-    let from_rgb = linearize_u16(&rgb, 3, &lut);
-    let from_rgba = linearize_u16(&rgba, 4, &lut);
+    let from_rgb = linearize_u16(&rgb, 3, &same_curve(&lut));
+    let from_rgba = linearize_u16(&rgba, 4, &same_curve(&lut));
 
     assert_eq!(
         from_rgb.len(),
@@ -169,7 +169,7 @@ fn linearize_widens_three_channels_to_an_opaque_rgba() {
 #[test]
 fn a_three_channel_upload_is_fully_opaque() {
     let lut = build_srgb_to_linear_lut_u16();
-    let out = linearize_u16(&[0, 32_768, 65_535], 3, &lut);
+    let out = linearize_u16(&[0, 32_768, 65_535], 3, &same_curve(&lut));
 
     let alpha = half::f16::from_le_bytes([out[6], out[7]]);
     assert_eq!(alpha.to_f32(), 1.0, "synthesised alpha must be exactly 1.0");
@@ -264,7 +264,7 @@ fn linearize_f32_produces_sixteen_bytes_per_pixel() {
     let lut = build_srgb_to_linear_lut_f32();
     let input = vec![0u16; 4 * 7];
 
-    let out = linearize_u16_f32(&input, 4, &lut);
+    let out = linearize_u16_f32(&input, 4, &same_curve(&lut));
 
     assert_eq!(out.len(), 7 * LINEAR_F32_BYTES_PER_PIXEL);
 }
@@ -280,7 +280,7 @@ fn linearize_f32_maps_each_channel_through_the_lut() {
         input.extend_from_slice(&[v, next, other, u16::MAX]);
     }
 
-    let out = linearize_u16_f32(&input, 4, &lut);
+    let out = linearize_u16_f32(&input, 4, &same_curve(&lut));
 
     for (px, chunk) in out.chunks_exact(LINEAR_F32_BYTES_PER_PIXEL).enumerate() {
         for c in 0..3 {
@@ -298,11 +298,11 @@ fn linearize_f32_maps_each_channel_through_the_lut() {
 fn linearize_f32_is_order_independent() {
     let lut = build_srgb_to_linear_lut_f32();
 
-    let single = linearize_u16_f32(&[300, 20_000, 65_535, u16::MAX], 4, &lut);
+    let single = linearize_u16_f32(&[300, 20_000, 65_535, u16::MAX], 4, &same_curve(&lut));
 
     let mut padded = vec![0u16; 4 * 500];
     padded[4 * 250..4 * 251].copy_from_slice(&[300, 20_000, 65_535, u16::MAX]);
-    let batch = linearize_u16_f32(&padded, 4, &lut);
+    let batch = linearize_u16_f32(&padded, 4, &same_curve(&lut));
 
     let at = 250 * LINEAR_F32_BYTES_PER_PIXEL;
     assert_eq!(
@@ -325,8 +325,8 @@ fn linearize_f32_widens_three_channels_to_an_opaque_rgba() {
         rgba.extend_from_slice(&[v, next, other, u16::MAX]);
     }
 
-    let from_rgb = linearize_u16_f32(&rgb, 3, &lut);
-    let from_rgba = linearize_u16_f32(&rgba, 4, &lut);
+    let from_rgb = linearize_u16_f32(&rgb, 3, &same_curve(&lut));
+    let from_rgba = linearize_u16_f32(&rgba, 4, &same_curve(&lut));
 
     assert_eq!(
         from_rgb.len(),

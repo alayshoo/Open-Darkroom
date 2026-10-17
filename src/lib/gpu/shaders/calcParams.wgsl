@@ -60,6 +60,13 @@ struct View {
     _pad0:        f32,   // 12
 }                        // total: 16 bytes
 
+// The source image's own primaries, as a matrix into the working space. Changes
+// when a new image is opened rather than when anything is edited, which is why
+// it is neither a slider nor part of the view.
+struct SourceSpace {
+    to_working: mat3x3<f32>,   //  0 — 48 bytes (3 cols × 16)
+}                              // total: 48 bytes
+
 //!include "chunks/params.wgsl"
 
 // Parameters for the sharpness stage, kept apart from Params because a
@@ -73,6 +80,7 @@ struct View {
 @group(0) @binding(1) var<storage, read_write> params: Params;
 @group(0) @binding(2) var<uniform> view: View;
 @group(0) @binding(3) var<storage, read_write> sharp: SharpParams;
+@group(0) @binding(4) var<uniform> source: SourceSpace;
 
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -92,20 +100,24 @@ const M_BRADFORD_INV = mat3x3<f32>(
     vec3f( 0.1599627,  0.0492912,  0.9684867),
 );
 
-// Linear sRGB <-> XYZ D65 (column-major)
+// Linear Rec.2020 <-> XYZ D65 (column-major).
+//
+// The working space, which is not the space the file arrived in: the source's
+// own primaries carry the darkroom block, and `source.to_working` converts out
+// of them afterwards. Everything from white balance onwards works here.
 const M_RGB_TO_XYZ = mat3x3<f32>(
-    vec3f(0.4124564, 0.2126729, 0.0193339),
-    vec3f(0.3575761, 0.7151522, 0.1191920),
-    vec3f(0.1804375, 0.0721750, 0.9503041),
+    vec3f(0.6369580, 0.2627002, 0.0000000),
+    vec3f(0.1446169, 0.6779981, 0.0280727),
+    vec3f(0.1688810, 0.0593017, 1.0609851),
 );
 
 // Must be the inverse of M_RGB_TO_XYZ to the same precision: at the neutral
 // reference temperature the adaptation collapses to M_XYZ_TO_RGB * M_RGB_TO_XYZ,
 // so any truncation here shows up as a tint on an image nobody white-balanced.
 const M_XYZ_TO_RGB = mat3x3<f32>(
-    vec3f( 3.2404542, -0.9692660,  0.0556434),
-    vec3f(-1.5371385,  1.8760108, -0.2040259),
-    vec3f(-0.4985314,  0.0415560,  1.0572252),
+    vec3f( 1.7166512, -0.6666844,  0.0176399),
+    vec3f(-0.3556708,  1.6164812, -0.0427706),
+    vec3f(-0.2533663,  0.0157685,  0.9421031),
 );
 
 const MIN_GAMMA: f32 = 0.01;
@@ -115,10 +127,13 @@ const MIN_GAMMA: f32 = 0.01;
 // (-black * slope) an outright NaN, poisoning every pixel of the image.
 const MIN_POINT_RANGE: f32 = 1e-6;
 
-// BT.709 luminance coefficients
-const LR: f32 = 0.2126;
-const LG: f32 = 0.7152;
-const LB: f32 = 0.0722;
+// BT.2020 luminance coefficients — the middle row of M_RGB_TO_XYZ, so they
+// describe the working space rather than the file's. They sum to 1, which is
+// what lets the white-balance normalisation below divide by the luma of a
+// transformed neutral.
+const LR: f32 = 0.2627002;
+const LG: f32 = 0.6779981;
+const LB: f32 = 0.0593017;
 
 // ── Tone-region amplitude budget ─────────────────────────────────────────────
 //
@@ -433,7 +448,12 @@ fn main() {
     params._pad1         = 0.0;
     params._pad2         = 0.0;
     params._pad3         = 0.0;
-    params.wb_matrix     = calc_wb_matrix();
+    // White balance, with the source → working-space conversion composed in
+    // ahead of it. Both are linear matrices applied to linear data one after
+    // the other, so a single multiply does the work of two. The order is fixed:
+    // the darkroom block above runs in the source's own primaries, and
+    // everything below this line is in the working space.
+    params.wb_matrix     = calc_wb_matrix() * source.to_working;
     params.exposure      = sliders.exposure;
     params.contrast      = sliders.contrast / 100.0;
     params.brightness    = sliders.brightness / 100.0 * MAX_BRIGHTNESS;

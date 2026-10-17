@@ -101,8 +101,12 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         });
     }
 
-    function loadImage(image: GPUImage) {
+    function loadImage(image: GPUImage, srcToWorking: Float32Array) {
         currentImage = image;
+
+        // The source's primaries, for calcParams to compose into the matrix
+        // that ends the darkroom block.
+        calcParams.updateSourceSpace(srcToWorking);
 
         // The intermediates are sized to the image, so a new image needs new
         // ones — and new bind groups pointing at them.

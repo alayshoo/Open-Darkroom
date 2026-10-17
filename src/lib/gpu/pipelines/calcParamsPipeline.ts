@@ -10,12 +10,15 @@ export const SLIDERS_BUFFER_SIZE = 128;
 export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
 export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
+// SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
+export const SOURCE_BUFFER_SIZE  = 48;
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
     sharpBuffer: GPUBuffer;
     updateSliders: (sliders: Sliders) => void;
     updateView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
+    updateSourceSpace: (srcToWorking: Float32Array) => void;
     recordCalcParams: (
         encoder: GPUCommandEncoder,
         timestampWrites?: GPUComputePassTimestampWrites,
@@ -61,6 +64,15 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         usage: GPUBufferUsage.STORAGE,
     });
 
+    // SourceSpace uniform buffer — the open image's primaries, as a matrix into
+    // the working space. Identity until an image arrives, which is also what a
+    // file whose own primaries are the working space would send.
+    const sourceBuffer = device.createBuffer({
+        label: "Source Space Uniform Buffer",
+        size: SOURCE_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
     const bindGroupLayout = device.createBindGroupLayout({
         label: "Calc Params Bind Group Layout",
         entries: [
@@ -84,6 +96,11 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "storage" },
             },
+            {
+                binding: 4,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
+            },
         ],
     });
 
@@ -106,6 +123,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
             { binding: 1, resource: { buffer: paramsBuffer } },
             { binding: 2, resource: { buffer: viewBuffer } },
             { binding: 3, resource: { buffer: sharpBuffer } },
+            { binding: 4, resource: { buffer: sourceBuffer } },
         ],
     });
 
@@ -117,6 +135,17 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
     function updateView(renderScale: number, fullWidth: number, fullHeight: number) {
         const data = new Float32Array([renderScale, fullWidth, fullHeight, 0]);
         device.queue.writeBuffer(viewBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
+    }
+
+    // A WGSL mat3x3<f32> is three 16-byte columns, not nine packed floats, so
+    // each column is written into its own vec4 slot. Packed tightly, the second
+    // column lands four bytes early and every colour comes out skewed.
+    function updateSourceSpace(srcToWorking: Float32Array) {
+        const padded = new Float32Array(12);
+        for (let col = 0; col < 3; col++) {
+            padded.set(srcToWorking.subarray(col * 3, col * 3 + 3), col * 4);
+        }
+        device.queue.writeBuffer(sourceBuffer, 0, padded.buffer, padded.byteOffset, padded.byteLength);
     }
 
     function recordCalcParams(
@@ -138,14 +167,24 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         paramsBuffer.destroy();
         viewBuffer.destroy();
         sharpBuffer.destroy();
+        sourceBuffer.destroy();
     }
 
     // A render is full resolution until something says otherwise. The dimensions
     // stay at zero until an image arrives; clarity's radius clamps to its floor
     // rather than collapsing.
     updateView(1, 0, 0);
+    updateSourceSpace(new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]));
 
-    return { paramsBuffer, sharpBuffer, updateSliders, updateView, recordCalcParams, destroy };
+    return {
+        paramsBuffer,
+        sharpBuffer,
+        updateSliders,
+        updateView,
+        updateSourceSpace,
+        recordCalcParams,
+        destroy,
+    };
 }
 
 // Packs raw slider values into a Float32Array matching the WGSL Sliders struct

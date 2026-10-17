@@ -11,11 +11,12 @@ use common::{noise, rgb_ramp, solid, u8_to_u16};
 use open_darkroom_lib::export_rendering::{
     render_image, render_image_with_chunk_rows, SlidersPayload, CHUNK_ROWS,
 };
+use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::image_opening::Rgba16Image;
 
 fn render8(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, 8, |_| {})).expect("render")
+    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, &SourceSpace::default(), 8, |_| {})).expect("render")
 }
 
 fn render_chunked(img: &Rgba16Image, chunk_rows: u32) -> Vec<u8> {
@@ -26,6 +27,7 @@ fn render_chunked(img: &Rgba16Image, chunk_rows: u32) -> Vec<u8> {
         h,
         4,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         8,
         chunk_rows,
         |_| {},
@@ -117,6 +119,7 @@ fn awkward_dimensions_survive_at_16_bit() {
             3,
             4,
             &SlidersPayload::default(),
+            &SourceSpace::default(),
             16,
             |_| {},
         ))
@@ -145,7 +148,7 @@ fn eight_and_sixteen_bit_paths_agree() {
     let sliders = SlidersPayload::default();
 
     let eight = render8(&img, &sliders);
-    let sixteen = pollster::block_on(render_image(img.as_raw(), 32, 16, 4, &sliders, 16, |_| {}))
+    let sixteen = pollster::block_on(render_image(img.as_raw(), 32, 16, 4, &sliders, &SourceSpace::default(), 16, |_| {}))
         .expect("render");
 
     assert_eq!(eight.len(), 32 * 16 * 3);
@@ -176,6 +179,7 @@ fn sixteen_bit_output_carries_more_levels_than_eight() {
         1,
         4,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         16,
         |_| {},
     ))
@@ -218,6 +222,7 @@ fn a_highlight_ramp_keeps_every_sixteen_bit_code() {
         1,
         4,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         16,
         |_| {},
     ))
@@ -270,6 +275,7 @@ fn progress_increases_and_finishes_at_one() {
         30,
         4,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         8,
         10,
         |p| seen.lock().unwrap().push(p),
@@ -296,6 +302,7 @@ fn a_ragged_final_chunk_still_reports_completion() {
         25,
         4,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         8,
         10,
         |p| seen.lock().unwrap().push(p),
@@ -313,15 +320,15 @@ fn a_ragged_final_chunk_still_reports_completion() {
 fn malformed_input_is_rejected_before_touching_the_gpu() {
     let sliders = SlidersPayload::default();
 
-    let err = pollster::block_on(render_image(&[0u16; 16], 4, 4, 4, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[0u16; 16], 4, 4, 4, &sliders, &SourceSpace::default(), 8, |_| {}))
         .expect_err("buffer too small for 4×4 RGBA");
     assert!(err.contains("expected 64"), "unhelpful error: {err}");
 
-    let err = pollster::block_on(render_image(&[], 0, 4, 4, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[], 0, 4, 4, &sliders, &SourceSpace::default(), 8, |_| {}))
         .expect_err("zero width");
     assert!(err.contains("0 × 4"), "unhelpful error: {err}");
 
-    let err = pollster::block_on(render_image(&[], 4, 0, 4, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[], 4, 0, 4, &sliders, &SourceSpace::default(), 8, |_| {}))
         .expect_err("zero height");
     assert!(err.contains("4 × 0"), "unhelpful error: {err}");
 
@@ -331,6 +338,7 @@ fn malformed_input_is_rejected_before_touching_the_gpu() {
         2,
         4,
         &sliders,
+        &SourceSpace::default(),
         8,
         0,
         |_| {},
@@ -340,11 +348,11 @@ fn malformed_input_is_rejected_before_touching_the_gpu() {
 
     // A three-channel buffer sized as if it were four, and an unsupported
     // channel count — the stride is what the slicing arithmetic trusts.
-    let err = pollster::block_on(render_image(&[0u16; 64], 4, 4, 3, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[0u16; 64], 4, 4, 3, &sliders, &SourceSpace::default(), 8, |_| {}))
         .expect_err("buffer sized for RGBA, declared RGB");
     assert!(err.contains("expected 48"), "unhelpful error: {err}");
 
-    let err = pollster::block_on(render_image(&[0u16; 32], 4, 4, 2, &sliders, 8, |_| {}))
+    let err = pollster::block_on(render_image(&[0u16; 32], 4, 4, 2, &sliders, &SourceSpace::default(), 8, |_| {}))
         .expect_err("two channels is not a thing");
     assert!(err.contains("channels must be"), "unhelpful error: {err}");
 }
@@ -372,6 +380,7 @@ fn a_three_channel_source_renders_exactly_like_its_rgba_equivalent() {
             18,
             4,
             &SlidersPayload::default(),
+            &SourceSpace::default(),
             bit_depth,
             |_| {},
         ))
@@ -383,6 +392,7 @@ fn a_three_channel_source_renders_exactly_like_its_rgba_equivalent() {
             18,
             3,
             &SlidersPayload::default(),
+            &SourceSpace::default(),
             bit_depth,
             |_| {},
         ))
@@ -412,6 +422,7 @@ fn chunking_a_three_channel_source_leaves_no_seam() {
         40,
         3,
         &SlidersPayload::default(),
+        &SourceSpace::default(),
         8,
         40,
         |_| {},
@@ -425,6 +436,7 @@ fn chunking_a_three_channel_source_leaves_no_seam() {
             40,
             3,
             &SlidersPayload::default(),
+            &SourceSpace::default(),
             8,
             chunk_rows,
             |_| {},
@@ -435,5 +447,57 @@ fn chunking_a_three_channel_source_leaves_no_seam() {
             chunked, whole,
             "chunking a three-channel source at {chunk_rows} rows changed the output"
         );
+    }
+}
+
+// ── The output transform ──────────────────────────────────────────────────────
+
+/// The chain now works in a space wider than the one it renders to, so it ends
+/// in a real gamut conversion where it used to end in the identity. With neutral
+/// sliders the whole round trip — sRGB in, into linear Rec.2020, back out to
+/// sRGB — has to return the file unchanged.
+///
+/// Saturated primaries are what make this worth asserting. A transposed or
+/// reversed matrix still maps a neutral to a neutral, so a grey ramp passes
+/// either way; pure red, green and blue are where the two come apart. Cyan is
+/// there because it is the corner sRGB and Rec.2020 disagree about most.
+#[test]
+fn a_neutral_render_round_trips_through_the_working_space() {
+    const PROBES: [[u8; 3]; 8] = [
+        [0, 0, 0],
+        [255, 255, 255],
+        [128, 128, 128],
+        [255, 0, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [0, 255, 255],
+        [200, 120, 40],
+    ];
+
+    let img: Rgba16Image = image::ImageBuffer::from_fn(PROBES.len() as u32, 1, |x, _| {
+        let p = PROBES[x as usize];
+        image::Rgba([
+            p[0] as u16 * 257,
+            p[1] as u16 * 257,
+            p[2] as u16 * 257,
+            u16::MAX,
+        ])
+    });
+
+    let out = render8(&img, &SlidersPayload::default());
+
+    for (i, want) in PROBES.iter().enumerate() {
+        let got = [out[i * 3], out[i * 3 + 1], out[i * 3 + 2]];
+        for c in 0..3 {
+            let delta = got[c] as i32 - want[c] as i32;
+            assert!(
+                delta.abs() <= 2,
+                "probe {i} channel {c}: expected {} ± 2, got {} (whole pixel {got:?}, \
+                 wanted {want:?}) — the source → working matrix and the output \
+                 transform are not inverses",
+                want[c],
+                got[c]
+            );
+        }
     }
 }
