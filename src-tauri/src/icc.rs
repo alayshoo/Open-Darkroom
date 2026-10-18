@@ -120,23 +120,33 @@ impl SourceSpace {
                     curves: RGB_TRC,
                 },
                 // A LUT profile has no separable channels to preserve, so there
-                // is nothing to lose by converting it here in full.
-                None => Self {
+                // is nothing to lose by converting it here in full — but only
+                // if the conversion can be built at all. A profile that is
+                // neither decomposable nor convertible is no more use than an
+                // unreadable one, and gets the same answer rather than failing
+                // the open later, once the pixels have been committed to.
+                None if bake_transform(&profile).is_ok() => Self {
                     icc: Some(bytes),
                     to_working: IDENTITY,
                     baked: true,
                     curves: RGB_TRC,
                 },
+                None => Self::default(),
             },
             // Greyscale keeps the matrix path, which matters for a scanned
             // black-and-white negative: the per-channel black, white and gamma
             // still address the three channels the decoder made, and they are
-            // equal going in. The pixels are neutral by construction and a
-            // neutral stays neutral under relative colorimetric, so there are
-            // no primaries to convert, only the profile's own curve to undo.
+            // equal going in. Only the profile's own curve is undone here.
+            //
+            // The matrix is the untagged one rather than the identity. A
+            // greyscale profile names no primaries, and while the pixels are
+            // neutral going in, the darkroom block runs before the matrix and
+            // is free to tone them apart. Anything but the untagged assumption
+            // would render a toned grey-tagged scan differently from the
+            // byte-identical untagged one.
             ColorSpaceSignature::GrayData => Self {
                 icc: Some(bytes),
-                to_working: IDENTITY,
+                to_working: SRGB_TO_WORKING,
                 baked: false,
                 curves: GREY_TRC,
             },
@@ -197,39 +207,19 @@ impl SourceSpace {
             return Ok(None);
         }
 
+        // Reading three channels per pixel below, so a narrower stride would
+        // index past the end rather than return the caller's own error.
+        if channels < 3 {
+            return Err(format!("channels must be 3 (RGB) or 4 (RGBA), got {channels}"));
+        }
+
         let icc = self
             .icc
             .as_deref()
             .ok_or("colour profile missing from a baked source space")?;
         let profile =
             Profile::new_icc(icc).map_err(|e| format!("Failed to read colour profile: {e}"))?;
-        let linear = ToneCurve::new(1.0);
-        let working = Profile::new_rgb(
-            &CIExyY {
-                x: D65[0],
-                y: D65[1],
-                Y: 1.0,
-            },
-            &CIExyYTRIPLE {
-                Red: xy_y(WORKING_PRIMARIES[0]),
-                Green: xy_y(WORKING_PRIMARIES[1]),
-                Blue: xy_y(WORKING_PRIMARIES[2]),
-            },
-            &[&linear, &linear, &linear],
-        )
-        .map_err(|e| format!("Failed to build the working-space profile: {e}"))?;
-
-        // The pixel type has to be three wide, not one: lcms2 checks it against
-        // the format's bytes per pixel and panics on a mismatch, so a `u16`
-        // element type against RGB_16 never reaches the conversion at all.
-        let transform: Transform<[u16; 3], [u16; 3]> = Transform::new(
-            &profile,
-            PixelFormat::RGB_16,
-            &working,
-            PixelFormat::RGB_16,
-            Intent::RelativeColorimetric,
-        )
-        .map_err(|e| format!("Failed to build the colour conversion: {e}"))?;
+        let transform = bake_transform(&profile)?;
 
         // Transformed three-wide and rewoven afterwards: lcms2 does not carry
         // an extra channel through unless told to, and alpha has no business in
@@ -250,6 +240,39 @@ impl SourceSpace {
         }
         Ok(Some(out))
     }
+}
+
+/// The source → linear working space conversion the baked path runs, built
+/// once here so that [`SourceSpace::resolve`] can ask whether it exists before
+/// committing a file to that path.
+fn bake_transform(profile: &Profile) -> Result<Transform<[u16; 3], [u16; 3]>, String> {
+    let linear = ToneCurve::new(1.0);
+    let working = Profile::new_rgb(
+        &CIExyY {
+            x: D65[0],
+            y: D65[1],
+            Y: 1.0,
+        },
+        &CIExyYTRIPLE {
+            Red: xy_y(WORKING_PRIMARIES[0]),
+            Green: xy_y(WORKING_PRIMARIES[1]),
+            Blue: xy_y(WORKING_PRIMARIES[2]),
+        },
+        &[&linear, &linear, &linear],
+    )
+    .map_err(|e| format!("Failed to build the working-space profile: {e}"))?;
+
+    // The pixel type has to be three wide, not one: lcms2 checks it against the
+    // format's bytes per pixel and panics on a mismatch, so a `u16` element
+    // type against RGB_16 never reaches the conversion at all.
+    Transform::new(
+        profile,
+        PixelFormat::RGB_16,
+        &working,
+        PixelFormat::RGB_16,
+        Intent::RelativeColorimetric,
+    )
+    .map_err(|e| format!("Failed to build the colour conversion: {e}"))
 }
 
 fn xy_y(xy: [f64; 2]) -> CIExyY {

@@ -66,14 +66,6 @@ fn lut_profile() -> Vec<u8> {
     std::fs::read(path).expect("tests/fixtures/srgb-lut.icc — regenerate with the example")
 }
 
-/// A greyscale profile: one channel, so not a set of RGB primaries either.
-fn grey_profile() -> Vec<u8> {
-    Profile::new_gray(&xyy(D65.0, D65.1), &ToneCurve::new(2.2))
-        .expect("grey profile")
-        .icc()
-        .expect("serialise")
-}
-
 /// An RGB profile with one colorant tag taken out: curves and a matrix are all
 /// six tags or none, and five is not a matrix.
 fn profile_without_a_colorant() -> Vec<u8> {
@@ -165,9 +157,12 @@ fn an_unreadable_profile_falls_back_to_srgb() {
 }
 
 /// A greyscale profile describes one channel, and the decoder replicated that
-/// channel across three. So its curve is the curve for all three, and there are
-/// no primaries to convert: the pixels are neutral by construction and stay
-/// neutral under relative colorimetric.
+/// channel across three. So its curve is the curve for all three.
+///
+/// Its matrix is the untagged one. A greyscale profile names no primaries, and
+/// although the pixels arrive neutral, the darkroom block runs ahead of the
+/// matrix and can tone them apart — so the identity would render a toned
+/// grey-tagged scan differently from the byte-identical untagged one.
 ///
 /// It keeps the matrix path deliberately. A scanned black-and-white negative is
 /// the case, and the per-channel black, white and gamma still address the three
@@ -182,7 +177,7 @@ fn a_greyscale_profile_undoes_its_own_curve_on_every_channel() {
     let space = SourceSpace::resolve(Some(grey));
 
     assert!(!space.baked, "greyscale keeps the matrix path");
-    assert_matrix_close("grey", space.to_working, IDENTITY, 1e-9);
+    assert_matrix_close("grey", space.to_working, SRGB_TO_WORKING, 1e-9);
 
     // Gamma 3 at half scale, on all three channels — the grey TRC, not the
     // sRGB fallback, which would give 0.2140 here.
@@ -214,39 +209,55 @@ fn a_profile_the_decoder_already_rendered_falls_back_to_srgb() {
 /// All six tags or none. A profile carrying the curves but missing a colorant
 /// has no matrix to read, and filling the gap with a zero column would turn one
 /// primary black while leaving the other two plausible.
+///
+/// It has no A2B pipeline to convert through either, so there is no path left
+/// for it and it gets the answer an unreadable profile gets. Committing it to
+/// the baked path instead would fail the open on a file that used to display.
 #[test]
-fn a_profile_missing_a_colorant_takes_the_cpu_path() {
+fn a_profile_missing_a_colorant_falls_back_to_srgb() {
     let space = SourceSpace::resolve(Some(profile_without_a_colorant()));
 
-    assert!(space.baked, "five colorant and curve tags is not a matrix");
-    assert_matrix_close("partial fallback", space.to_working, IDENTITY, 1e-9);
+    assert!(!space.baked, "there is no conversion to bake with");
+    assert_matrix_close("partial fallback", space.to_working, SRGB_TO_WORKING, 1e-9);
 }
 
 // ── The baked path ────────────────────────────────────────────────────────────
 
-/// Only an RGB profile reaches `bake` now, which is the only kind it can
-/// convert: it hands lcms2 `PixelFormat::RGB_16`, and lcms2 checks that against
-/// the profile's own colour space. The input it exists for is a scanner's A2B0
-/// LUT profile. An RGB profile with a tag missing also arrives here and cannot
-/// be built, and that has to surface rather than render.
+/// A profile nothing can convert must not fail the open. The conversion is
+/// built while the file's space is being resolved, so a profile that cannot
+/// produce one never reaches the baked path and the file opens as sRGB —
+/// which is what it did before the pipeline read profiles at all.
 ///
-/// This is the guard on the pixel type too. lcms2 checks the transform's
-/// element type against the format's bytes per pixel with a plain `assert_eq!`,
-/// so a one-wide element against RGB_16 panicked here instead of returning —
-/// inside a Tauri command, on opening an ordinary file. A clean `Err` is what
-/// says that check was passed and the conversion was genuinely attempted.
+/// The open is the assertion. A space that says it is baked and then cannot
+/// convert still errors, because by then the pixels have been committed to;
+/// resolving it earlier is what stops that state from arising.
 #[test]
-fn a_conversion_that_cannot_be_built_fails_the_open() {
+fn a_conversion_that_cannot_be_built_does_not_fail_the_open() {
     let img: ImageBuffer<Rgba<u16>, Vec<u16>> =
         ImageBuffer::from_pixel(4, 3, Rgba([1000u16, 2000, 3000, u16::MAX]));
 
     let space = SourceSpace::resolve(Some(profile_without_a_colorant()));
-    assert!(space.baked);
+    assert!(!space.baked, "an unconvertible profile is not a baked one");
 
-    let err = prepare_image(img.as_raw(), 4, 3, 4, &space)
+    prepare_image(img.as_raw(), 4, 3, 4, &space)
+        .expect("a profile lcms2 cannot convert must still open as sRGB");
+}
+
+/// The guard on the pixel type. lcms2 checks the transform's element type
+/// against the format's bytes per pixel with a plain `assert_eq!`, and
+/// `bake` reads three channels per pixel regardless, so a narrower stride
+/// panicked inside a Tauri command on an ordinary file. A clean `Err` is
+/// what says the stride was checked before either of those.
+#[test]
+fn baking_a_narrow_stride_is_an_error_not_a_panic() {
+    let space = SourceSpace::resolve(Some(lut_profile()));
+    assert!(space.baked, "the fixture is the profile bake exists for");
+
+    let err = space
+        .bake(&[1000u16, 2000, 3000, 4000], 2)
         .err()
-        .expect("a profile lcms2 cannot convert must not be silently ignored");
-    assert!(err.contains("colour conversion"), "unhelpful error: {err}");
+        .expect("two channels is not a pixel bake can read");
+    assert!(err.contains("channels must be 3"), "unhelpful error: {err}");
 }
 
 

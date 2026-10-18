@@ -362,11 +362,6 @@ pub async fn render_image_with_chunk_rows(
     chunk_rows: u32,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
-    // A profile the GPU cannot be handed as a matrix is applied here instead,
-    // over the whole buffer rather than per chunk: the conversion is per pixel,
-    // so splitting it would only multiply the lcms2 transforms.
-    let baked = space.bake(pixels_u16, channels)?;
-    let pixels_u16: &[u16] = baked.as_deref().unwrap_or(pixels_u16);
     let t = Instant::now();
 
     // ── 0. Validate inputs ────────────────────────────────────────────────────
@@ -388,6 +383,13 @@ pub async fn render_image_with_chunk_rows(
             pixels_u16.len()
         ));
     }
+
+    // A profile the GPU cannot be handed as a matrix is applied here instead,
+    // over the whole buffer rather than per chunk: the conversion is per pixel,
+    // so splitting it would only multiply the lcms2 transforms. It runs after
+    // the checks above so that a bad buffer is reported rather than converted.
+    let baked = space.bake(pixels_u16, channels)?;
+    let pixels_u16: &[u16] = baked.as_deref().unwrap_or(pixels_u16);
 
     // ── 1. Initialise wgpu ────────────────────────────────────────────────────
 
