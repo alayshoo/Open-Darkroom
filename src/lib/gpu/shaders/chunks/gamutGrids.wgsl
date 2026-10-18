@@ -10,24 +10,33 @@ const XY_TOTAL: u32 = 16384u;
 const XY_X_MAX: f32 = 0.8;
 const XY_Y_MAX: f32 = 0.9;
 
-// ── The colour volume grid: hue across, lightness up ─────────────────────────
-// Two words per cell, a count and the chroma summed over it, so the plot can
-// draw each cell at the chroma its pixels actually reached.
-const HUE_BINS:   u32 = 96u;
-const LIGHT_BINS: u32 = 64u;
-const HL_CELLS:   u32 = 6144u;
-const HL_TOTAL:   u32 = 12288u;
-const HL_COUNT:   u32 = 0u;
-const HL_CHROMA:  u32 = 1u;
+// ── The colour volume: a grid through Oklab ──────────────────────────────────
+// Lightness up, a and b across — the axes a colour solid is traditionally
+// plotted on. Only occupancy is stored: the colour of a cell is the colour of
+// its own coordinates, so there is nothing to average.
+const VOL_BINS:   u32 = 48u;
+const VOL_TOTAL:  u32 = 110592u;
+const VOL_AB_MAX: f32 = 0.4;
+const VOL_L_MAX:  f32 = 1.0;
 
-// Chroma is summed as an integer, so it is scaled on the way in. 4096 leaves an
-// Oklab chroma of 0.4 across a million-pixel overview two bits short of the u32
-// ceiling, and resolves 1/4096 — far finer than a cell is drawn.
-const CHROMA_SCALE: f32 = 4096.0;
+/// Where in the grid an Oklab colour falls, or a negative component when it
+/// falls outside the plotted box.
+fn volume_cell(lab: vec3f) -> vec3f {
+  return vec3f(
+    (lab.y + VOL_AB_MAX) / (2.0 * VOL_AB_MAX),
+    lab.x / VOL_L_MAX,
+    (lab.z + VOL_AB_MAX) / (2.0 * VOL_AB_MAX),
+  );
+}
 
-// Lightness above this has nowhere left to go on the plot; Oklab L is 1.0 at
-// the working space's white, and the chain carries highlights above it.
-const LIGHT_MAX: f32 = 1.0;
+/// The Oklab coordinates at the centre of a cell — the inverse of the above.
+fn volume_lab(cell: vec3f) -> vec3f {
+  return vec3f(
+    cell.y * VOL_L_MAX,
+    cell.x * 2.0 * VOL_AB_MAX - VOL_AB_MAX,
+    cell.z * 2.0 * VOL_AB_MAX - VOL_AB_MAX,
+  );
+}
 
 // ── Statistics ───────────────────────────────────────────────────────────────
 // Tallied per pixel and read back on the CPU, which is what the panel's
@@ -59,23 +68,47 @@ struct GamutSpace {
 }
 
 struct GamutOverlay {
+  // Linear destination → CIE XYZ, for the measurement taken after the output
+  // transform. The destination follows the preview, so this cannot be a
+  // constant the way the working space's matrix is.
+  destination_to_xyz: mat3x3<f32>,
   spaces: array<GamutSpace, GAMUT_SPACES>,
   locus:  array<vec2f, LOCUS_POINTS>,
+  // Non-zero while the panel is measuring what the output transform produces
+  // rather than what the adjustments asked for.
+  transformed: u32,
+  // Non-zero while the colour volume is switched on. Nothing else in the panel
+  // depends on its grid, so a pixel need not vote into it.
+  volume: u32,
 }
 
-// Which side of the edge a point falls on. Positive for all three edges of a
-// triangle wound one way, negative for the other, so the sign of the product is
-// what decides containment without knowing the winding.
-fn edge_side(a: vec2f, b: vec2f, p: vec2f) -> f32 {
-  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+// How far a point lies to one side of an edge, in the diagram's own units.
+// Positive for all three edges of a triangle wound one way and negative for the
+// other, so the signs agreeing is what decides containment without anything
+// having to know the winding.
+fn edge_distance(a: vec2f, b: vec2f, p: vec2f) -> f32 {
+  let edge = b - a;
+  return (edge.x * (p.y - a.y) - edge.y * (p.x - a.x)) / max(length(edge), 1e-9);
 }
+
+// A colour sitting exactly on the boundary counts as inside.
+//
+// Not a nicety: gamut compression works by moving a colour onto the boundary
+// and leaving it there, so measured after the output transform a good fraction
+// of the image lands on the edge of the destination's triangle to within
+// floating-point noise. Without this, "0% outside sRGB" — the whole point of
+// the measurement — reads as a stubborn fraction of a percent instead. The
+// width is a five-thousandth of the diagram, far below a pixel of it.
+const GAMUT_TOLERANCE: f32 = 2e-4;
 
 // Whether a chromaticity falls inside a space's triangle. This asks about hue
 // and saturation only — a triangle in xy says nothing about how bright a colour
 // may be — which is exactly what the diagram shows.
 fn inside_gamut(space: GamutSpace, xy: vec2f) -> bool {
-  let a = edge_side(space.red, space.green, xy);
-  let b = edge_side(space.green, space.blue, xy);
-  let c = edge_side(space.blue, space.red, xy);
-  return (a >= 0.0 && b >= 0.0 && c >= 0.0) || (a <= 0.0 && b <= 0.0 && c <= 0.0);
+  let d = vec3f(
+    edge_distance(space.red, space.green, xy),
+    edge_distance(space.green, space.blue, xy),
+    edge_distance(space.blue, space.red, xy),
+  );
+  return all(d >= vec3f(-GAMUT_TOLERANCE)) || all(d <= vec3f(GAMUT_TOLERANCE));
 }

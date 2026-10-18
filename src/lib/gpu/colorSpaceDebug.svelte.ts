@@ -27,12 +27,45 @@ class ColorSpaceDebug {
 
     overlays = $state<Record<OutputSpaceId, boolean>>(initialOverlays());
 
+    /**
+     * Whether the panel measures what the output transform produces rather than
+     * what the adjustments asked for.
+     *
+     * Off is the question the plots exist to answer — the colour the edit wants,
+     * which the transform has not yet had to give up. On is what the screen is
+     * showing, and the difference between the two is the gamut compression
+     * doing its work. The percentages read differently either side of it: after
+     * the transform, nothing can fall outside the space being rendered to, so a
+     * zero there says the compression worked rather than that the colour fitted.
+     */
+    transformed = $state(false);
+
+    /**
+     * Whether the colour volume is drawn at all.
+     *
+     * It is the expensive half of the panel — a ray per fragment, and a third
+     * grid to fill — and it is the half that is not always wanted, so it
+     * switches off on its own. The grid is not even binned while it is off.
+     */
+    volume = $state(true);
+
+    /** Where the volume is being looked at from, in radians. */
+    yaw = $state(0.6);
+    pitch = $state(0.42);
+
     toggle() {
         this.enabled = !this.enabled;
     }
 
     toggleOverlay(id: OutputSpaceId) {
         this.overlays = { ...this.overlays, [id]: !this.overlays[id] };
+    }
+
+    /** Turn the box by a drag, keeping the eye off the poles where the
+     *  lightness axis would collapse to a point. */
+    turn(dx: number, dy: number) {
+        this.yaw += dx;
+        this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + dy));
     }
 }
 

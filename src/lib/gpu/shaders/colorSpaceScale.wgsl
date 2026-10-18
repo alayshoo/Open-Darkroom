@@ -3,13 +3,17 @@
 // What the two colour-space plots normalise against: the fullest cell of each
 // grid. One workgroup reduces both, so the answer never leaves the GPU — the
 // same arrangement histogramScale.wgsl uses, and for the same reason.
+//
+// The volume's figure is read for the softness of the solid's edge rather than
+// for a height, so a grid nobody switched on reduces to 1 and costs the pass
+// nothing it would not have cost anyway.
 
 //!include "chunks/gamutGrids.wgsl"
 
 const THREADS: u32 = 256u;
 
 @group(0) @binding(0) var<storage, read>       xyBins: array<u32, XY_TOTAL>;
-@group(0) @binding(1) var<storage, read>       hlBins: array<u32, HL_TOTAL>;
+@group(0) @binding(1) var<storage, read>       volBins: array<u32, VOL_TOTAL>;
 @group(0) @binding(2) var<storage, read_write> scale:  array<u32, 2>;
 
 var<workgroup> partial: array<u32, THREADS>;
@@ -40,8 +44,8 @@ fn main(@builtin(local_invocation_index) lid: u32) {
   }
 
   best = 0u;
-  for (var i = lid; i < HL_CELLS; i += THREADS) {
-    best = max(best, hlBins[i * 2u + HL_COUNT]);
+  for (var i = lid; i < VOL_TOTAL; i += THREADS) {
+    best = max(best, volBins[i]);
   }
   workgroupBarrier();
   partial[lid] = best;

@@ -12,6 +12,7 @@
         type GamutStats,
     } from "$lib/gpu/pipelines/colorSpacePipeline";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
+    import { proofing } from "$lib/gpu/proofing.svelte";
     import { GAMUT_ORDER, GAMUT_TINTS } from "$lib/gpu/gamutOverlay";
     import { OUTPUT_SPACE_LABELS, WORKING_SPACE } from "$lib/gpu/outputSpace";
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -51,23 +52,59 @@
 
     function onFrame() {
         frameHandle = null;
-        if (!dirty) return;
         // A request made before the canvases or the image were ready outlives
         // the frame that could not serve it.
-        if (draw()) dirty = false;
+        if (dirty) {
+            if (draw()) {
+                dirty = false;
+                viewDirty = false;
+            }
+            return;
+        }
+        if (viewDirty && redraw()) viewDirty = false;
+    }
+
+    /** The views to draw into, or null while nothing is ready to receive one. */
+    function targets() {
+        if (!chromaticityLink || chromaticityCanvas.width === 0) return null;
+
+        const showVolume =
+            colorSpaceDebug.volume && volumeLink !== null && volumeCanvas.width > 0;
+
+        return {
+            chromaticity: chromaticityLink.canvasConfig.getCurrentTexture().createView(),
+            volume: showVolume
+                ? volumeLink!.canvasConfig.getCurrentTexture().createView()
+                : undefined,
+        };
     }
 
     function draw(): boolean {
-        if (!pipeline || !image || !chromaticityLink || !volumeLink) return false;
-        if (chromaticityCanvas.width === 0 || volumeCanvas.width === 0) return false;
+        if (!pipeline || !image) return false;
+        const views = targets();
+        if (!views) return false;
 
-        pipeline.render(image.texture, sliders, {
-            chromaticity: chromaticityLink.canvasConfig.getCurrentTexture().createView(),
-            volume: volumeLink.canvasConfig.getCurrentTexture().createView(),
-        });
+        pipeline.render(image.texture, sliders, views);
 
         if (statsHandle !== null) clearTimeout(statsHandle);
         statsHandle = setTimeout(readStats, STATS_SETTLE_MS);
+        return true;
+    }
+
+    // Turning the box changes where it is seen from, not what was measured, so
+    // it costs a draw rather than another pass over the image.
+    let viewDirty = false;
+
+    function requestRedraw() {
+        viewDirty = true;
+        if (frameHandle === null) frameHandle = requestAnimationFrame(onFrame);
+    }
+
+    function redraw(): boolean {
+        if (!pipeline) return false;
+        const views = targets();
+        if (!views) return false;
+        pipeline.redraw(views);
         return true;
     }
 
@@ -154,6 +191,7 @@
                 statsHandle = null;
             }
             dirty = false;
+            viewDirty = false;
         };
     });
 
@@ -176,11 +214,37 @@
 
     $effect(() => {
         if (!pipeline) return;
-        pipeline.setOverlays(colorSpaceDebug.overlays);
-        // A space that has just been switched off leaves a stale tally behind,
-        // and the next pass is what clears it.
+        pipeline.setOverlays({
+            enabled: colorSpaceDebug.overlays,
+            transformed: colorSpaceDebug.transformed,
+            volume: colorSpaceDebug.volume,
+            destination: gpu.displaySpace,
+        });
+        // A space that has just been switched off, or a measurement taken from
+        // the other side of the transform, leaves a stale tally behind — and
+        // the next pass is what clears it.
         stats = null;
         requestRender();
+    });
+
+    // The transform the panel can measure through is the one the preview is
+    // rendered with, soft proofing included.
+    $effect(() => {
+        if (!pipeline) return;
+        pipeline.setOutputSpace(gpu.displaySpace, proofing.space);
+        requestRender();
+    });
+
+    $effect(() => {
+        if (!pipeline) return;
+        pipeline.setVolumeView({
+            yaw: colorSpaceDebug.yaw,
+            pitch: colorSpaceDebug.pitch,
+            aspect: volumeCanvas?.width
+                ? volumeCanvas.width / volumeCanvas.height
+                : 1,
+        });
+        requestRedraw();
     });
 
     $effect(() => {
@@ -200,6 +264,33 @@
         if (value === 0) return "0%";
         if (value < 0.1) return "<0.1%";
         return `${value.toFixed(1)}%`;
+    }
+
+    // Dragging turns the box. The pointer is captured so a drag that leaves the
+    // canvas keeps turning it rather than stopping at the edge.
+    let turning = false;
+    let last = { x: 0, y: 0 };
+
+    const TURN_PER_PIXEL = 0.011;
+
+    function startTurn(event: PointerEvent) {
+        turning = true;
+        last = { x: event.clientX, y: event.clientY };
+        volumeCanvas.setPointerCapture(event.pointerId);
+    }
+
+    function turn(event: PointerEvent) {
+        if (!turning) return;
+        colorSpaceDebug.turn(
+            (event.clientX - last.x) * TURN_PER_PIXEL,
+            (event.clientY - last.y) * TURN_PER_PIXEL,
+        );
+        last = { x: event.clientX, y: event.clientY };
+    }
+
+    function endTurn(event: PointerEvent) {
+        turning = false;
+        volumeCanvas.releasePointerCapture(event.pointerId);
     }
 </script>
 
@@ -222,7 +313,7 @@
                         <span class="swatch" style="background: {GAMUT_TINTS[id]}"></span>
                         <span class="name">{OUTPUT_SPACE_LABELS[id]}</span>
                         <span class="outside">
-                            {#if id === WORKING_SPACE}
+                            {#if id === WORKING_SPACE && !colorSpaceDebug.transformed}
                                 working
                             {:else if outside !== null}
                                 {formatPercentage(outside)} out
@@ -234,16 +325,63 @@
                 </li>
             {/each}
         </ul>
+
+        <label class="measure">
+            <input
+                type="checkbox"
+                checked={colorSpaceDebug.transformed}
+                onchange={() => (colorSpaceDebug.transformed = !colorSpaceDebug.transformed)}
+            />
+            <span class="name">After output transform</span>
+        </label>
+
         <p class="note">
-            Measured in the working space, after the adjustments and before the
-            output transform.
+            {#if colorSpaceDebug.transformed}
+                What the preview is showing, fitted to
+                {OUTPUT_SPACE_LABELS[gpu.displaySpace]}{proofing.space
+                    ? ` and proofed against ${OUTPUT_SPACE_LABELS[proofing.space]}`
+                    : ""}. Nothing can fall outside the space being rendered to,
+                so a zero here says the compression worked.
+            {:else}
+                The colour the adjustments are asking for, measured in the
+                working space before the output transform.
+            {/if}
         </p>
     </div>
 
     <div class="panel glass rounded-[12px] p-2.5">
-        <h2>Colour volume · hue × light</h2>
-        <canvas class="volume" bind:this={volumeCanvas}></canvas>
-        <p class="axes"><span>hue</span><span>lightness ↑</span></p>
+        <div class="volume-head">
+            <h2>Colour volume · Oklab</h2>
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    checked={colorSpaceDebug.volume}
+                    onchange={() => (colorSpaceDebug.volume = !colorSpaceDebug.volume)}
+                />
+            </label>
+        </div>
+
+        <!-- Kept mounted while it is off: the canvas is the panel's size, and
+             tearing it down would make the sidebar jump every time the switch
+             moved. Nothing is binned or drawn into it meanwhile. -->
+        <div class="volume-slot" class:off={!colorSpaceDebug.volume}>
+            <canvas
+                class="volume"
+                bind:this={volumeCanvas}
+                onpointerdown={startTurn}
+                onpointermove={turn}
+                onpointerup={endTurn}
+                onpointercancel={endTurn}
+            ></canvas>
+            {#if !colorSpaceDebug.volume}
+                <p class="placeholder">off</p>
+            {/if}
+        </div>
+
+        <p class="axes">
+            <span>L ↑ · a/b</span>
+            <span>{colorSpaceDebug.volume ? "drag to turn" : ""}</span>
+        </p>
     </div>
 </div>
 
@@ -284,8 +422,47 @@
         aspect-ratio: 8 / 9;
     }
 
+    /* Square, so the box is a box and turning it never runs a corner off the
+       edge of the panel. */
     canvas.volume {
-        aspect-ratio: 2 / 1;
+        aspect-ratio: 1 / 1;
+        cursor: grab;
+        touch-action: none;
+    }
+
+    canvas.volume:active {
+        cursor: grabbing;
+    }
+
+    .volume-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+
+    .volume-slot {
+        position: relative;
+    }
+
+    .volume-slot.off canvas {
+        opacity: 0.25;
+        cursor: default;
+        pointer-events: none;
+    }
+
+    .placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        color: rgba(255, 255, 255, 0.35);
+    }
+
+    .measure {
+        margin-top: 0.35rem;
     }
 
     .axes {

@@ -1,14 +1,16 @@
 // src/lib/gpu/shaders/colorSpace.wgsl
 //
 // Where the edited image sits in colour, binned two ways in one pass over the
-// overview: its chromaticities on the CIE 1931 diagram, and its lightness
-// against its hue.
+// overview: its chromaticities on the CIE 1931 diagram, and its colour volume
+// through Oklab.
 //
-// Both are measured in the working space, after the adjustment chain and before
-// the output transform. That is the one place the question can be answered: the
-// transform fits the picture into whatever is being displayed, so a gamut plot
-// taken after it would show every image comfortably inside the display and
-// never the colour the edit is asking for.
+// Both can be measured on either side of the output transform, and the two
+// answer different questions. Before it is the colour the edit is asking for,
+// which is the only place the gamut question can be put: the transform fits the
+// picture into whatever is being displayed, so a plot taken after it shows every
+// image comfortably inside the display and never what it cost to put it there.
+// After it is what the screen is actually showing, and the difference between
+// the two is the compression doing its work.
 
 @group(0) @binding(0) var inputTexture: texture_2d<f32>;
 
@@ -18,21 +20,37 @@
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
 //!include "chunks/developChain.wgsl"
+//!include "chunks/outputTransform.wgsl"
 //!include "chunks/colorimetry.wgsl"
 //!include "chunks/gamutGrids.wgsl"
 
-@group(0) @binding(2) var<storage, read_write> xyBins: array<atomic<u32>, XY_TOTAL>;
-@group(0) @binding(3) var<storage, read_write> hlBins: array<atomic<u32>, HL_TOTAL>;
-@group(0) @binding(4) var<storage, read_write> stats:  array<atomic<u32>, STAT_WORDS>;
+@group(0) @binding(2) var<storage, read_write> xyBins:  array<atomic<u32>, XY_TOTAL>;
+@group(0) @binding(3) var<storage, read_write> volBins: array<atomic<u32>, VOL_TOTAL>;
+@group(0) @binding(4) var<storage, read_write> stats:   array<atomic<u32>, STAT_WORDS>;
 @group(0) @binding(5) var<storage, read>      overlay: GamutOverlay;
 
-// The grids are too large for workgroup memory — 28k words against a 16KiB
-// budget — so they take the global atomics directly. They can afford to: a
-// photograph spreads over thousands of cells, where the statistics below are
-// five addresses every single pixel votes on.
+// Where the preview is being rendered to, so that the measurement taken after
+// the transform is the one the screen is showing — soft proofing included.
+@group(0) @binding(6) var<uniform> outputSpace: OutputSpace;
+
+// The grids are far too large for workgroup memory, so they take the global
+// atomics directly. They can afford to: a photograph spreads over thousands of
+// cells, where the statistics below are five addresses every pixel votes on.
 var<workgroup> local_stats: array<atomic<u32>, STAT_WORDS>;
 
 const WORKGROUP_THREADS: u32 = 256u;
+
+// One pixel through the chain, as far as the panel is measuring it.
+fn measured_xyz(coord: vec2u) -> vec3f {
+  let working = develop(textureLoad(inputTexture, coord, 0).rgb);
+  if (overlay.transformed == 0u) {
+    return M_WORKING_TO_XYZ * max(working, vec3f(0.0));
+  }
+  // Stopping short of the transfer curve: that is an encoding, and this is a
+  // question about colour.
+  let destination = to_destination_linear(working, outputSpace);
+  return overlay.destination_to_xyz * max(destination, vec3f(0.0));
+}
 
 fn bin_chromaticity(xy: vec2f) {
   let cell = vec2u(
@@ -42,12 +60,14 @@ fn bin_chromaticity(xy: vec2f) {
   atomicAdd(&xyBins[cell.y * XY_BINS + cell.x], 1u);
 }
 
-fn bin_volume(lch: vec3f) {
-  let hue = u32(clamp(lch.z, 0.0, 0.9999) * f32(HUE_BINS));
-  let light = u32(clamp(lch.x / LIGHT_MAX, 0.0, 0.9999) * f32(LIGHT_BINS));
-  let base = (light * HUE_BINS + hue) * 2u;
-  atomicAdd(&hlBins[base + HL_COUNT], 1u);
-  atomicAdd(&hlBins[base + HL_CHROMA], u32(max(lch.y, 0.0) * CHROMA_SCALE));
+// Colours outside the plotted box are dropped rather than clamped onto its
+// face, which would build a wall of colour the image does not contain.
+fn bin_volume(lab: vec3f) {
+  let cell = volume_cell(lab);
+  if (any(cell < vec3f(0.0)) || any(cell >= vec3f(1.0))) { return; }
+
+  let at = vec3u(cell * f32(VOL_BINS));
+  atomicAdd(&volBins[(at.z * VOL_BINS + at.y) * VOL_BINS + at.x], 1u);
 }
 
 @compute @workgroup_size(16, 16)
@@ -64,19 +84,21 @@ fn main(
   // image gates the work rather than returning out of it.
   let dimensions = textureDimensions(inputTexture);
   if (gid.x < dimensions.x && gid.y < dimensions.y) {
-    let working = develop(textureLoad(inputTexture, gid.xy, 0).rgb);
-    let xy = chromaticity(working);
+    let xyz = measured_xyz(gid.xy);
+    let sum = xyz.x + xyz.y + xyz.z;
 
-    // A black pixel has no hue and no chromaticity, and counting it would put a
-    // spike on whichever cell the division happened to land in.
-    if (xy.y >= 0.0) {
-      bin_chromaticity(xy);
-      bin_volume(oklab_to_lch(working_to_oklab(working)));
+    // A black pixel has no chromaticity, and counting it would put a spike on
+    // whichever cell the division happened to land in.
+    if (sum >= COLORIMETRY_EPSILON) {
+      bin_chromaticity(vec2f(xyz.x, xyz.y) / sum);
+      if (overlay.volume != 0u) {
+        bin_volume(xyz_to_oklab(xyz));
+      }
 
       atomicAdd(&local_stats[STAT_COUNTED], 1u);
       for (var s = 0u; s < GAMUT_SPACES; s++) {
         let space = overlay.spaces[s];
-        if (space.enabled != 0u && !inside_gamut(space, xy)) {
+        if (space.enabled != 0u && !inside_gamut(space, vec2f(xyz.x, xyz.y) / sum)) {
           atomicAdd(&local_stats[STAT_OUTSIDE + s], 1u);
         }
       }

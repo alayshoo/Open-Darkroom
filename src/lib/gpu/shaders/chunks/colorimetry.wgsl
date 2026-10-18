@@ -48,7 +48,8 @@ const M_LAB_TO_LMS = mat3x3<f32>(
 // division that finds its chromaticity would not be meaningful either.
 const COLORIMETRY_EPSILON: f32 = 1e-6;
 
-// CIE 1931 xy of a colour, or a negative y for one too dark to have any.
+// CIE 1931 xy of a working-space colour, or a negative y for one too dark to
+// have any.
 fn chromaticity(working: vec3f) -> vec2f {
   let xyz = M_WORKING_TO_XYZ * max(working, vec3f(0.0));
   let sum = xyz.x + xyz.y + xyz.z;
@@ -62,8 +63,12 @@ fn cbrt_signed(v: vec3f) -> vec3f {
   return sign(v) * pow(abs(v), vec3f(1.0 / 3.0));
 }
 
+fn xyz_to_oklab(xyz: vec3f) -> vec3f {
+  return M_LMS_TO_LAB * cbrt_signed(M_XYZ_TO_LMS * xyz);
+}
+
 fn working_to_oklab(working: vec3f) -> vec3f {
-  return M_LMS_TO_LAB * cbrt_signed(M_XYZ_TO_LMS * (M_WORKING_TO_XYZ * working));
+  return xyz_to_oklab(M_WORKING_TO_XYZ * working);
 }
 
 fn oklab_to_working(lab: vec3f) -> vec3f {

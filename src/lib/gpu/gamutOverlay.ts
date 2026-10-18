@@ -8,7 +8,12 @@
 // percentages therefore cannot disagree — they are the same three points.
 
 import type { GPUSession } from "$lib/types/gpuTypes";
-import { OUTPUT_SPACE_IDS, PRIMARIES, type OutputSpaceId } from "./outputSpace";
+import {
+    OUTPUT_SPACE_IDS,
+    PRIMARIES,
+    spaceToXyz,
+    type OutputSpaceId,
+} from "./outputSpace";
 
 /**
  * The spectral locus in CIE 1931 xy, at 10nm from 380nm to 700nm. The last
@@ -52,11 +57,32 @@ export const GAMUT_TINTS: Record<OutputSpaceId, string> = {
     "rec2020": "#ff87b3",
 };
 
+/**
+ * Where each field starts, in words. The matrix leads because a WGSL mat3x3 is
+ * 16-byte aligned, and three 16-byte columns is what it occupies.
+ */
+const DESTINATION_TO_XYZ = 0;
+const SPACES_OFFSET = 12;
 /** Words per GamutSpace: three chromaticities, the flag and the tint. */
 const SPACE_WORDS = 8;
-const LOCUS_OFFSET = GAMUT_SPACES * SPACE_WORDS;
+const LOCUS_OFFSET = SPACES_OFFSET + GAMUT_SPACES * SPACE_WORDS;
+const TRANSFORMED_WORD = LOCUS_OFFSET + LOCUS_POINTS * 2;
+const VOLUME_WORD = TRANSFORMED_WORD + 1;
 
-export const GAMUT_OVERLAY_BUFFER_SIZE = (LOCUS_OFFSET + LOCUS_POINTS * 2) * 4;
+export const GAMUT_OVERLAY_BUFFER_SIZE = (VOLUME_WORD + 1) * 4;
+
+/** What the panel is measuring, and which of its plots are switched on. */
+export interface GamutOverlayState {
+    enabled: Record<OutputSpaceId, boolean>;
+    /** Measure what the output transform produces rather than what the
+     *  adjustments asked for. */
+    transformed: boolean;
+    /** Whether the colour volume's grid is worth filling. */
+    volume: boolean;
+    /** The space the transform is rendering to, which only matters while
+     *  `transformed` is set. */
+    destination: OutputSpaceId;
+}
 
 function packTint(hex: string): number {
     return parseInt(hex.slice(1), 16) & 0xffffff;
@@ -64,8 +90,9 @@ function packTint(hex: string): number {
 
 export interface GamutOverlayBuffer {
     buffer: GPUBuffer;
-    /** Which triangles the diagram draws, and so which the statistics count. */
-    setEnabled: (enabled: Record<OutputSpaceId, boolean>) => void;
+    /** Which triangles the diagram draws — and so which the statistics count —
+     *  along with what the panel is measuring. */
+    set: (state: GamutOverlayState) => void;
     destroy: () => void;
 }
 
@@ -88,7 +115,7 @@ export function createGamutOverlayBuffer(gpu: GPUSession): GamutOverlayBuffer {
     });
 
     GAMUT_ORDER.forEach((id, slot) => {
-        const at = slot * SPACE_WORDS;
+        const at = SPACES_OFFSET + slot * SPACE_WORDS;
         PRIMARIES[id].forEach(([x, y], primary) => {
             floats[at + primary * 2] = x;
             floats[at + primary * 2 + 1] = y;
@@ -96,10 +123,21 @@ export function createGamutOverlayBuffer(gpu: GPUSession): GamutOverlayBuffer {
         words[at + 7] = packTint(GAMUT_TINTS[id]);
     });
 
-    function setEnabled(enabled: Record<OutputSpaceId, boolean>) {
+    // A WGSL mat3x3<f32> is three 16-byte columns, not nine packed floats, so
+    // each column goes into its own vec4 slot.
+    function writeMatrix(at: number, m: Float32Array) {
+        for (let col = 0; col < 3; col++) {
+            floats.set(m.subarray(col * 3, col * 3 + 3), at + col * 4);
+        }
+    }
+
+    function set(state: GamutOverlayState) {
+        writeMatrix(DESTINATION_TO_XYZ, spaceToXyz(state.destination));
         GAMUT_ORDER.forEach((id, slot) => {
-            words[slot * SPACE_WORDS + 6] = enabled[id] ? 1 : 0;
+            words[SPACES_OFFSET + slot * SPACE_WORDS + 6] = state.enabled[id] ? 1 : 0;
         });
+        words[TRANSFORMED_WORD] = state.transformed ? 1 : 0;
+        words[VOLUME_WORD] = state.volume ? 1 : 0;
         gpu.device.queue.writeBuffer(buffer, 0, staging);
     }
 
@@ -107,5 +145,5 @@ export function createGamutOverlayBuffer(gpu: GPUSession): GamutOverlayBuffer {
         buffer.destroy();
     }
 
-    return { buffer, setEnabled, destroy };
+    return { buffer, set, destroy };
 }

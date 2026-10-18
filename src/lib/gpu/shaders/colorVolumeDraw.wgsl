@@ -1,30 +1,45 @@
 // src/lib/gpu/shaders/colorVolumeDraw.wgsl
 //
-// The colour volume: hue across the plot, lightness up it, and in every cell
-// the chroma its pixels actually reached, drawn as the colour that describes.
+// The colour volume as a solid: the image's colours occupying a box through
+// Oklab, lightness up and a/b across, inside the wireframe that bounds it.
 //
-// It answers what the chromaticity diagram cannot. A triangle in xy says
-// nothing about brightness, so two images with the same hues at wildly
-// different exposures plot identically there — here they do not, and a hue the
-// edit only reaches in the shadows reads differently from one it carries all
-// the way up.
+// Raymarched rather than drawn as points. A point cloud needs a depth buffer,
+// a draw sized to the grid and a vertex for every cell whether or not anything
+// is in it; a ray per fragment needs none of that, occludes itself exactly, and
+// gives the wireframe a depth to be hidden behind. It costs one full-screen
+// pass, which runs when the view turns or the bins change and not otherwise.
 
 //!include "chunks/tone.wgsl"
 //!include "chunks/colorimetry.wgsl"
 //!include "chunks/gamutGrids.wgsl"
 
-@group(0) @binding(0) var<storage, read> hlBins: array<u32, HL_TOTAL>;
-@group(0) @binding(1) var<storage, read> scale:  array<u32, 2>;
+@group(0) @binding(0) var<storage, read> volBins: array<u32, VOL_TOTAL>;
+@group(0) @binding(1) var<storage, read> scale:   array<u32, 2>;
 
-const GRID_TINT = vec3f(0.42, 0.44, 0.48);
+// Where the box is being looked at from.
+struct Camera {
+  yaw:    f32,
+  pitch:  f32,
+  // Width over height of the target, so the box stays a box.
+  aspect: f32,
+  // Half the box's extent in clip units: how much of the panel it fills.
+  zoom:   f32,
+}
 
-// Floor under a cell that holds anything at all, so a hue carried by a handful
-// of pixels is visible rather than merely present.
-const PRESENT_FLOOR: f32 = 0.30;
+@group(0) @binding(2) var<uniform> camera: Camera;
+
+// Steps along the ray. The box is 48 cells on its longest diagonal, so a little
+// over that resolves every cell the ray passes through.
+const STEPS: u32 = 96u;
+
+const BOX_TINT = vec3f(0.68, 0.71, 0.76);
+const EDGE_ALPHA: f32 = 0.7;
+// How much of that an edge keeps when the solid is standing in front of it.
+// Dropping those edges outright leaves a box with no back, which reads flat.
+const HIDDEN_EDGE: f32 = 0.3;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
-  // Hue across, lightness up.
   @location(0) uv: vec2f,
 }
 
@@ -42,83 +57,173 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
 
   var out: VertexOut;
   out.position = vec4f(p, 0.0, 1.0);
-  out.uv = p * 0.5 + vec2f(0.5);
+  out.uv = p;
   return out;
 }
 
-// A cell's coverage and its mean chroma. Hue wraps — red is one cell from
-// magenta — while lightness does not.
-fn cell(hue: i32, light: i32) -> vec2f {
-  if (light < 0 || light >= i32(LIGHT_BINS)) { return vec2f(0.0); }
-  let h = u32((hue + i32(HUE_BINS)) % i32(HUE_BINS));
+// The camera's basis. Yaw turns the box about its lightness axis; pitch lifts
+// the eye above it.
+fn basis() -> mat3x3<f32> {
+  let cy = cos(camera.yaw);
+  let sy = sin(camera.yaw);
+  let cp = cos(camera.pitch);
+  let sp = sin(camera.pitch);
 
-  let base = (u32(light) * HUE_BINS + h) * 2u;
-  let count = hlBins[base + HL_COUNT];
-  if (count == 0u) { return vec2f(0.0); }
-
-  let coverage = PRESENT_FLOOR
-    + (1.0 - PRESENT_FLOOR) * log(1.0 + f32(count)) / log(1.0 + f32(scale[1]));
-  let chroma = f32(hlBins[base + HL_CHROMA]) / (f32(count) * CHROMA_SCALE);
-  return vec2f(coverage, chroma);
+  let right   = vec3f(cy, 0.0, -sy);
+  let up      = vec3f(sy * sp, cp, cy * sp);
+  let forward = vec3f(sy * cp, -sp, cy * cp);
+  return mat3x3<f32>(right, up, forward);
 }
 
-// Read between cells, so the plot describes a volume rather than a mosaic. The
-// chroma is weighted by coverage: an empty neighbour has no chroma to average
-// in, and letting its zero pull the mean down would bleed grey into every edge.
-fn sample_cell(uv: vec2f) -> vec2f {
-  let t = vec2f(uv.x * f32(HUE_BINS), uv.y * f32(LIGHT_BINS)) - vec2f(0.5);
-  let base = vec2i(floor(t));
-  let f = fract(t);
+/// Where a point in the unit box lands on the panel, and how far along the ray
+/// that reaches it the point sits — measured from the box's centre, which is
+/// why reading it back costs the same two units the ray starts before.
+fn project(cell: vec3f, view: mat3x3<f32>) -> vec3f {
+  let centred = cell - vec3f(0.5);
+  let eye = transpose(view) * centred;
+  return vec3f(eye.x / (camera.zoom * camera.aspect), eye.y / camera.zoom, eye.z);
+}
 
-  var coverage = 0.0;
-  var weighted = 0.0;
-  for (var dy = 0; dy < 2; dy++) {
-    for (var dx = 0; dx < 2; dx++) {
-      let c = cell(base.x + dx, base.y + dy);
-      let w = mix(1.0 - f.x, f.x, f32(dx)) * mix(1.0 - f.y, f.y, f32(dy));
-      coverage += c.x * w;
-      weighted += c.x * c.y * w;
-    }
-  }
+/// The slab test: where a ray enters and leaves the unit box.
+fn box_span(origin: vec3f, direction: vec3f) -> vec2f {
+  let inverse = 1.0 / direction;
+  let a = (vec3f(0.0) - origin) * inverse;
+  let b = (vec3f(1.0) - origin) * inverse;
+  let near = min(a, b);
+  let far = max(a, b);
+  return vec2f(
+    max(near.x, max(near.y, near.z)),
+    min(far.x, min(far.y, far.z)),
+  );
+}
 
-  return vec2f(coverage, select(0.0, weighted / coverage, coverage > 1e-5));
+fn occupancy(cell: vec3f) -> u32 {
+  if (any(cell < vec3f(0.0)) || any(cell >= vec3f(1.0))) { return 0u; }
+  let at = vec3u(cell * f32(VOL_BINS));
+  return volBins[(at.z * VOL_BINS + at.y) * VOL_BINS + at.x];
+}
+
+/// The colour a cell stands for, which is the colour of its own coordinates.
+/// Clamped rather than gamut-compressed: this is a swatch of one colour, and
+/// the honest thing for one the display cannot hold is the nearest it can.
+fn cell_colour(cell: vec3f) -> vec3f {
+  let working = oklab_to_working(volume_lab(cell));
+  return encode_srgb(clamp(working, vec3f(0.0), vec3f(1.0)));
+}
+
+/// A little shading off the surface, so the solid reads as one rather than as a
+/// flat patch of colour. Taken from how far away the surface is, which varies
+/// smoothly — reading the neighbouring cells instead speckles every face, since
+/// occupancy is a yes or no and the cells are large enough to see.
+fn relief(t: f32, span: vec2f) -> f32 {
+  let depth = clamp((t - span.x) / max(span.y - span.x, 1e-5), 0.0, 1.0);
+  return mix(1.15, 0.78, depth);
+}
+
+/// Straight-alpha source over destination, both carried as (rgb, a).
+fn over(src: vec4f, dst: vec4f) -> vec4f {
+  let a = src.a + dst.a * (1.0 - src.a);
+  if (a < 1e-5) { return vec4f(0.0); }
+  return vec4f((src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a, a);
+}
+
+fn segment_distance(a: vec2f, b: vec2f, p: vec2f) -> f32 {
+  let ab = b - a;
+  let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+  return length(p - (a + ab * t));
+}
+
+/// Where along a segment the closest point to `p` fell, for the depth of an
+/// edge at the fragment that is drawing it.
+fn segment_at(a: vec2f, b: vec2f, p: vec2f) -> f32 {
+  let ab = b - a;
+  return clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let px = max(fwidth(in.uv.x), 1e-5);
+  let view = basis();
 
-  // The quarters of lightness, and the twelve hue sectors — the latter in the
-  // hue they stand for, which is the only thing orienting the horizontal axis.
-  var grid = 0.0;
-  for (var i = 1u; i < 4u; i++) {
-    grid = max(grid, 1.0 - smoothstep(0.0, px, abs(in.uv.y - f32(i) / 4.0)));
-  }
+  // An orthographic ray: the panel is a window onto the box rather than a lens,
+  // so parallel edges stay parallel and a length means the same everywhere.
+  let right = view[0];
+  let up = view[1];
+  let forward = view[2];
+  let origin = vec3f(0.5)
+    + right * (in.uv.x * camera.zoom * camera.aspect)
+    + up * (in.uv.y * camera.zoom)
+    - forward * 2.0;
 
-  var colour = GRID_TINT;
-  var alpha = grid * 0.28;
+  let span = box_span(origin, forward);
 
-  for (var i = 1u; i < 12u; i++) {
-    let hue = f32(i) / 12.0;
-    let line = 1.0 - smoothstep(0.0, px, abs(in.uv.x - hue));
-    if (line > 0.0) {
-      let swatch = oklab_to_working(lch_to_oklab(vec3f(0.72, 0.12, hue)));
-      colour = encode_srgb(clamp(swatch, vec3f(0.0), vec3f(1.0)));
-      alpha = max(alpha, line * 0.34);
+  var colour = vec3f(0.0);
+  var alpha = 0.0;
+  // How far along the ray the solid was struck, and so what the wireframe has
+  // to be in front of to be seen.
+  var hit = 1e9;
+
+  if (span.y > span.x && span.y > 0.0) {
+    let start = max(span.x, 0.0);
+    let stride = (span.y - start) / f32(STEPS);
+
+    for (var i = 0u; i < STEPS; i++) {
+      let t = start + (f32(i) + 0.5) * stride;
+      let cell = origin + forward * t;
+      let count = occupancy(cell);
+      if (count == 0u) { continue; }
+
+      // The first cell the ray meets is the surface. Its coverage softens the
+      // edge of the solid, where a cell holding two pixels would otherwise read
+      // as solid as the middle of a sky.
+      let density = log(1.0 + f32(count)) / log(1.0 + f32(scale[1]));
+      colour = cell_colour(cell) * relief(t, span);
+      alpha = clamp(0.35 + 2.2 * density, 0.0, 1.0);
+      hit = t;
+      break;
     }
   }
 
-  let sampled = sample_cell(in.uv);
-  if (sampled.x > 0.0) {
-    let lightness = in.uv.y * LIGHT_MAX;
-    let working = oklab_to_working(lch_to_oklab(vec3f(lightness, sampled.y, in.uv.x)));
+  // The box, as twelve edges between its eight corners. Drawn from the same
+  // camera as the solid, so an edge the solid stands in front of can be told
+  // from one it stands behind, and kept faint rather than painted over it.
+  var front = 0.0;
+  var back = 0.0;
+  for (var e = 0u; e < 12u; e++) {
+    // Each axis contributes four edges, one for each corner of the face it
+    // runs across.
+    let axis = e / 4u;
+    let corner = e % 4u;
+    let other = vec2f(f32(corner & 1u), f32((corner >> 1u) & 1u));
 
-    // Clamped, not gamut-compressed: this is a swatch of one colour rather than
-    // a picture, and the honest thing for a chroma the display cannot hold is
-    // the nearest it can.
-    colour = encode_srgb(clamp(working, vec3f(0.0), vec3f(1.0)));
-    alpha = max(alpha, sampled.x);
+    var a = vec3f(other.x, other.y, 0.0);
+    var b = vec3f(other.x, other.y, 1.0);
+    if (axis == 0u) {
+      a = vec3f(0.0, other.x, other.y);
+      b = vec3f(1.0, other.x, other.y);
+    } else if (axis == 1u) {
+      a = vec3f(other.x, 0.0, other.y);
+      b = vec3f(other.x, 1.0, other.y);
+    }
+
+    let pa = project(a, view);
+    let pb = project(b, view);
+    let line = 1.0 - smoothstep(0.0, px * 1.6, segment_distance(pa.xy, pb.xy, in.uv));
+    if (line <= 0.0) { continue; }
+
+    // The projection measures depth from the box's centre; the ray starts two
+    // units before it.
+    let depth = mix(pa.z, pb.z, segment_at(pa.xy, pb.xy, in.uv)) + 2.0;
+    if (hit < 1e8 && depth > hit) {
+      back = max(back, line);
+    } else {
+      front = max(front, line);
+    }
   }
 
-  return vec4f(colour * alpha, alpha);
+  var layered = over(vec4f(BOX_TINT, back * EDGE_ALPHA * HIDDEN_EDGE), vec4f(0.0));
+  layered = over(vec4f(colour, alpha), layered);
+  layered = over(vec4f(BOX_TINT, front * EDGE_ALPHA), layered);
+
+  return vec4f(layered.rgb * layered.a, layered.a);
 }
