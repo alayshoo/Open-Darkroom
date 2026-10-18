@@ -4,6 +4,7 @@
 // pipeline directly, without a running Tauri app.
 pub mod color;
 pub mod icc;
+pub mod raw;
 pub mod output_space;
 pub mod image_opening;
 pub mod export_rendering;

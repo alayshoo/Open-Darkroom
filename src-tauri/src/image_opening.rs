@@ -404,6 +404,39 @@ pub fn payload_len_for(
         + 3 * HIST_BINS * 4
 }
 
+/// Decode a file the `image` crate handles, returning its samples, channel
+/// count, dimensions and what its profile says those samples mean.
+fn decode_encoded(
+    path: &std::path::Path,
+) -> Result<(Vec<u16>, usize, u32, u32, SourceSpace), String> {
+    let open_err = |e: image::ImageError| format!("Failed to open image: {e}");
+    let mut decoder = image::ImageReader::open(path)
+        .map_err(|e| format!("Failed to open image: {e}"))?
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to open image: {e}"))?
+        .into_decoder()
+        .map_err(open_err)?;
+
+    // The profile has to come off the decoder before building the image
+    // consumes it. No profile means sRGB, which is what an untagged file means
+    // in practice and what every file was assumed to be before this.
+    let space = SourceSpace::resolve(decoder.icc_profile().ok().flatten());
+    let img = image::DynamicImage::from_decoder(decoder).map_err(open_err)?;
+
+    let (width, height) = (img.width(), img.height());
+
+    // Sources whose format declares no alpha are kept three-wide. `into_rgb16` /
+    // `into_rgba16` consume the DynamicImage, so the decoded source buffer is
+    // released as soon as the conversion is done rather than idling.
+    let (samples, channels) = if img.color().has_alpha() {
+        (img.into_rgba16().into_raw(), 4)
+    } else {
+        (img.into_rgb16().into_raw(), 3)
+    };
+
+    Ok((samples, channels, width, height, space))
+}
+
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
 /// Error returned when the user dismisses the file picker.
@@ -420,10 +453,14 @@ pub(crate) async fn open_image_file(
 ) -> Result<Response, String> {
     println!("open_image_file: started");
 
+    let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
+    extensions.extend(crate::raw::dialog_extensions());
+    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+
     let path = app
         .dialog()
         .file()
-        .add_filter("Images", &["jpg", "jpeg", "png"])
+        .add_filter("Images", &extensions)
         .blocking_pick_file()
         .ok_or(OPEN_CANCELLED)?
         .into_path()
@@ -440,29 +477,20 @@ pub(crate) async fn open_image_file(
 
     let overall_start = Instant::now();
 
-    let open_err = |e: image::ImageError| format!("Failed to open image: {e}");
-    let mut decoder = image::ImageReader::open(&path)
-        .map_err(|e| format!("Failed to open image: {e}"))?
-        .with_guessed_format()
-        .map_err(|e| format!("Failed to open image: {e}"))?
-        .into_decoder()
-        .map_err(open_err)?;
-
-    // The profile has to come off the decoder before building the image
-    // consumes it. No profile means sRGB, which is what an untagged file means
-    // in practice and what every file was assumed to be before this.
-    let space = SourceSpace::resolve(decoder.icc_profile().ok().flatten());
-    let img = image::DynamicImage::from_decoder(decoder).map_err(open_err)?;
-
-    let (full_width, full_height) = (img.width(), img.height());
-
-    // Sources whose format declares no alpha are kept three-wide. `into_rgb16` /
-    // `into_rgba16` consume the DynamicImage, so the decoded source buffer is
-    // released as soon as the conversion is done rather than idling.
-    let (samples, channels) = if img.color().has_alpha() {
-        (img.into_rgba16().into_raw(), 4)
+    // Sensor data takes its own decoder, and arrives already linear and in the
+    // camera's primaries rather than carrying a profile to be read.
+    let (samples, channels, full_width, full_height, space) = if crate::raw::is_raw_extension(&path)
+    {
+        let decoded = crate::raw::decode(&path)?;
+        (
+            decoded.pixels_u16,
+            crate::raw::RAW_CHANNELS,
+            decoded.width,
+            decoded.height,
+            decoded.space,
+        )
     } else {
-        (img.into_rgb16().into_raw(), 3)
+        decode_encoded(&path)?
     };
 
     let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;

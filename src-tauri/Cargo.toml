@@ -36,6 +36,7 @@ wgpu = "25"
 tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-store = "2.4.4"
 lcms2 = { version = "6.2.0", features = ["static"] }
+rawler = "0.8"
 
 [dev-dependencies]
 # Drives the async wgpu pipeline from synchronous #[test] functions.

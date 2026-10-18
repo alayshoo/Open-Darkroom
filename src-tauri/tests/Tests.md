@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 230 Rust tests, 95 TypeScript, 32 in-browser.
+Nothing is `#[ignore]`d. 245 Rust tests, 95 TypeScript, 32 in-browser.
 
 ---
 
@@ -285,6 +285,41 @@ element type against the format's bytes per pixel with a plain `assert_eq!`, so 
 one-wide element against `RGB_16` panicked rather than returning — inside a Tauri
 command, on opening an ordinary file. A clean `Err` is what says the check was
 passed and the conversion was genuinely attempted.
+
+## L1 — `raw.rs` (12)
+
+Sensor data, which reaches `SourceSpace` by a different route: no transfer curve
+to undo, and primaries from the camera's own calibration rather than a profile.
+Three decisions nothing downstream could catch.
+
+The colour matrix is checked against the published XYZ → sRGB matrix rather than
+against our own numbers. Feed a camera whose primaries *are* sRGB and the
+conversion has to land on `SRGB_TO_WORKING`, the constant an untagged file
+already uses — a composition built the wrong way round cannot arrive there.
+Orientation is checked exhaustively because all eight cases produce an image and
+seven of them produce the wrong one.
+
+| Test | Asserts |
+|---|---|
+| `srgb_camera_lands_on_the_untagged_matrix` | invert, compose and normalise, against a matrix from the spec |
+| `neutral_stays_neutral` | rows sum to one, so a balanced grey stays grey |
+| `a_matrix_of_the_wrong_width_is_refused` | a four-colour matrix is an error, not a silent crop |
+| `white_balance_is_scaled_by_its_largest_coefficient` | nothing is pushed past unity, so nothing clips into u16 |
+| `white_balance_preserves_a_neutral` | the scaling is uniform, which is what lets the matrix normalise separately |
+| `missing_coefficients_fall_back_to_unity` | NaN, zero, negative and infinite all mean "no balance recorded" |
+| `normal_is_not_copied_or_changed` | the common case allocates nothing |
+| `flips_keep_the_dimensions` | the three in-place cases, by corner |
+| `quarter_turns_swap_the_dimensions` | the four transposing cases, by corner |
+| `every_orientation_keeps_every_pixel` | no pixel invented, dropped or doubled |
+| `rotating_four_quarter_turns_returns_the_original` | which a near-miss in the index maths cannot survive |
+| `raw_extensions_are_recognised_whatever_their_case` | the dispatch that decides which decoder a file gets |
+
+### What is not covered here
+
+There is no end-to-end decode. A camera file is 20–60 MB and does not belong in
+the repository, and rawler's DNG writer is involved enough that a synthesised
+fixture is its own piece of work. So the three pure decisions are tested and the
+decode around them is not — the gap worth closing first if sensor support grows.
 
 ## L2 — `colorimetry.rs` (8)
 
