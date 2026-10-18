@@ -99,16 +99,7 @@ impl OutputSpace {
     pub fn working_to_destination(self) -> Matrix3 {
         let working = rgb_to_xyz(WORKING_PRIMARIES, D65);
         let destination = rgb_to_xyz(self.primaries(), D65);
-        let out = multiply(invert(destination), working);
-
-        // Column-major: WGSL indexes a mat3x3 by column.
-        let mut flat = [0.0f32; 9];
-        for col in 0..3 {
-            for row in 0..3 {
-                flat[col * 3 + row] = out[row][col] as f32;
-            }
-        }
-        flat
+        column_major(multiply(invert(destination), working))
     }
 
     /// Linear destination → linear working space, the inverse of the above.
@@ -117,15 +108,7 @@ impl OutputSpace {
     pub fn destination_to_working(self) -> Matrix3 {
         let working = rgb_to_xyz(WORKING_PRIMARIES, D65);
         let destination = rgb_to_xyz(self.primaries(), D65);
-        let out = multiply(invert(working), destination);
-
-        let mut flat = [0.0f32; 9];
-        for col in 0..3 {
-            for row in 0..3 {
-                flat[col * 3 + row] = out[row][col] as f32;
-            }
-        }
-        flat
+        column_major(multiply(invert(working), destination))
     }
 
     /// The ICC profile describing this space, for embedding in an exported file.
@@ -214,7 +197,7 @@ fn xy_y(xy: [f64; 2]) -> CIExyY {
 /// Each primary contributes a column scaled so that RGB (1, 1, 1) lands exactly
 /// on the white point — the standard construction, and the reason the matrix
 /// cannot simply be read off the chromaticities.
-fn rgb_to_xyz(primaries: [[f64; 2]; 3], white: [f64; 2]) -> [[f64; 3]; 3] {
+pub(crate) fn rgb_to_xyz(primaries: [[f64; 2]; 3], white: [f64; 2]) -> [[f64; 3]; 3] {
     let mut m = [[0.0f64; 3]; 3];
     for (col, xy) in primaries.iter().enumerate() {
         let (x, y) = (xy[0], xy[1]);
@@ -234,7 +217,7 @@ fn rgb_to_xyz(primaries: [[f64; 2]; 3], white: [f64; 2]) -> [[f64; 3]; 3] {
     m
 }
 
-fn multiply(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+pub(crate) fn multiply(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let mut out = [[0.0f64; 3]; 3];
     for row in 0..3 {
         for col in 0..3 {
@@ -244,13 +227,25 @@ fn multiply(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     out
 }
 
+/// Flatten a row-major 3×3 into the column-major layout WGSL indexes a
+/// `mat3x3` by.
+pub(crate) fn column_major(m: [[f64; 3]; 3]) -> Matrix3 {
+    let mut flat = [0.0f32; 9];
+    for col in 0..3 {
+        for row in 0..3 {
+            flat[col * 3 + row] = m[row][col] as f32;
+        }
+    }
+    flat
+}
+
 fn multiply_vec(a: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     std::array::from_fn(|row| (0..3).map(|k| a[row][k] * v[k]).sum())
 }
 
 /// Inverse by cofactors. Every matrix reaching this is built from three
 /// independent primaries, so the determinant cannot vanish.
-fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+pub(crate) fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let cofactor = |row: usize, col: usize| {
         let r = [(row + 1) % 3, (row + 2) % 3];
         let c = [(col + 1) % 3, (col + 2) % 3];

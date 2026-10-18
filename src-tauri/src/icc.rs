@@ -76,6 +76,9 @@ pub struct SourceSpace {
     /// on how many channels the profile describes rather than how many the
     /// decoder produced.
     curves: [TagSignature; 3],
+    /// Set when the source carries linear light already, so there is no
+    /// transfer curve to undo. Sensor data is the case this exists for.
+    linear: bool,
 }
 
 impl Default for SourceSpace {
@@ -87,6 +90,7 @@ impl Default for SourceSpace {
             to_working: SRGB_TO_WORKING,
             baked: false,
             curves: RGB_TRC,
+            linear: false,
         }
     }
 }
@@ -119,6 +123,7 @@ impl SourceSpace {
                     to_working,
                     baked: false,
                     curves: RGB_TRC,
+                    linear: false,
                 },
                 // A LUT profile has no separable channels to preserve, so there
                 // is nothing to lose by converting it here in full — but only
@@ -131,6 +136,7 @@ impl SourceSpace {
                     to_working: IDENTITY,
                     baked: true,
                     curves: RGB_TRC,
+                    linear: false,
                 },
                 None => Self::default(),
             },
@@ -150,11 +156,29 @@ impl SourceSpace {
                 to_working: SRGB_TO_WORKING,
                 baked: false,
                 curves: GREY_TRC,
+                linear: false,
             },
             // Lab, CMYK, XYZ: the buffer is the decoder's RGB rendering of
             // those numbers rather than the numbers, and nothing here can undo
             // that step. sRGB is the assumption every untagged file gets.
             _ => Self::default(),
+        }
+    }
+
+    /// A source that is already linear light in its own primaries, with
+    /// `to_working` carrying those primaries into the working space.
+    ///
+    /// Sensor data is what this is for: there is no transfer curve to undo and
+    /// no ICC profile to read, only a matrix the camera's own calibration
+    /// supplies. The darkroom block still runs in the camera's primaries, which
+    /// is where its per-channel controls line up with the dye layers.
+    pub fn linear_with_matrix(to_working: Matrix3) -> Self {
+        Self {
+            icc: None,
+            to_working,
+            baked: false,
+            curves: RGB_TRC,
+            linear: true,
         }
     }
 
@@ -168,8 +192,9 @@ impl SourceSpace {
     pub fn luts<T>(&self, map: impl Fn(f32) -> T) -> [Vec<T>; 3] {
         let unit = |i: usize| i as f32 / (LUT_SIZE - 1) as f32;
 
-        // The baked path has already linearised, so its table is the identity.
-        if self.baked {
+        // The baked path has already linearised, and a linear source never
+        // needed a curve, so both read straight through.
+        if self.baked || self.linear {
             return std::array::from_fn(|_| (0..LUT_SIZE).map(|i| map(unit(i))).collect());
         }
 
