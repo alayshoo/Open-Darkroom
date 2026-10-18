@@ -35,6 +35,8 @@ SYSTEM_PACKAGES=(
   # through wgpu headlessly, and a cloud container has no GPU, so without a
   # software adapter roughly three quarters of the Rust tests cannot run at all.
   mesa-vulkan-drivers
+  # The L3 suite runs Chromium headed, which needs a display to open onto.
+  xvfb
 )
 
 export DEBIAN_FRONTEND=noninteractive
@@ -48,6 +50,46 @@ mkdir -p "$RUNTIME_DIR"
 chmod 700 "$RUNTIME_DIR"
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export XDG_RUNTIME_DIR=$RUNTIME_DIR" >> "$CLAUDE_ENV_FILE"
+fi
+
+# ── The browser suite ─────────────────────────────────────────────────────────
+#
+# The L3 suite drives the real pipeline through Chromium's WebGPU, and a cloud
+# container is missing all three things that takes. Each is exported rather than
+# wrapped around the test command so that `pnpm test:browser` works unchanged.
+
+# A display. The suite runs headed deliberately — headless Chromium offers no
+# adapter — so with no DISPLAY it cannot launch at all.
+if [ -z "${DISPLAY:-}" ] && command -v Xvfb >/dev/null 2>&1; then
+  for n in 99 98 97; do
+    if [ ! -e "/tmp/.X11-unix/X$n" ]; then
+      nohup Xvfb ":$n" -screen 0 1280x1024x24 >/dev/null 2>&1 &
+      disown || true
+      if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+        echo "export DISPLAY=:$n" >> "$CLAUDE_ENV_FILE"
+      fi
+      break
+    fi
+  done
+fi
+
+# A Chromium that Playwright will accept. The container ships its own build
+# under PLAYWRIGHT_BROWSERS_PATH, and it is rarely the revision the installed
+# Playwright asks for — which it reports as a missing executable, suggesting an
+# install that the container has no network path for.
+PW_BROWSERS="${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
+CHROMIUM_EXECUTABLE="$(
+  ls -d "$PW_BROWSERS"/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -1
+)"
+if [ -n "$CHROMIUM_EXECUTABLE" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  echo "export CHROMIUM_EXECUTABLE=$CHROMIUM_EXECUTABLE" >> "$CLAUDE_ENV_FILE"
+fi
+
+# An adapter. Chromium defines navigator.gpu here but returns nothing from
+# requestAdapter without this flag, which is the one that lets it fall back to
+# the software driver installed above.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  echo "export CHROMIUM_FLAGS=--enable-unsafe-webgpu" >> "$CLAUDE_ENV_FILE"
 fi
 
 # ── Project dependencies ──────────────────────────────────────────────────────
