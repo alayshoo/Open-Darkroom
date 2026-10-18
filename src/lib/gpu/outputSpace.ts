@@ -44,10 +44,10 @@ export const WORKING_SPACE: OutputSpaceId = "rec2020";
 
 /** Shared by every space here, which is what lets the gamut compression in
  *  outputTransform.wgsl treat one luminance as the neutral axis of all of them. */
-const D65: [number, number] = [0.3127, 0.3290];
+export const D65: [number, number] = [0.3127, 0.3290];
 
 /** Published chromaticities of the red, green and blue primaries. */
-const PRIMARIES: Record<OutputSpaceId, [number, number][]> = {
+export const PRIMARIES: Record<OutputSpaceId, [number, number][]> = {
     "srgb":       [[0.640, 0.330], [0.300, 0.600], [0.150, 0.060]],
     "display-p3": [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]],
     "adobe-rgb":  [[0.640, 0.330], [0.210, 0.710], [0.150, 0.060]],
@@ -124,4 +124,16 @@ export function destinationToWorking(id: OutputSpaceId): Float32Array {
     const working = rgbToXyz(PRIMARIES[WORKING_SPACE], D65);
     const destination = rgbToXyz(PRIMARIES[id], D65);
     return new Float32Array(multiplyMat3(invertMat3(working), destination));
+}
+
+/**
+ * Linear working space → CIE XYZ, column-major.
+ *
+ * The colour-space tools measure chromaticity and Oklab, both of which start
+ * here. The shaders carry the same matrix as a constant — the working space is
+ * fixed, so there is nothing to upload — and shader_contracts.rs checks the two
+ * still agree.
+ */
+export function workingToXyz(): Float32Array {
+    return new Float32Array(rgbToXyz(PRIMARIES[WORKING_SPACE], D65));
 }

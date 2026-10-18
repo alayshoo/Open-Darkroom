@@ -29,7 +29,10 @@ use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 // The drift guards in `shader_contracts.rs` read these as text. They live here
 // so every path is declared in exactly one place.
 
-pub use open_darkroom_lib::shaders::HISTOGRAM_WGSL;
+pub use open_darkroom_lib::shaders::{
+    CHROMATICITY_DRAW_WGSL, COLOR_SPACE_SCALE_WGSL, COLOR_SPACE_WGSL, COLOR_VOLUME_DRAW_WGSL,
+    HISTOGRAM_WGSL,
+};
 pub const CALC_PARAMS_PIPELINE_TS: &str =
     include_str!("../../../src/lib/gpu/pipelines/calcParamsPipeline.ts");
 pub const IMG_PARAMETERS_TS: &str = include_str!("../../../src/lib/types/imgParameters.ts");

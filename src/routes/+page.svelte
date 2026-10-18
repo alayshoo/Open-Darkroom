@@ -11,7 +11,9 @@
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
+    import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
+    import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { settings } from "$lib/settings/settings.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
@@ -450,6 +452,10 @@
                 // average.
                 debugStats.clear();
             },
+            toggleColorSpace: () => {
+                if (!settings.debugTools) return;
+                colorSpaceDebug.toggle();
+            },
             toggleSettings: () => settings.toggle(),
         },
         closeSettings: () => settings.close(),
@@ -474,6 +480,13 @@
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
     <div class="toolbar shrink-0"></div>
+    <!-- Takes its own column rather than floating over the canvas, so opening
+         it moves the image's centre across instead of covering it. -->
+    {#if settings.debugTools && colorSpaceDebug.enabled}
+        <div class="colour-space-bar shrink-0">
+            <ColorSpacePanel {sliders} {imagePayload} />
+        </div>
+    {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
@@ -1304,6 +1317,24 @@
             transparent 100%
         );
         pointer-events: none;
+    }
+
+    /* Same treatment as the side bar: its own column in the shell, lifted above
+       the canvas so a zoomed image runs underneath it. The padding is the room
+       the panels' drop shadows need — a scroll container clips at its padding
+       box, so without it the shadows are cut off down the right-hand edge. */
+    .colour-space-bar {
+        width: 300px;
+        padding: 0 28px 24px 0;
+        position: relative;
+        z-index: 10;
+        pointer-events: auto;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+
+    .colour-space-bar::-webkit-scrollbar {
+        display: none;
     }
 
     .side-bar {

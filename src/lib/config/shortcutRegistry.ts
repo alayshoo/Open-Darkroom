@@ -223,6 +223,13 @@ export const shortcutActions = [
         label: "Live histogram",
         defaults: ["F2"],
     },
+    {
+        id: "toggleColorSpace",
+        group: "debug",
+        label: "Colour space panel",
+        description: "The chromaticity diagram and the colour volume, on the left.",
+        defaults: ["F3"],
+    },
 ] as const satisfies readonly ShortcutAction[];
 
 export type ShortcutId = (typeof shortcutActions)[number]["id"];

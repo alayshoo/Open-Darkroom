@@ -4,6 +4,7 @@
         debugStats,
         IDLE_AFTER_MS,
         type PassTiming,
+        type UpdateSample,
     } from "$lib/gpu/debugStats.svelte";
 
     // Average each pass across the frames that carried it, in the order the
@@ -77,10 +78,9 @@
         };
     });
 
-    // Histogram updates run on their own cadence, so they average separately.
-    let histogram = $derived.by(() => {
-        debugStats.histogramVersion;
-        const recent = debugStats.histogramSamples.slice(-WINDOW);
+    // Updates that run on their own cadence, averaged apart from the frames.
+    function meanUpdate(samples: UpdateSample[]) {
+        const recent = samples.slice(-WINDOW);
         if (recent.length === 0) return null;
 
         const recordMs =
@@ -92,6 +92,16 @@
         const gpuMs = passes.reduce((total, p) => total + p.ms, 0);
 
         return { gpuMs, recordMs, passes };
+    }
+
+    let histogram = $derived.by(() => {
+        debugStats.histogramVersion;
+        return meanUpdate(debugStats.histogramSamples);
+    });
+
+    let colourSpace = $derived.by(() => {
+        debugStats.colorSpaceVersion;
+        return meanUpdate(debugStats.colorSpaceSamples);
     });
 
     // Redraw the sparkline whenever a frame lands. A canvas keeps this off the
@@ -189,6 +199,22 @@
                 {/each}
                 <dt class="total">histogram cpu</dt>
                 <dd class="total">{ms(histogram.recordMs)}</dd>
+            </dl>
+        {/if}
+
+        <!-- Only present while the F3 panel is up, which is the point: it
+             measures the whole overview again, so it should cost nothing at
+             all when nobody is looking at it. -->
+        {#if colourSpace}
+            <dl class="rows passes">
+                <dt class="total">colour space gpu</dt>
+                <dd class="total">{ms(colourSpace.gpuMs)}</dd>
+                {#each colourSpace.passes as pass (pass.label)}
+                    <dt class="child">{pass.label}</dt>
+                    <dd>{ms(pass.ms)}</dd>
+                {/each}
+                <dt class="total">colour space cpu</dt>
+                <dd class="total">{ms(colourSpace.recordMs)}</dd>
             </dl>
         {/if}
     {:else}
