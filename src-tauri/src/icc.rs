@@ -43,9 +43,10 @@ const XYZ_D50_TO_WORKING: [[f32; 3]; 3] = [
     [0.029_664_043, -0.062_919_13, 1.253_431_2],
 ];
 
-/// Rec.2020 primaries and white, for the profile the baked path converts into.
-const WORKING_PRIMARIES: [[f64; 2]; 3] = [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]];
-const D65: [f64; 2] = [0.3127, 0.3290];
+/// Rec.2020 primaries and white: the working space, shared with output_space.rs
+/// so that the two sides of the pipeline name the same space once.
+pub const WORKING_PRIMARIES: [[f64; 2]; 3] = [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]];
+pub const D65: [f64; 2] = [0.3127, 0.3290];
 
 /// Where an RGB profile keeps its transfer curves, one tag per channel.
 const RGB_TRC: [TagSignature; 3] = [

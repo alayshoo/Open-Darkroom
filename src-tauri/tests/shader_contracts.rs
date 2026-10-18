@@ -11,7 +11,8 @@
 mod common;
 
 use common::{
-    CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS, WORKING_SPACE_TS,
+    CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, EXPORT_SETTINGS_TS, HISTOGRAM_WGSL,
+    OPEN_IMAGE_TS, OUTPUT_SPACE_BUFFER_TS, OUTPUT_SPACE_TS, WORKING_SPACE_TS,
 };
 
 use open_darkroom_lib::export_rendering::{
@@ -19,7 +20,9 @@ use open_darkroom_lib::export_rendering::{
     DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
     SOURCE_SPACE_BYTES, VIEW_BYTES,
 };
+use open_darkroom_lib::export_rendering::OUTPUT_SPACE_BYTES;
 use open_darkroom_lib::icc::SRGB_TO_WORKING;
+use open_darkroom_lib::output_space::{OutputSpace, Transfer};
 use open_darkroom_lib::image_opening::{OPEN_CANCELLED, PAYLOAD_HEADER_BYTES};
 
 /// The frontend has to tell a dismissed file picker apart from an open that
@@ -529,9 +532,14 @@ fn the_shaders_that_need_the_tone_maths_get_it() {
         }
     }
 
-    // The luminance weights are a separate chunk, and only the two shaders that
-    // run the adjustment chain read them.
-    for (label, source) in [("develop.wgsl", DEVELOP_WGSL), ("histogram.wgsl", HISTOGRAM_WGSL)] {
+    // The luminance weights are a separate chunk. The two chain shaders read
+    // them for vibrance, and the output transform reads them to find the
+    // neutral its gamut compression aims at.
+    for (label, source) in [
+        ("develop.wgsl", DEVELOP_WGSL),
+        ("histogram.wgsl", HISTOGRAM_WGSL),
+        ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
+    ] {
         assert!(
             source.contains("const LUMA"),
             "{label} no longer sees const LUMA — check its includes"
@@ -603,18 +611,48 @@ fn the_preview_and_the_histogram_share_one_output_transform() {
         ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
         ("histogram.wgsl", HISTOGRAM_WGSL),
     ] {
-        for needle in ["const M_WORKING_TO_DESTINATION", "fn to_destination"] {
+        for needle in ["struct OutputSpace", "fn to_destination", "fn gamut_compress"] {
             assert!(
                 source.contains(needle),
                 "{label} no longer sees {needle} — check its includes"
             );
         }
         assert_eq!(
-            source.matches("const M_WORKING_TO_DESTINATION").count(),
+            source.matches("struct OutputSpace").count(),
             1,
-            "{label} declares the destination matrix more than once"
+            "{label} declares the output space more than once"
+        );
+        assert!(
+            source.contains(": OutputSpace;"),
+            "{label} includes the output transform without binding its uniform, \
+             so it would read a zero matrix"
         );
     }
+}
+
+/// The develop stage must not know where the render is going.
+///
+/// Vibrance measures how saturated a pixel already looks, and it measures in
+/// sRGB on purpose: a measurement that followed the destination would re-grade
+/// the picture when the export format changed, so the same sliders would stop
+/// meaning the same image. The reference matrix therefore lives with the other
+/// measurement constants, and develop.wgsl does not include the transform at
+/// all.
+#[test]
+fn the_develop_stage_measures_saturation_against_a_fixed_reference() {
+    for (label, source) in [("develop.wgsl", DEVELOP_WGSL), ("histogram.wgsl", HISTOGRAM_WGSL)] {
+        assert_eq!(
+            source.matches("const M_WORKING_TO_SRGB").count(),
+            1,
+            "{label} should see the vibrance reference matrix exactly once"
+        );
+    }
+
+    assert!(
+        !DEVELOP_WGSL.contains("fn to_destination"),
+        "develop.wgsl has picked up the output transform — the develop chain must \
+         render the same image whatever space the export is written in"
+    );
 }
 
 /// The structs are declared in a chunk and bound per shader, so a shader can
@@ -622,7 +660,7 @@ fn the_preview_and_the_histogram_share_one_output_transform() {
 #[test]
 fn every_shader_that_binds_a_struct_also_declares_it() {
     for (label, source) in SHADERS {
-        for name in ["Params", "SharpParams", "SourceSpace"] {
+        for name in ["Params", "SharpParams", "SourceSpace", "OutputSpace"] {
             if !source.contains(&format!(": {name};")) {
                 continue;
             }
@@ -632,4 +670,208 @@ fn every_shader_that_binds_a_struct_also_declares_it() {
             );
         }
     }
+}
+
+// ── The output spaces, declared in three languages ────────────────────────────
+
+/// Pull `name: f32 = <number>;` style WGSL constants out of a shader.
+fn wgsl_const(source: &str, name: &str) -> f64 {
+    source
+        .split(&format!("{name}: u32 = "))
+        .nth(1)
+        .unwrap_or_else(|| panic!("no {name} declaration"))
+        .split(|c| c == 'u' || c == ';')
+        .next()
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap_or_else(|e| panic!("{name} is not a number: {e}"))
+}
+
+/// The chromaticities are the one set of colour numbers stated in both
+/// languages — everything else about a space is derived from them. Derived
+/// separately on each side, so a typo in either would give the preview and the
+/// exported file different primaries while both looked plausible.
+#[test]
+fn typescript_declares_the_same_primaries_as_rust() {
+    // Each entry is `"id": [[x, y], [x, y], [x, y]],` inside the PRIMARIES map.
+    let table = OUTPUT_SPACE_TS
+        .split("const PRIMARIES")
+        .nth(1)
+        .expect("outputSpace.ts declares no PRIMARIES");
+
+    for space in OutputSpace::ALL {
+        let id = serde_json::to_string(&space).expect("space serialises");
+        let row = table
+            .split(&format!("{id}:"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("outputSpace.ts has no primaries for {id}"))
+            .split(']')
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("]");
+
+        let numbers: Vec<f64> = row
+            .split(|c: char| !c.is_ascii_digit() && c != '.')
+            .filter(|t| !t.is_empty())
+            .map(|t| t.parse().expect("primary is not a number"))
+            .collect();
+
+        let expected: Vec<f64> = space.primaries().concat();
+        assert_eq!(
+            numbers.len(),
+            6,
+            "expected six chromaticities for {id}, parsed {numbers:?}"
+        );
+        for (i, (&got, &want)) in numbers.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                got, want,
+                "{id} chromaticity {i}: outputSpace.ts says {got}, output_space.rs says {want}"
+            );
+        }
+    }
+}
+
+/// The curve id is an integer crossing two language boundaries on its way to the
+/// shader, and nothing about a wrong one looks wrong: the image still renders,
+/// just through the wrong transfer function, which reads as a contrast shift
+/// rather than as a bug.
+#[test]
+fn the_transfer_curve_ids_agree_across_the_three_languages() {
+    for (wgsl_name, ts_name, rust) in [
+        ("TRANSFER_SRGB", "srgb", Transfer::Srgb),
+        ("TRANSFER_ADOBE", "adobe", Transfer::Adobe),
+        ("TRANSFER_BT2020", "bt2020", Transfer::Bt2020),
+    ] {
+        let id = rust as u32 as f64;
+
+        assert_eq!(
+            wgsl_const(COLOR_SPACE_ENCODE_WGSL, wgsl_name),
+            id,
+            "{wgsl_name} in the shader disagrees with output_space.rs"
+        );
+
+        let ts: f64 = OUTPUT_SPACE_TS
+            .split("const TRANSFER = {")
+            .nth(1)
+            .expect("outputSpace.ts declares no TRANSFER")
+            .split(&format!("{ts_name}:"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("outputSpace.ts has no {ts_name} curve"))
+            .split(',')
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .expect("curve id is not a number");
+        assert_eq!(
+            ts, id,
+            "TRANSFER.{ts_name} in TypeScript disagrees with output_space.rs"
+        );
+    }
+}
+
+/// The space travels from the export menu to the backend as a string, so a
+/// rename on one side is a failed export rather than a wrong colour — but only
+/// at run time, in the one code path nobody exercises until they export.
+#[test]
+fn typescript_and_rust_agree_on_the_output_space_names() {
+    let union = OUTPUT_SPACE_TS
+        .split("export type OutputSpaceId =")
+        .nth(1)
+        .expect("outputSpace.ts declares no OutputSpaceId")
+        .split(';')
+        .next()
+        .unwrap();
+
+    let names: Vec<&str> = union
+        .split('|')
+        .map(|t| t.trim().trim_matches('"'))
+        .collect();
+
+    assert_eq!(
+        names.len(),
+        OutputSpace::ALL.len(),
+        "OutputSpaceId lists {} spaces, output_space.rs has {}",
+        names.len(),
+        OutputSpace::ALL.len()
+    );
+
+    for name in &names {
+        let json = format!("\"{name}\"");
+        serde_json::from_str::<OutputSpace>(&json).unwrap_or_else(|e| {
+            panic!("the backend cannot deserialise the frontend's {json}: {e}")
+        });
+    }
+
+    // And every space the backend knows is offered, so none is unreachable.
+    for space in OutputSpace::ALL {
+        let id = serde_json::to_string(&space).expect("space serialises");
+        assert!(
+            names.contains(&id.trim_matches('"')),
+            "output_space.rs has {id} but OutputSpaceId does not offer it"
+        );
+    }
+}
+
+/// The uniform is written by the frontend and by the export path, into the same
+/// struct, so its size has to agree the way the other buffers' do.
+#[test]
+fn typescript_declares_the_same_output_space_size_as_rust() {
+    let declared: u64 = OUTPUT_SPACE_BUFFER_TS
+        .split("OUTPUT_SPACE_BUFFER_SIZE = ")
+        .nth(1)
+        .expect("outputSpaceBuffer.ts declares no OUTPUT_SPACE_BUFFER_SIZE")
+        .split(';')
+        .next()
+        .unwrap()
+        .trim()
+        .parse()
+        .expect("expected a numeric literal");
+
+    assert_eq!(
+        declared, OUTPUT_SPACE_BYTES,
+        "OUTPUT_SPACE_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+    assert_eq!(
+        OUTPUT_SPACE_BYTES % 16,
+        0,
+        "a uniform struct binds 16-aligned"
+    );
+}
+
+/// The frontend picks the space per format; the backend only does as it is told.
+/// This pins the rule itself, which is the part that would otherwise drift
+/// silently into shipping 16-bit files in sRGB's gamut.
+#[test]
+fn the_sixteen_bit_default_is_the_working_space() {
+    let rule = EXPORT_SETTINGS_TS
+        .split("export function defaultOutputSpace")
+        .nth(1)
+        .expect("exportSettings.ts declares no defaultOutputSpace");
+
+    assert!(
+        rule.contains("WORKING_SPACE"),
+        "the 16-bit TIFF default is no longer the working space"
+    );
+    assert!(
+        rule.contains("\"srgb\""),
+        "the 8-bit default is no longer sRGB"
+    );
+
+    // The working space the frontend names has to be the one the chain runs in.
+    let working = OUTPUT_SPACE_TS
+        .split("export const WORKING_SPACE: OutputSpaceId = ")
+        .nth(1)
+        .expect("outputSpace.ts declares no WORKING_SPACE")
+        .split(';')
+        .next()
+        .unwrap()
+        .trim()
+        .trim_matches('"');
+    assert_eq!(
+        serde_json::from_str::<OutputSpace>(&format!("\"{working}\"")).expect("a known space"),
+        OutputSpace::Rec2020,
+        "the frontend's working space is not Rec.2020"
+    );
 }

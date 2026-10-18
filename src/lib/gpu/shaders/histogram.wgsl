@@ -31,10 +31,13 @@ const VOTE: u32 = 256u;
 //!include "chunks/tone.wgsl"
 //!include "chunks/outputTransform.wgsl"
 
+// The destination the bins are measured in, so the curves and the clipping
+// warnings follow whatever the preview is currently being rendered for.
+@group(0) @binding(3) var<uniform> outputSpace: OutputSpace;
 
-// One pixel through the same chain develop.wgsl runs, ending in the encoded
-// domain the bins measure.
-fn developed_srgb(coord: vec2u) -> vec3f {
+// One pixel through the same chain develop.wgsl runs, ending in the destination
+// the bins measure — whichever space the preview is currently rendered for.
+fn developed_destination(coord: vec2u) -> vec3f {
   var rgb = textureLoad(inputTexture, coord, 0).rgb;
 
   // ===================== Apply same adjustment chain as develop.wgsl =====================
@@ -143,7 +146,7 @@ fn developed_srgb(coord: vec2u) -> vec3f {
   // anything it will be shown in. Measured in Rec.2020 the vivid colours lose
   // the most, enough to boost a vivid red harder than a muted one. Only the
   // measurement moves; the boost still happens in the working space.
-  let seen = max(M_WORKING_TO_DESTINATION * vib_rgb, vec3f(0.0));
+  let seen = max(M_WORKING_TO_SRGB * vib_rgb, vec3f(0.0));
   let maxC = max(seen.r, max(seen.g, seen.b));
   let minC = min(seen.r, min(seen.g, seen.b));
   let pixelSat = (maxC - minC) / max(maxC, 1e-4);
@@ -152,14 +155,14 @@ fn developed_srgb(coord: vec2u) -> vec3f {
 
   // The same output transform the preview is rendered through, so the bins
   // measure the image on screen rather than the working space behind it.
-  return to_destination(rgb);
+  return to_destination(rgb, outputSpace);
 }
 
 // Split one pixel's vote between the two bins its value falls between, per
 // channel, into this workgroup's tallies.
-fn accumulate(srgb: vec3f) {
+fn accumulate(encoded: vec3f) {
   // Fractional bin position in [0, 255]
-  let f = clamp(srgb, vec3f(0.0), vec3f(1.0)) * 255.0;
+  let f = clamp(encoded, vec3f(0.0), vec3f(1.0)) * 255.0;
 
   // Lower bin indices, and upper ones clamped so bin 255 absorbs the right edge
   let lo = vec3u(f);
@@ -195,7 +198,7 @@ fn main(
   // the edge of the image gates the work rather than returning out of it.
   let dimensions = textureDimensions(inputTexture);
   if (gid.x < dimensions.x && gid.y < dimensions.y) {
-    accumulate(developed_srgb(gid.xy));
+    accumulate(developed_destination(gid.xy));
   }
 
   workgroupBarrier();

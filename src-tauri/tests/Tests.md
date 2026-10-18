@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 200 Rust tests, 83 TypeScript, 27 in-browser.
+Nothing is `#[ignore]`d. 230 Rust tests, 95 TypeScript, 32 in-browser.
 
 ---
 
@@ -26,18 +26,24 @@ develop.wgsl           steps 1-10, into the perceptual working space
 calcSharpTexture.wgsl  h_main — luma, blurred along x at four scales
 calcSharpTexture.wgsl  v_main — blurs finished, three bands subtracted out
 composite.wgsl         the bands applied by scaling the colour
-colorSpaceEncode.wgsl  output transform + the single clamp (chunks/outputTransform.wgsl)
+colorSpaceEncode.wgsl  output transform + gamut compression (chunks/outputTransform.wgsl)
 ```
 
 `develop.wgsl` deliberately does **not** clamp: the headroom has to survive as far
 as the output transform. Anything asserting on final pixel values must therefore
 drive the whole chain, not the develop pass alone.
 
+The output transform reads its destination from a uniform — the display for a
+preview, the chosen space for an export, both at once for a soft proof — so a
+test asserting on final pixel values has to say which space it means.
+`develop.wgsl` does not see that uniform at all: the develop chain must render
+the same image whatever the export is written in.
+
 The two blur passes are skipped whenever no band can reach the screen. That is
 only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
 so composite is a no-op regardless of what the detail texture holds.
 
-## L1 — `shader_contracts.rs` (18)
+## L1 — `shader_contracts.rs` (24)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -57,6 +63,13 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `develop_and_histogram_apply_the_same_chain` | steps 1-10 have not drifted between the two copies |
 | `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
 | `typescript_matches_the_cancelled_open_sentinel` | the string that tells a cancelled open from a failed one |
+| `the_preview_and_the_histogram_share_one_output_transform` | both see the struct, the transform and the compression, and bind the uniform |
+| `the_develop_stage_measures_saturation_against_a_fixed_reference` | vibrance measures in sRGB; develop never sees the destination |
+| `typescript_declares_the_same_primaries_as_rust` | the one set of chromaticities both sides derive from |
+| `the_transfer_curve_ids_agree_across_the_three_languages` | WGSL == Rust == TypeScript |
+| `typescript_and_rust_agree_on_the_output_space_names` | every id the menu offers deserialises, and none is unreachable |
+| `typescript_declares_the_same_output_space_size_as_rust` | the uniform is 160 bytes on both sides |
+| `the_sixteen_bit_default_is_the_working_space` | 8-bit defaults to sRGB, 16-bit TIFF to Rec.2020 |
 
 The chain comparison stops after vibrance, because that is where the two files
 stop agreeing by design — develop hands off to `composite.wgsl` unclamped, while
@@ -192,7 +205,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
-## L1 — `source_space.rs` (20)
+## L1 — `source_space.rs` (23)
 
 What a file says its own numbers mean, and how that reaches the GPU. Nothing
 downstream can tell a mistake here from a deliberate look: a transposed matrix, a
@@ -360,7 +373,7 @@ code-value shift), and tint (green scaled, then renormalised).
 | `tint_moves_green_against_the_slider` | green scales by 2^(-tint/100), then renormalises |
 | `white_balance_does_not_change_the_exposure` | 90 in-gamut temp × tint combos hold luminance within 4% |
 | `white_balance_still_shifts_the_colour` | the normalisation has not swallowed the control |
-| `the_coldest_temperatures_clip_red_out_of_gamut` | pins the 2200 K gamut limit |
+| `the_coldest_temperatures_desaturate_rather_than_clipping` | pins the 2200 K gamut limit, now paid in saturation |
 | `exposure_is_symmetric_in_stops` | ±1 and ±2 EV are exact powers of two |
 | `contrast_matches_the_reference_curve` | 17 tones × 6 settings vs an f64 oracle |
 | `contrast_holds_mid_grey_and_both_endpoints` | pivot holds, 0 stays 0, 255 stays 255 |
@@ -412,7 +425,7 @@ is where Lightroom's Basic panel works. That is what puts the mask boundaries at
 sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
 real mid-grey instead of on a bright highlight.
 
-## L2 — `export_gpu.rs` (16)
+## L2 — `export_gpu.rs` (22)
 
 Export mechanics: the parts that break on unusual dimensions, not unusual sliders.
 
@@ -434,8 +447,43 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `chunking_a_three_channel_source_leaves_no_seam` | 5 chunk sizes at a stride of three |
 | `a_neutral_render_round_trips_through_the_working_space` | 8 probes, sRGB → Rec.2020 → sRGB unchanged |
 | `the_export_applies_the_source_matrix_it_is_given` | a file already in the working space takes the output transform alone |
+| `the_gamut_compression_keeps_the_luminance_a_clamp_would_lose` | the one thing exactly true of the compression — see below |
+| `colour_the_destination_can_hold_passes_through_unchanged` | in-gamut colour is not quietly desaturated |
+| `colour_brighter_than_white_keeps_its_chromaticity` | above white, luminance gives way and hue does not |
+| `the_working_space_destination_only_applies_its_curve` | Rec.2020 out converts no primaries, so the BT.2020 OETF alone |
+| `the_destination_primaries_move_colour_and_leave_neutrals` | sRGB vs Display P3: same white, different gamut |
+| `each_destination_encodes_with_its_own_curve` | Adobe RGB's pure power vs sRGB's linear toe, in the shadows |
 
-## L2 — `encoding.rs` (11)
+### Why luminance is the assertion
+
+The gamut compression pulls a colour the destination cannot hold towards the
+neutral of its own brightness. Hue is kept because the colour moves along a
+straight line to that neutral, and luminance is kept *exactly*: the neutral has
+the colour's own luminance, and luminance is linear, so every point on the line
+between them has it too. That holds for any amount of compression, which makes it
+the one property worth asserting rather than approximating.
+
+A per-channel clamp keeps neither. It drops whichever channel left the range and
+leaves the others, which darkens the colour and slides its hue — for a Rec.2020
+red into sRGB, by about 0.05 of luminance against a tolerance of 0.01. The test
+checks that gap too, so it cannot pass by accident on a probe that was in gamut
+all along.
+
+Above white, luminance is the one thing that cannot be kept. The gamut narrows to
+a point at white, so the only colour holding a luminance of 1 is white itself,
+and aiming at the neutral of the pixel's own brightness would render every bright
+saturated colour white — a blown neon sign included. Such a colour is scaled to
+fit instead: scaling linear RGB scales XYZ with it, so x and y do not move at
+all, and the luminance given up had no representation to lose.
+
+The gate is luminance, not channel range. A colour darker than white that merely
+falls outside the gamut still takes the luminance-preserving path above, which is
+why the Rec.2020 primaries are unaffected by the scaling. A near-neutral blown
+pixel has a near-neutral chromaticity, so it still resolves to white without
+needing a case of its own; a specular highlight stays neutral and a saturated
+light source stays saturated, under one rule.
+
+## L2 — `encoding.rs` (15)
 
 | Test | Asserts |
 |---|---|
@@ -450,8 +498,36 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `higher_jpeg_quality_produces_a_larger_file` | quality slider reaches the encoder |
 | `the_webp_lossless_flag_reaches_the_encoder` | lossless exact, lossy not |
 | `an_unsupported_tiff_bit_depth_is_reported` | 12-bit errors by name |
+| `every_format_carries_the_profile_of_its_space` | 4 formats × 4 spaces, each read back through `SourceSpace` |
+| `a_sixteen_bit_tiff_is_tagged_and_still_exact` | the strip-wise path tags without disturbing a sample |
+| `a_greyscale_tiff_is_tagged` | the single-channel paths at 8 and 16 bits |
+| `rewrapping_webp_for_its_profile_preserves_the_image` | the extended container — see below |
 
-## L1 — `tests/unit/` (83, TypeScript)
+### Why the TIFF tag is read by hand
+
+Neither library here can vouch for the profile in a TIFF. `image`'s decoder
+looks it up as `Tag::Unknown(34675)`, while the `tiff` crate parses that same id
+into its named `IccProfile` variant — so the two never meet, and a profile that
+is present reads as absent. Taking either at its word would have meant either a
+test that could never pass or, worse, one that passed by agreeing with the same
+mistake twice.
+
+Whether the bytes are right is a question about the file, so the test parses the
+first IFD itself: tag 34675, type 7 (UNDEFINED), and the profile at the offset
+the entry gives. That also pins the tag *type*, which a reader is entitled to
+check and which writing `[u8]` through the `tiff` crate would have silently made
+BYTE instead.
+
+### Why WebP is rewrapped
+
+libwebp writes the simple RIFF container: one `VP8 ` or `VP8L` chunk and nothing
+else, with nowhere to put a profile. Carrying one means the extended format, so
+the encoded bitstream is copied into a new container behind a `VP8X` header
+declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
+itself is never touched, and the test checks both halves of that claim: the
+header is there, and the pixels still decode to what went in.
+
+## L1 — `tests/unit/` (95, TypeScript)
 
 | Test | Asserts |
 |---|---|
@@ -460,9 +536,10 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `sharpnessPage` × 11 | the sharpness controls' ranges, defaults, steps and history wiring |
 | `openImage` × 3 more | the source matrix's float order, the baked flag, the pixels after the 64-byte header |
 | `wgslInclude` × 10 | the directive's grammar, chunk flattening, and every shipped shader resolving |
+| `outputSpace` × 12 | the destination matrices derived on the frontend: identity on the working space, inverses, white, gamut containment, the curve table |
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 
-## L3 — `tests/browser/` (27, real WebGPU)
+## L3 — `tests/browser/` (32, real WebGPU)
 
 Drives the frontend's own pipeline modules, including the full six-pass chain. A
 failure here that passes in L2 is a TypeScript wiring bug.

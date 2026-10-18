@@ -11,6 +11,7 @@
     import { createRenderer } from "$lib/gpu/renderer";
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { type Sliders } from "$lib/types/imgParameters";
+    import { proofing } from "$lib/gpu/proofing.svelte";
 
     // Props
     let {
@@ -137,6 +138,14 @@
             );
             localRenderer.requestRender();
         });
+    });
+
+    // The destination the chain encodes for: the display, unless the export
+    // space is being proofed through it.
+    $effect(() => {
+        if (!renderer) return;
+        renderer.setOutputSpace(gpu.displaySpace, proofing.space);
+        renderer.requestRender();
     });
 
     // Re-render on adjustment changes. Both calls are bookkeeping — a buffer

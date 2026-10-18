@@ -8,6 +8,7 @@
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
+    import { proofing } from "$lib/gpu/proofing.svelte";
     import { type ImagePayload } from "$lib/types/imagePayload";
 
     let {
@@ -106,8 +107,11 @@
         histPipeline = createHistogramPipeline(gpu);
 
         // Premultiplied so the panel's own background shows through wherever
-        // the curves do not reach, as it did behind the 2D canvas.
-        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
+        // the curves do not reach, as it did behind the 2D canvas. sRGB because
+        // the curves are UI, drawn to match the CSS around them rather than the
+        // image — what follows the display is where the bins are measured, set
+        // below.
+        linkCanvas2GPU(canvas, gpu, "premultiplied", "srgb").then((link) => {
             if (destroyed) return;
             canvasLink = link;
             requestRender();
@@ -145,6 +149,15 @@
             imagePayload.overviewHeight,
         );
         histPipeline.setSourceSpace(imagePayload.srcToWorking);
+        requestRender();
+    });
+
+    // The bins are taken after the output transform, so they follow the same
+    // destination the preview is rendered for — including the proof, which is
+    // what moves the clipping warnings onto the gamut being proofed.
+    $effect(() => {
+        if (!histPipeline) return;
+        histPipeline.setOutputSpace(gpu.displaySpace, proofing.space);
         requestRender();
     });
 

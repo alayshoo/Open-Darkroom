@@ -549,12 +549,20 @@ fn white_balance_still_shifts_the_colour() {
 }
 
 /// Below about 2360 K, adapting a neutral all the way to the 5500 K reference
-/// lands outside sRGB: red goes negative and clips. That is a gamut limit of the
-/// output space, not a bug in the matrix, and Lightroom clips there too. The UI
-/// rail stops at 2700 K, on the safe side of it, but presets and export can pass
-/// anything, so the boundary is pinned rather than left to be rediscovered.
+/// lands outside sRGB: red goes negative. That is a gamut limit of the output
+/// space, not a bug in the matrix. The UI rail stops at 2700 K, on the safe side
+/// of it, but presets and export can pass anything, so the boundary is pinned
+/// rather than left to be rediscovered.
+///
+/// What happens at the boundary changed when the output transform started
+/// compressing the gamut instead of clamping each channel. It used to crush red
+/// to zero and leave the other two, which both darkened the patch and pushed its
+/// hue past blue into cyan. Now the colour is pulled towards the neutral of its
+/// own brightness until it fits, so red comes back up, the patch keeps its
+/// brightness, and it stays blue. The gamut limit is still there — it is simply
+/// paid for in saturation rather than in a dead channel.
 #[test]
-fn the_coldest_temperatures_clip_red_out_of_gamut() {
+fn the_coldest_temperatures_desaturate_rather_than_clipping() {
     let got = develop_patch(
         [160; 3],
         &SlidersPayload {
@@ -562,8 +570,22 @@ fn the_coldest_temperatures_clip_red_out_of_gamut() {
             ..defaults()
         },
     );
-    assert_eq!(got[0], 0, "2200 K should drive red out of gamut, got {got:?}");
-    assert!(got[2] > 240, "...while blue saturates, got {got:?}");
+
+    assert!(
+        got[2] > 240,
+        "2200 K should drive blue to the top of the range, got {got:?}"
+    );
+    assert!(
+        got[2] as i32 - got[0] as i32 > 60,
+        "2200 K should still read as blue, got {got:?}"
+    );
+    // The old clamp's signature, and the thing that made it worth replacing: a
+    // channel at zero, with the hue and the brightness gone with it.
+    assert!(
+        got[0] > 16,
+        "red is crushed rather than desaturated, got {got:?} — the gamut \
+         compression is not reaching this path"
+    );
 
     // And the clip must not spread: at 3200 K everything is still in range.
     let ok = develop_patch(

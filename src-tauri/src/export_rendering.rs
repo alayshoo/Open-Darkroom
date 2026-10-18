@@ -13,7 +13,8 @@ use std::time::Instant;
 use wgpu::util::DeviceExt;
 
 use crate::color::{linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL};
-use crate::icc::SourceSpace;
+use crate::icc::{Matrix3, SourceSpace};
+use crate::output_space::OutputSpace;
 
 pub use crate::shaders::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
@@ -112,6 +113,11 @@ pub fn chunk_rows_for_margin(margin: u32) -> u32 {
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
 pub const PARAMS_BYTES: u64 = 256;
+
+/// Size of the `OutputSpace` uniform read by colorSpaceEncode.wgsl and
+/// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, then two
+/// u32, padded to the 16 bytes a uniform struct binds at.
+pub const OUTPUT_SPACE_BYTES: u64 = 160;
 
 /// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 30
 /// f32 fields occupy 120 bytes; a uniform struct is bound 16-aligned, so the
@@ -297,6 +303,42 @@ pub fn source_space_to_bytes(space: &SourceSpace) -> [u8; SOURCE_SPACE_BYTES as 
     bytes
 }
 
+/// Pack the destination, and what it is being proofed against, into the
+/// `OutputSpace` uniform matching the WGSL struct.
+///
+/// `proof` is `None` for an export, which renders straight into `destination`.
+/// A soft-proofed preview passes the space the file will be written in, and the
+/// shader detours the signal through its gamut on the way to the display.
+pub fn output_space_to_bytes(
+    destination: OutputSpace,
+    proof: Option<OutputSpace>,
+) -> [u8; OUTPUT_SPACE_BYTES as usize] {
+    let mut bytes = [0u8; OUTPUT_SPACE_BYTES as usize];
+
+    // A WGSL mat3x3<f32> is three 16-byte columns, not nine packed floats, so
+    // each column is written into its own vec4 slot.
+    let mut matrix = |at: usize, m: Matrix3| {
+        for col in 0..3 {
+            for row in 0..3 {
+                let offset = at + col * 16 + row * 4;
+                bytes[offset..offset + 4].copy_from_slice(&m[col * 3 + row].to_le_bytes());
+            }
+        }
+    };
+
+    matrix(0, destination.working_to_destination());
+    // Left at zero when nothing is being proofed: the shader reads neither
+    // matrix unless the flag below is set.
+    if let Some(proof) = proof {
+        matrix(48, proof.working_to_destination());
+        matrix(96, proof.destination_to_working());
+    }
+
+    bytes[144..148].copy_from_slice(&(destination.transfer() as u32).to_le_bytes());
+    bytes[148..152].copy_from_slice(&u32::from(proof.is_some()).to_le_bytes());
+    bytes
+}
+
 /// Pack the view into the uniform buffer matching the WGSL `View` struct.
 pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
     let mut bytes = [0u8; VIEW_BYTES];
@@ -319,6 +361,7 @@ pub async fn render_image(
     channels: usize,
     sliders: &SlidersPayload,
     space: &SourceSpace,
+    output: OutputSpace,
     bit_depth: u8,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
@@ -329,6 +372,7 @@ pub async fn render_image(
         channels,
         sliders,
         space,
+        output,
         bit_depth,
         chunk_rows_for_margin(sharp_margin_rows(sliders, width, height)),
         on_progress,
@@ -358,6 +402,7 @@ pub async fn render_image_with_chunk_rows(
     channels: usize,
     sliders: &SlidersPayload,
     space: &SourceSpace,
+    output: OutputSpace,
     bit_depth: u8,
     chunk_rows: u32,
     on_progress: impl Fn(f32) + Send + Sync,
@@ -706,7 +751,26 @@ pub async fn render_image_with_chunk_rows(
         "composite_bgl",
         &[intermediate_entry(0), intermediate_entry(1), params_entry(2)],
     );
-    let encode_bgl = bgl("encode_bgl", &[intermediate_entry(0)]);
+    let uniform_entry = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+
+    // An export renders straight into its destination; proofing exists for the
+    // preview, which has a display to reconcile the file's gamut with.
+    let output_space_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("output_space_buf"),
+        contents: &output_space_to_bytes(output, None),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let encode_bgl = bgl("encode_bgl", &[intermediate_entry(0), uniform_entry(1)]);
 
     let full_screen_pipeline = |label: &str,
                                 source: &str,
@@ -988,10 +1052,16 @@ pub async fn render_image_with_chunk_rows(
         let encode_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("encode_bg"),
             layout: &encode_bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(composite_view),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(composite_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output_space_buf.as_entire_binding(),
+                },
+            ],
         });
 
         let mut enc = device.create_command_encoder(&Default::default());

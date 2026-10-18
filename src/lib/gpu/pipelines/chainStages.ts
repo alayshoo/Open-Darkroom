@@ -87,13 +87,21 @@ export function createCompositeStage(gpu: GPUSession): RenderStage {
 }
 
 // The output transform — the only stage that knows what it is rendering for, so
-// the only one targeting the destination format.
+// the only one targeting the destination format and the only one bound to the
+// uniform naming that destination.
 export function createEncodeStage(gpu: GPUSession): RenderStage {
     return createRenderStage(gpu, {
         label: "Colour Space Encode",
         code: colorSpaceEncodeSource,
         format: gpu.format,
-        bindings: [intermediateBinding(0)],
+        bindings: [
+            intermediateBinding(0),
+            {
+                binding: 1, // outputSpace
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+        ],
     });
 }
 

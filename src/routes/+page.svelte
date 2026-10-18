@@ -37,6 +37,7 @@
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
     import { exportImage } from "$lib/utils/exportImage";
     import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
+    import { proofing } from "$lib/gpu/proofing.svelte";
 
     import { animateObject } from "$lib/utils/animateObject";
 
@@ -277,6 +278,12 @@
     let exportMenuOpen = $state(false);
     let exportSettings = $state<ExportSettings>({ ...defaultExportSettings });
     let footerEl: HTMLDivElement | null = $state(null);
+
+    // What a soft proof proofs against is whatever the export is set to write,
+    // kept here rather than in the menu so it holds while the menu is closed.
+    $effect(() => {
+        proofing.target = exportSettings.outputSpace;
+    });
 
     $effect(() => {
         if (!exportMenuOpen) return;
