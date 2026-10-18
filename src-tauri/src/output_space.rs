@@ -133,26 +133,41 @@ impl OutputSpace {
     /// Built rather than shipped: the primaries and the curve are already stated
     /// above for the GPU's benefit, and generating the profile from the same
     /// numbers is what keeps the tag honest about the pixels.
-    pub fn icc(self) -> Result<Vec<u8>, String> {
+    ///
+    /// `greyscale` describes a file written with one sample per pixel. A profile
+    /// has to name as many channels as the file carries, so that one is a grey
+    /// profile: the same transfer curve, and no primaries, since a single
+    /// channel has none. The pixels it describes are neutral, which is what
+    /// makes dropping the primaries lossless rather than an approximation.
+    pub fn icc(self, greyscale: bool) -> Result<Vec<u8>, String> {
         let curve = self.tone_curve()?;
         let primaries = self.primaries();
 
-        let mut profile = Profile::new_rgb(
-            &xy_y(D65),
-            &CIExyYTRIPLE {
-                Red: xy_y(primaries[0]),
-                Green: xy_y(primaries[1]),
-                Blue: xy_y(primaries[2]),
-            },
-            &[&curve, &curve, &curve],
-        )
+        let mut profile = if greyscale {
+            Profile::new_gray(&xy_y(D65), &curve)
+        } else {
+            Profile::new_rgb(
+                &xy_y(D65),
+                &CIExyYTRIPLE {
+                    Red: xy_y(primaries[0]),
+                    Green: xy_y(primaries[1]),
+                    Blue: xy_y(primaries[2]),
+                },
+                &[&curve, &curve, &curve],
+            )
+        }
         .map_err(|e| format!("Failed to build the {} profile: {e}", self.description()))?;
 
         // An untitled profile shows as a blank entry in anything that lists the
         // space a file is in, so the description is part of being tagged at all.
         let mut description = MLU::new(1);
         description.set_text_ascii(self.description(), Locale::none());
-        profile.write_tag(TagSignature::ProfileDescriptionTag, Tag::MLU(&description));
+        if !profile.write_tag(TagSignature::ProfileDescriptionTag, Tag::MLU(&description)) {
+            return Err(format!(
+                "Failed to name the {} profile",
+                self.description()
+            ));
+        }
 
         profile
             .icc()

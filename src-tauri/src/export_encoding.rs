@@ -66,8 +66,11 @@ pub fn encode_and_save(
     path: &Path,
 ) -> Result<(), String> {
     // Built once here rather than per encoder: the profile describes the render,
-    // which is the same whatever container it ends up in.
-    let icc = settings.output_space.icc()?;
+    // which is the same whatever container it ends up in. The exception is a
+    // black-and-white TIFF, the one output written with a single sample per
+    // pixel, which needs a profile naming a single channel.
+    let greyscale = matches!(settings.format, ExportFormat::Tiff) && settings.is_bw;
+    let icc = settings.output_space.icc(greyscale)?;
 
     match settings.format {
         ExportFormat::Png  => encode_png(rgb_bytes, width, height, settings.png_compression, icc, path),

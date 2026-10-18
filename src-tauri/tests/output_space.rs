@@ -165,7 +165,7 @@ fn display_p3_red_sits_marginally_outside_the_working_space() {
 #[test]
 fn the_profile_describes_the_matrix_the_shader_was_given() {
     for space in OutputSpace::ALL {
-        let icc = space.icc().expect("profile");
+        let icc = space.icc(false).expect("profile");
         let resolved = SourceSpace::resolve(Some(icc));
 
         assert!(
@@ -189,7 +189,7 @@ fn the_profile_describes_the_matrix_the_shader_was_given() {
 #[test]
 fn every_profile_names_itself() {
     for space in OutputSpace::ALL {
-        let icc = space.icc().expect("profile");
+        let icc = space.icc(false).expect("profile");
         let profile = Profile::new_icc(&icc).expect("readable");
 
         let Tag::MLU(description) = profile.read_tag(TagSignature::ProfileDescriptionTag) else {
@@ -231,7 +231,7 @@ fn the_profile_curve_matches_the_shader_curve() {
     }
 
     for space in OutputSpace::ALL {
-        let icc = space.icc().expect("profile");
+        let icc = space.icc(false).expect("profile");
         let profile = Profile::new_icc(&icc).expect("readable");
         let Tag::ToneCurve(curve) = profile.read_tag(TagSignature::RedTRCTag) else {
             panic!("{space:?}: the profile carries no red tone curve");

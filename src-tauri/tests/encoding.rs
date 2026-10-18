@@ -500,9 +500,18 @@ fn a_greyscale_tiff_is_tagged() {
         let source = if bit_depth == 8 { rgb8(w, h) } else { rgb16(w, h) };
         encode_and_save(source, w, h, &s, scratch.path()).expect("encode");
 
-        assert!(
-            embedded_profile(scratch.path()).is_some_and(|p| !p.is_empty()),
-            "a {bit_depth}-bit greyscale TIFF carries no profile"
+        let icc = embedded_profile(scratch.path())
+            .unwrap_or_else(|| panic!("a {bit_depth}-bit greyscale TIFF carries no profile"));
+
+        // A profile has to describe the samples the file actually holds. An RGB
+        // profile on a one-sample-per-pixel image is a mismatch a colour-managed
+        // reader is entitled to reject, so presence alone is not the assertion.
+        let profile = lcms2::Profile::new_icc(&icc).expect("parse the embedded profile");
+        assert_eq!(
+            profile.color_space(),
+            lcms2::ColorSpaceSignature::GrayData,
+            "a {bit_depth}-bit greyscale TIFF is tagged {:?}, but carries one sample per pixel",
+            profile.color_space()
         );
         assert_eq!(
             image::open(scratch.path()).expect("decode").dimensions(),
