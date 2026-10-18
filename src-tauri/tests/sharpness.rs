@@ -21,6 +21,7 @@ use open_darkroom_lib::export_rendering::{
     SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
 };
 use open_darkroom_lib::image_opening::Rgba16Image;
+use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::icc::SourceSpace;
 
 /// Lane index of each sharpness field in the packed uniform. These are the tail
@@ -455,6 +456,7 @@ fn chunk_size_does_not_change_a_sharpened_render() {
         4,
         &sliders,
         &SourceSpace::default(),
+        OutputSpace::Srgb,
         8,
         h,
         |_| {},
@@ -469,6 +471,7 @@ fn chunk_size_does_not_change_a_sharpened_render() {
             4,
             &sliders,
             &SourceSpace::default(),
+            OutputSpace::Srgb,
             8,
             chunk_rows,
             |_| {},
@@ -533,6 +536,7 @@ fn chunk_size_does_not_change_a_clarity_render() {
         4,
         &sliders,
         &SourceSpace::default(),
+        OutputSpace::Srgb,
         8,
         h,
         |_| {},
@@ -547,6 +551,7 @@ fn chunk_size_does_not_change_a_clarity_render() {
             4,
             &sliders,
             &SourceSpace::default(),
+            OutputSpace::Srgb,
             8,
             chunk_rows,
             |_| {},

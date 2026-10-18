@@ -5,6 +5,8 @@ import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
 import { createFrameTimer } from "./frameTimer";
 import { debugStats } from "../debugStats.svelte";
+import { createOutputSpaceBuffer } from "../outputSpaceBuffer";
+import type { OutputSpaceId } from "../outputSpace";
 import shaderSource from "../shaders/histogram.wgsl?raw";
 import scaleSource from "../shaders/histogramScale.wgsl?raw";
 import drawSource from "../shaders/histogramDraw.wgsl?raw";
@@ -33,6 +35,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // ── Calc params pipeline (computes matrices on GPU) ───────────
     const calcParams: CalcParamsPipeline = createCalcParamsPipeline(gpu);
 
+    // The bins are measured after the output transform, so they need the same
+    // destination the preview is being rendered for.
+    const outputSpace = createOutputSpaceBuffer(gpu);
+
     // ── Shader module ────────────────────────────────────────────────
     const shaderModule = device.createShaderModule({
         label: "Histogram Compute Shader",
@@ -57,6 +63,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 binding: 2, // bins — all three channels, end to end
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "storage" },
+            },
+            {
+                binding: 3, // outputSpace
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
             },
         ],
     });
@@ -181,6 +192,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 { binding: 0, resource: inputTexture.createView() },
                 { binding: 1, resource: { buffer: calcParams.paramsBuffer } },
                 { binding: 2, resource: { buffer: bins } },
+                { binding: 3, resource: { buffer: outputSpace.buffer } },
             ],
         });
         return bindGroup;
@@ -190,6 +202,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     function setSourceSpace(srcToWorking: Float32Array) {
         calcParams.updateSourceSpace(srcToWorking);
+    }
+
+    function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
+        outputSpace.set(destination, proof);
     }
 
     function render(
@@ -316,11 +332,18 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     function destroy() {
         calcParams.destroy();
+        outputSpace.destroy();
         timer.destroy();
         bins.destroy();
         scaleBuffer.destroy();
         staging?.destroy();
     }
 
-    return { setSourceSpace, render, readBins, destroy };
+    // The display is the destination until something says otherwise, matching
+    // what an unproofed preview renders for. Set here rather than left to the
+    // caller because an unwritten uniform is a zero matrix, which would bin a
+    // black image.
+    setOutputSpace(gpu.displaySpace, null);
+
+    return { setSourceSpace, setOutputSpace, render, readBins, destroy };
 }

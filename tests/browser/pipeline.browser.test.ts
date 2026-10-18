@@ -35,7 +35,13 @@ import {
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
 import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
-import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
+import { createOutputSpaceBuffer } from "$lib/gpu/outputSpaceBuffer";
+import { IDENTITY, SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
+import {
+  OUTPUT_SPACE_IDS,
+  type OutputSpaceId,
+} from "$lib/gpu/outputSpace";
+import { OUTPUT_SPACE_BUFFER_SIZE } from "$lib/gpu/outputSpaceBuffer";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -116,6 +122,10 @@ beforeAll(async () => {
   gpu = {
     device: await adapter.requestDevice(),
     format: "rgba8unorm",
+    // sRGB rather than whatever the test machine's display can show: these
+    // tests compare bytes against the Rust renderer, which is given the same
+    // destination.
+    displaySpace: "srgb",
     canTimestamp: false,
     adapterInfo: null,
     adapterFeatures: [],
@@ -128,6 +138,13 @@ interface DevelopOptions {
   height?: number;
   /** RGBA f16 pixels to upload as they stand, rather than linearising `rgb`. */
   pixels?: Uint8Array;
+  /** Where to encode for. Defaults to sRGB, unproofed, as the Rust suite does. */
+  output?: OutputSpaceId;
+  /** The export space to proof against, if any. */
+  proof?: OutputSpaceId | null;
+  /** Treat the source as already in the working space, so only the output
+   *  transform runs — the one way to reach colour outside the destination. */
+  alreadyWorking?: boolean;
 }
 
 /**
@@ -150,6 +167,8 @@ async function develop(
   const sharpV = createSharpVerticalStage(gpu);
   const composite = createCompositeStage(gpu);
   const colorSpaceEncode = createEncodeStage(gpu);
+  const outputSpace = createOutputSpaceBuffer(gpu);
+  outputSpace.set(options.output ?? "srgb", options.proof ?? null);
   const sampler = createSourceSampler(gpu);
 
   const image = uploadRawPixelsToGPU(
@@ -193,7 +212,7 @@ async function develop(
   ]);
 
   calcParams.updateSliders(sliders);
-  calcParams.updateSourceSpace(SRGB_TO_WORKING);
+  calcParams.updateSourceSpace(options.alreadyWorking ? IDENTITY : SRGB_TO_WORKING);
   if (renderScale !== undefined) calcParams.updateView(renderScale, FULL_WIDTH, FULL_HEIGHT);
 
   const encoder = gpu.device.createCommandEncoder();
@@ -240,6 +259,7 @@ async function develop(
     target.createView(),
     createStageBindGroup(gpu, colorSpaceEncode, [
       { binding: 0, resource: compositeTexture.createView() },
+      { binding: 1, resource: { buffer: outputSpace.buffer } },
     ]),
   );
 
@@ -267,6 +287,7 @@ async function develop(
     }
   }
   calcParams.destroy();
+  outputSpace.destroy();
   image.texture.destroy();
   developTexture.destroy();
   sharpHTexture.destroy();
@@ -918,6 +939,131 @@ describe("image integrity", () => {
           expect(Math.abs(out[i + c] - source[i + c]), `(${x}, ${y})`).toBeLessThanOrEqual(2);
         }
       }
+    }
+  });
+});
+
+describe("the output space", () => {
+  // A saturated working-space primary, which is well outside sRGB and outside
+  // Display P3. Reached by declaring the source already in the working space —
+  // the usual sRGB source matrix and the output transform are inverses, so
+  // nothing fed through it can land outside the destination.
+  const WORKING_RED = solid(255, 0, 0);
+
+  function firstPixel(out: Uint8Array): [number, number, number] {
+    return [out[0], out[1], out[2]];
+  }
+
+  it("declares a buffer matching the WGSL struct", () => {
+    // Three mat3x3 of three 16-byte columns, then two u32, bound 16-aligned.
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBe(160);
+    expect(OUTPUT_SPACE_BUFFER_SIZE % 16).toBe(0);
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBeGreaterThanOrEqual(3 * 48 + 8);
+
+    const buffer = createOutputSpaceBuffer(gpu);
+    expect(buffer.buffer.size).toBe(OUTPUT_SPACE_BUFFER_SIZE);
+    // Every space has to be writable without the padding assertions tripping.
+    for (const id of OUTPUT_SPACE_IDS) buffer.set(id, "srgb");
+    buffer.destroy();
+  });
+
+  // The matrix reaching the shader is the one this module derives. If the
+  // uniform were never bound, packed without the column padding, or bound at
+  // the wrong index, the encode stage would read zeroes and the frame would be
+  // black — so a non-black render is itself the wiring assertion.
+  it("reaches the shader, so each destination encodes differently", async () => {
+    const results = new Map<OutputSpaceId, [number, number, number]>();
+    for (const id of OUTPUT_SPACE_IDS) {
+      const out = await develop(WORKING_RED, defaultSlidersRGB, undefined, {
+        output: id,
+        alreadyWorking: true,
+      });
+      const pixel = firstPixel(out);
+      expect(pixel.some((c) => c > 0), `${id} rendered black`).toBe(true);
+      results.set(id, pixel);
+    }
+
+    // Rec.2020 is the working space, so its own red needs no compression and
+    // comes through as a pure primary. Every narrower space has to move it:
+    // either the other channels rise, or the red itself comes down when one of
+    // them reaches the floor first, which is what Adobe RGB's green does.
+    expect(results.get("rec2020")).toEqual([255, 0, 0]);
+    for (const id of ["srgb", "display-p3", "adobe-rgb"] as OutputSpaceId[]) {
+      expect(results.get(id), `${id} left the primary untouched`).not.toEqual([255, 0, 0]);
+    }
+
+    // And all four differ from each other, so no two are reading the same
+    // matrix. The exact values are the Rust suite's business; this is wiring.
+    const distinct = new Set([...results.values()].map((p) => p.join(",")));
+    expect(distinct.size).toBe(OUTPUT_SPACE_IDS.length);
+  });
+
+  // What soft-proofing is for: on a display wider than the export, the preview
+  // shows colour the file cannot hold. Proofing squeezes the signal through the
+  // export space's gamut and back, so the preview loses exactly what the file
+  // will lose.
+  it("squeezes the preview through the proofed gamut", async () => {
+    const direct = firstPixel(
+      await develop(WORKING_RED, defaultSlidersRGB, undefined, {
+        output: "display-p3",
+        alreadyWorking: true,
+      }),
+    );
+    const proofed = firstPixel(
+      await develop(WORKING_RED, defaultSlidersRGB, undefined, {
+        output: "display-p3",
+        proof: "srgb",
+        alreadyWorking: true,
+      }),
+    );
+
+    // Proofing the narrower space can only cost saturation, which on a red
+    // means the other two channels come up.
+    expect(proofed[1]).toBeGreaterThan(direct[1]);
+    expect(proofed[2]).toBeGreaterThan(direct[2]);
+  });
+
+  // And it has to be a no-op on colour the proofed space can already hold,
+  // or every proofed preview would be wrong about in-gamut colour too.
+  it("leaves colour the proofed space can hold alone", async () => {
+    const neutral = solid(128, 128, 128);
+    const direct = firstPixel(
+      await develop(neutral, defaultSlidersRGB, undefined, { output: "display-p3" }),
+    );
+    const proofed = firstPixel(
+      await develop(neutral, defaultSlidersRGB, undefined, {
+        output: "display-p3",
+        proof: "srgb",
+      }),
+    );
+
+    for (let c = 0; c < 3; c++) {
+      expect(Math.abs(direct[c] - proofed[c]), `channel ${c}`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  // The histogram runs its own copy of the chain and measures after the same
+  // transform, so a destination it was not told about would describe a
+  // different picture from the one on screen.
+  it("reaches the histogram as well as the preview", async () => {
+    const pipeline = createHistogramPipeline(gpu);
+    const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(solid(200, 40, 40)), WIDTH, HEIGHT);
+    try {
+      const binsFor = async (output: OutputSpaceId) => {
+        pipeline.setSourceSpace(SRGB_TO_WORKING);
+        pipeline.setOutputSpace(output, null);
+        pipeline.render(image.texture, defaultSlidersRGB);
+        const { r } = await pipeline.readBins();
+        // Where the red channel's mass sits, which is what the curve draws.
+        return r.reduce((at, count, bin) => at + count * bin, 0) / r.reduce((a, b) => a + b, 0);
+      };
+
+      // Adobe RGB's curve has no linear toe and its gamut is wider, so the same
+      // red cannot land in the same bin as it does in sRGB.
+      expect(Math.abs((await binsFor("srgb")) - (await binsFor("adobe-rgb")))).toBeGreaterThan(1);
+    } finally {
+      image.texture.destroy();
+      pipeline.destroy();
     }
   });
 });

@@ -17,10 +17,11 @@ use wgpu::util::DeviceExt;
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, same_curve};
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::export_rendering::{
-    render_image, sliders_to_bytes, view_to_bytes, SlidersPayload, ViewPayload, PARAMS_BYTES,
-    SHARP_PARAMS_BYTES,
+    output_space_to_bytes, render_image, sliders_to_bytes, view_to_bytes, SlidersPayload,
+    ViewPayload, PARAMS_BYTES, SHARP_PARAMS_BYTES,
     source_space_to_bytes,
 };
+use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 
 // ── Source files under contract ───────────────────────────────────────────────
@@ -35,6 +36,10 @@ pub const IMG_PARAMETERS_TS: &str = include_str!("../../../src/lib/types/imgPara
 pub const EXPORT_RENDERING_RS: &str = include_str!("../../src/export_rendering.rs");
 pub const OPEN_IMAGE_TS: &str = include_str!("../../../src/lib/utils/openImage.ts");
 pub const WORKING_SPACE_TS: &str = include_str!("../../../src/lib/gpu/workingSpace.ts");
+pub const OUTPUT_SPACE_TS: &str = include_str!("../../../src/lib/gpu/outputSpace.ts");
+pub const OUTPUT_SPACE_BUFFER_TS: &str =
+    include_str!("../../../src/lib/gpu/outputSpaceBuffer.ts");
+pub const EXPORT_SETTINGS_TS: &str = include_str!("../../../src/lib/types/exportSettings.ts");
 
 // ── The working space ─────────────────────────────────────────────────
 
@@ -229,7 +234,17 @@ pub fn mixed_ramp(width: u32) -> Rgba16Image {
 /// Render `img` with `sliders` at 8 bits and return the RGB bytes.
 pub fn develop(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u8> {
     let (w, h) = img.dimensions();
-    pollster::block_on(render_image(img.as_raw(), w, h, 4, sliders, &SourceSpace::default(), 8, |_| {}))
+    pollster::block_on(render_image(
+        img.as_raw(),
+        w,
+        h,
+        4,
+        sliders,
+        &SourceSpace::default(),
+        OutputSpace::Srgb,
+        8,
+        |_| {},
+    ))
         .expect("render should succeed")
 }
 
@@ -243,6 +258,7 @@ pub fn develop16(img: &Rgba16Image, sliders: &SlidersPayload) -> Vec<u16> {
         4,
         sliders,
         &SourceSpace::default(),
+        OutputSpace::Srgb,
         16,
         |_| {},
     ))
@@ -679,6 +695,14 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
+    // sRGB, unproofed: the bins these tests assert on are the ones the Rust
+    // renderer produces, which is given the same destination.
+    let output_space = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("output_space"),
+        contents: &output_space_to_bytes(OutputSpace::Srgb, None),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("histogram"),
         source: wgpu::ShaderSource::Wgsl(HISTOGRAM_WGSL.into()),
@@ -709,6 +733,10 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: bins.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: output_space.as_entire_binding(),
             },
         ],
     });

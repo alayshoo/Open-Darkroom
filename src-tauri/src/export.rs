@@ -22,7 +22,10 @@ pub(crate) async fn export_image(
     sliders: SlidersPayload,
     settings: ExportSettings,
 ) -> Result<(), String> {
-    println!("export_image: opening save dialog ({:?})", settings.format);
+    println!(
+        "export_image: opening save dialog ({:?}, {:?})",
+        settings.format, settings.output_space
+    );
 
     let (filter_name, extensions): (&str, &[&str]) = match settings.format {
         ExportFormat::Png => ("PNG Image", &["png"]),
@@ -78,6 +81,7 @@ pub(crate) async fn export_image(
         channels,
         &sliders,
         &space,
+        settings.output_space,
         bit_depth,
         move |progress| {
             let _ = progress_handle.emit("export:progress", progress);

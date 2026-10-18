@@ -2,6 +2,7 @@
 // lib/gpu/gpu.ts
 
 import { type GPUSession } from "$lib/types/gpuTypes";
+import type { OutputSpaceId } from "./outputSpace";
 
 export async function initializeGPU(): Promise<GPUSession> {
     
@@ -34,10 +35,26 @@ export async function initializeGPU(): Promise<GPUSession> {
     return {
         device,
         format,
+        displaySpace: detectDisplaySpace(),
         canTimestamp,
         adapterInfo: adapter.info ?? null,
         adapterFeatures: [...adapter.features].sort(),
     };
+}
+
+
+/**
+ * The space the preview is rendered for.
+ *
+ * A canvas is sRGB unless it is told otherwise, so on a wide-gamut display the
+ * render would be squeezed into sRGB and the extra colour simply discarded.
+ * Asking for P3 on a screen that cannot show it would be just as wrong — the
+ * browser would convert back and the preview would end up slightly desaturated
+ * for nothing — so the display's own gamut decides.
+ */
+function detectDisplaySpace(): OutputSpaceId {
+    if (typeof window === "undefined" || !window.matchMedia) return "srgb";
+    return window.matchMedia("(color-gamut: p3)").matches ? "display-p3" : "srgb";
 }
 
 

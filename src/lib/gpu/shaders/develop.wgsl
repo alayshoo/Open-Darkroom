@@ -14,7 +14,6 @@
 
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
-//!include "chunks/outputTransform.wgsl"
 
 // ---------- Vertex Shader ----------
 // Runs once per vertex (6 vertices = 2 triangles = full screen quad).
@@ -167,7 +166,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   // anything it will be shown in. Measured in Rec.2020 the vivid colours lose
   // the most, enough to boost a vivid red harder than a muted one. Only the
   // measurement moves; the boost still happens in the working space.
-  let seen = max(M_WORKING_TO_DESTINATION * vib_rgb, vec3f(0.0));
+  let seen = max(M_WORKING_TO_SRGB * vib_rgb, vec3f(0.0));
   let maxC = max(seen.r, max(seen.g, seen.b));
   let minC = min(seen.r, min(seen.g, seen.b));
   let pixelSat = (maxC - minC) / max(maxC, 1e-4);

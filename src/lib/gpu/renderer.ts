@@ -27,6 +27,8 @@ import {
 import { sharpnessIsVisible } from "./sharpnessVisibility";
 import { createFrameTimer } from "./pipelines/frameTimer";
 import { debugStats } from "./debugStats.svelte";
+import { createOutputSpaceBuffer } from "./outputSpaceBuffer";
+import type { OutputSpaceId } from "./outputSpace";
 
 
 // The backdrop the preview sits on, and the encode stage's options as an
@@ -46,6 +48,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     const colorSpaceEncode: RenderStage = createEncodeStage(gpu);
 
     const sampler = createSourceSampler(gpu);
+
+    // Where the chain is rendering to. The buffer outlives every image, so the
+    // destination can be set before one is open and survives a reload.
+    const outputSpace = createOutputSpaceBuffer(gpu);
 
     // The sliders and the view are forwarded straight to calcParams, but they are
     // also kept here: whether the blur passes are worth recording is a decision
@@ -151,7 +157,15 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
         encodeBindGroup = createStageBindGroup(gpu, colorSpaceEncode, [
             { binding: 0, resource: compositeView },
+            { binding: 1, resource: { buffer: outputSpace.buffer } },
         ]);
+    }
+
+    // The destination the preview is encoded for, and the export space it is
+    // being proofed against. Does not itself request a frame: the caller owns
+    // when the preview redraws, as it does for the sliders.
+    function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
+        outputSpace.set(destination, proof);
     }
 
     function setSliders(sliders: Sliders) {
@@ -325,6 +339,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         frameHandle = null;
 
         calcParams.destroy();
+        outputSpace.destroy();
         frameTimer.destroy();
         developTexture?.destroy();
         sharpHTexture?.destroy();
@@ -332,8 +347,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         compositeTexture?.destroy();
     }
 
-    // Initialize with default sliders
+    // Initialize with default sliders, and with the display as the destination
+    // — which is what an unproofed preview renders for.
     setSliders( defaultSlidersRGB );
+    setOutputSpace(gpu.displaySpace, null);
 
-    return { loadImage, setSliders, setView, requestRender, destroy };
+    return { loadImage, setSliders, setOutputSpace, setView, requestRender, destroy };
 }

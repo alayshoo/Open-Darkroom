@@ -4,25 +4,29 @@
 //
 // This is the last stage, and the only one that knows what it is rendering for.
 // Four steps: decode the working curve, matrix from the working primaries into
-// the destination's, apply the destination transfer curve, clamp.
+// the destination's, fit the result into the destination gamut, apply the
+// destination transfer curve.
 //
-// The working space is linear Rec.2020 and the destination is sRGB, so the
-// gamut matrix is a real conversion rather than the identity it collapsed to
-// when the two were the same space.
+// Which destination that is comes from the uniform rather than the source. The
+// preview renders for the display, an export renders for the space the file
+// will be tagged with, and a soft-proofed preview renders for both at once.
 //
-// The clamp lives here rather than at the end of develop.wgsl so that the
-// headroom above white and the out-of-gamut negatives survive the sharpening
-// stage — a negative halo can pull a blown highlight back into range, which it
-// could not do if the signal had already been flattened against the ceiling.
+// The gamut fitting lives here rather than at the end of develop.wgsl so that
+// the headroom above white and the out-of-gamut negatives survive the
+// sharpening stage — a negative halo can pull a blown highlight back into
+// range, which it could not do if the signal had already been flattened against
+// the ceiling.
 //
 // The transform itself lives in chunks/outputTransform.wgsl because
 // histogram.wgsl has to apply the same one: a histogram of the working space
 // would not describe the picture on screen.
 
 //!include "chunks/tone.wgsl"
+//!include "chunks/luma.wgsl"
 //!include "chunks/outputTransform.wgsl"
 
 @group(0) @binding(0) var compositeTexture: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> outputSpace: OutputSpace;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
@@ -47,5 +51,5 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   // negatives reach the matrix intact rather than being flattened on the way.
   let working = decode_srgb(c.rgb);
 
-  return vec4f(to_destination(working), c.a);
+  return vec4f(to_destination(working, outputSpace), c.a);
 }

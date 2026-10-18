@@ -1,10 +1,15 @@
 // $lib/types/gpuTypes.ts
 
+import type { OutputSpaceId } from "$lib/gpu/outputSpace";
+
 // Stores the GPU reference and format for display to
 // be shared accross svelte components.
 export interface GPUSession {
     device: GPUDevice;
     format: GPUTextureFormat;
+    // The space the canvas is configured for, and so the one the output
+    // transform encodes the preview into. Follows what the display can show.
+    displaySpace: OutputSpaceId;
     // Whether the device was created with `timestamp-query`. Only the frame
     // stats overlay reads it; the render chain does not depend on it.
     canTimestamp: boolean;
@@ -69,6 +74,9 @@ export interface Renderer {
     // would render wrong colours with nothing to indicate why.
     loadImage: (image: GPUImage, srcToWorking: Float32Array) => void;
     setSliders: (sliders: Sliders) => void;
+    // Where the preview is being encoded to, and the export space it is being
+    // proofed against — `null` for a preview showing the display's own gamut.
+    setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
     setView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
@@ -84,6 +92,9 @@ export interface HistogramPipeline {
     // images. Set when the overview texture is uploaded, for the same reason
     // the renderer takes it alongside the preview.
     setSourceSpace: (srcToWorking: Float32Array) => void;
+    // The destination the bins are measured in. Set from the same place the
+    // preview's is, so the curves describe the picture on screen.
+    setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
     // in one submit. Omitting the target bins without drawing.
     render: (
