@@ -49,9 +49,97 @@ fn neutral_stays_neutral() {
     }
 }
 
+/// XYZ (D65) → camera, for a camera whose primaries are nothing like the
+/// working space's: the published Adobe calibration for the Canon EOS 5D Mk IV.
+const XYZ_TO_5D4: [f32; 9] = [
+    0.6446, -0.0366, -0.0864, //
+    -0.4436, 1.2204, 0.2513, //
+    -0.0952, 0.2496, 0.6348,
+];
+
+/// XYZ (D65) → linear Rec.2020, from the Rec.2020 specification.
+const XYZ_TO_REC2020: [[f64; 3]; 3] = [
+    [1.7166512, -0.3556708, -0.2533663],
+    [-0.6666844, 1.6164812, 0.0157685],
+    [0.0176399, -0.0427706, 0.9421031],
+];
+
+#[test]
+fn the_balance_scales_camera_channels_not_output_channels() {
+    // The conversion itself is XYZ → Rec.2020 composed with camera → XYZ. What
+    // the normalisation is allowed to add to it is one scale per *camera*
+    // channel, standing in for the balance already applied to the pixels — so
+    // every element of a column is off the raw composition by the same factor.
+    // Scaling output channels instead would also leave neutrals neutral, which
+    // is why a camera with the working space's own primaries cannot tell the
+    // two apart.
+    let composed = multiply(XYZ_TO_REC2020, invert(as_rows(&XYZ_TO_5D4)));
+    let m = camera_to_working(Illuminant::D65, &XYZ_TO_5D4).expect("matrix");
+
+    for col in 0..3 {
+        let scale = m[col * 3] as f64 / composed[0][col];
+        for row in 1..3 {
+            let got = m[col * 3 + row] as f64 / composed[row][col];
+            assert!(
+                (got - scale).abs() < 1e-3 * scale.abs(),
+                "column {col} row {row}: scaled by {got}, column scaled by {scale}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_matrix_of_the_wrong_width_is_refused() {
     assert!(camera_to_working(Illuminant::D65, &[1.0, 0.0, 0.0]).is_err());
+}
+
+#[test]
+fn a_matrix_that_is_not_numbers_is_refused() {
+    let mut flat = XYZ_TO_SRGB;
+    flat[4] = f32::NAN;
+
+    assert!(camera_to_working(Illuminant::D65, &flat).is_err());
+}
+
+#[test]
+fn a_matrix_that_cannot_be_inverted_is_refused() {
+    // Two identical rows: the camera cannot tell two of its channels apart, so
+    // there is no way back. Nothing may reach the GPU but an error.
+    let flat = [
+        1.0, 0.0, 0.0, //
+        1.0, 0.0, 0.0, //
+        0.0, 0.0, 1.0,
+    ];
+
+    assert!(camera_to_working(Illuminant::D65, &flat).is_err());
+    assert!(camera_to_working(Illuminant::D65, &[0.0f32; 9]).is_err());
+}
+
+fn as_rows(flat: &[f32; 9]) -> [[f64; 3]; 3] {
+    std::array::from_fn(|row| std::array::from_fn(|col| flat[row * 3 + col] as f64))
+}
+
+fn multiply(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    std::array::from_fn(|row| {
+        std::array::from_fn(|col| (0..3).map(|k| a[row][k] * b[k][col]).sum())
+    })
+}
+
+fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let cofactor = |row: usize, col: usize| {
+        let r = [(row + 1) % 3, (row + 2) % 3];
+        let c = [(col + 1) % 3, (col + 2) % 3];
+        m[r[0]][c[0]] * m[r[1]][c[1]] - m[r[0]][c[1]] * m[r[1]][c[0]]
+    };
+    let det = (0..3).map(|col| m[0][col] * cofactor(0, col)).sum::<f64>();
+
+    let mut out = [[0.0f64; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            out[col][row] = cofactor(row, col) / det;
+        }
+    }
+    out
 }
 
 // ── White balance ─────────────────────────────────────────────────────────────

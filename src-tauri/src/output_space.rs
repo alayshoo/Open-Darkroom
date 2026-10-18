@@ -246,13 +246,30 @@ fn multiply_vec(a: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
 /// Inverse by cofactors. Every matrix reaching this is built from three
 /// independent primaries, so the determinant cannot vanish.
 pub(crate) fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    invert_checked(m).unwrap_or([[f64::NAN; 3]; 3])
+}
+
+/// Inverse by cofactors, for matrices that come from a file rather than from
+/// our own primaries: `None` when the matrix is singular or holds a value that
+/// is not a number.
+pub(crate) fn invert_checked(m: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
     let cofactor = |row: usize, col: usize| {
         let r = [(row + 1) % 3, (row + 2) % 3];
         let c = [(col + 1) % 3, (col + 2) % 3];
         m[r[0]][c[0]] * m[r[1]][c[1]] - m[r[0]][c[1]] * m[r[1]][c[0]]
     };
 
+    // Against the product of the row lengths rather than against zero: a matrix
+    // two of whose rows all but agree has a determinant that is small for its
+    // scale, not small in absolute terms, and inverting it amplifies noise.
     let det = (0..3).map(|col| m[0][col] * cofactor(0, col)).sum::<f64>();
+    let scale: f64 = m
+        .iter()
+        .map(|row| row.iter().map(|v| v * v).sum::<f64>().sqrt())
+        .product();
+    if !det.is_finite() || !scale.is_finite() || det.abs() <= 1e-9 * scale {
+        return None;
+    }
 
     // Transposed on the way out: the cofactor of (row, col) belongs at
     // (col, row) in the inverse.
@@ -262,5 +279,7 @@ pub(crate) fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
             out[col][row] = cofactor(row, col) / det;
         }
     }
-    out
+    out.iter()
+        .all(|row| row.iter().all(|v| v.is_finite()))
+        .then_some(out)
 }

@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::color::LUT_SIZE;
 use crate::icc::{Matrix3, SourceSpace, D65, SRGB_TO_WORKING, WORKING_PRIMARIES};
-use crate::output_space::{column_major, invert, multiply, rgb_to_xyz};
+use crate::output_space::{column_major, invert_checked, multiply, rgb_to_xyz};
 
 /// Channels a decoded sensor image is handed on as. Sensors carry no alpha, so
 /// this is always three and the buffer is a quarter smaller than an RGBA one.
@@ -167,11 +167,16 @@ pub fn white_balance(wb_coeffs: [f32; 4]) -> [f32; RAW_CHANNELS] {
 /// Camera RGB → linear Rec.2020, column-major for WGSL.
 ///
 /// The camera's calibration gives XYZ → camera; the working space's primaries
-/// give XYZ → Rec.2020. Composing the first inverted with the second is the
-/// whole conversion. Rows are normalised to sum to one afterwards so that a
-/// white-balanced neutral stays neutral — without it the matrix carries a cast
-/// of its own, on top of the balance already applied to the pixels.
+/// give XYZ → Rec.2020. Composing the second with the first inverted is the
+/// whole conversion. The normalisation that follows is a scale per camera
+/// channel, standing in for the balance already applied to the pixels: the rows
+/// of Rec.2020 → camera are brought to one before that matrix is inverted.
+/// Normalising the composed matrix instead scales output channels, which leaves
+/// neutrals neutral but shifts every other colour.
 pub fn camera_to_working(illuminant: Illuminant, flat: &[f32]) -> Result<Matrix3, String> {
+    if flat.iter().any(|v| !v.is_finite()) {
+        return Err("RAW colour matrix holds a value that is not a number".into());
+    }
     let xyz_to_cam = transform_1d::<3, 3>(flat)
         .ok_or("RAW colour matrix does not describe three channels")?;
     let xyz_to_cam = if illuminant == Illuminant::D65 {
@@ -182,20 +187,21 @@ pub fn camera_to_working(illuminant: Illuminant, flat: &[f32]) -> Result<Matrix3
 
     let xyz_to_cam: [[f64; 3]; 3] =
         std::array::from_fn(|row| std::array::from_fn(|col| xyz_to_cam[row][col] as f64));
-    let xyz_to_working = invert(rgb_to_xyz(WORKING_PRIMARIES, D65));
-    let cam_to_working = multiply(xyz_to_working, invert(xyz_to_cam));
+    let working_to_cam = multiply(xyz_to_cam, rgb_to_xyz(WORKING_PRIMARIES, D65));
 
-    let mut out = [[0.0f64; 3]; 3];
-    for (row, values) in cam_to_working.iter().enumerate() {
+    let mut balanced = [[0.0f64; 3]; 3];
+    for (row, values) in working_to_cam.iter().enumerate() {
         let sum: f64 = values.iter().sum();
-        if sum.abs() < f64::EPSILON {
+        if !sum.is_finite() || sum.abs() < f64::EPSILON {
             return Err("RAW colour matrix maps neutral to zero".into());
         }
         for col in 0..3 {
-            out[row][col] = values[col] / sum;
+            balanced[row][col] = values[col] / sum;
         }
     }
-    Ok(column_major(out))
+
+    let cam_to_working = invert_checked(balanced).ok_or("RAW colour matrix cannot be inverted")?;
+    Ok(column_major(cam_to_working))
 }
 
 /// Scale one pixel's worth of unit-interval floats into the full u16 range,
