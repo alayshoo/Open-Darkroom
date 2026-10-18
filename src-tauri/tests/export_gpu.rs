@@ -595,6 +595,13 @@ const LUMA_TOLERANCE: f64 = 0.005;
 /// Render probes that are already in the working space, so only the output
 /// transform runs and its closed form is what the result has to match.
 fn render_to(probes: &[[u8; 3]], output: OutputSpace) -> Vec<u8> {
+    render_to_exposed(probes, output, 0.0)
+}
+
+/// As above, with an exposure in stops — the only way to put a luminance above
+/// the destination's white in front of the output transform, since a source
+/// pixel cannot exceed its own white on its own.
+fn render_to_exposed(probes: &[[u8; 3]], output: OutputSpace, exposure: f32) -> Vec<u8> {
     let img: Rgba16Image = image::ImageBuffer::from_fn(probes.len() as u32, 1, |x, _| {
         let p = probes[x as usize];
         image::Rgba([u8_to_u16(p[0]), u8_to_u16(p[1]), u8_to_u16(p[2]), u16::MAX])
@@ -603,13 +610,18 @@ fn render_to(probes: &[[u8; 3]], output: OutputSpace) -> Vec<u8> {
     let mut already_working = SourceSpace::default();
     already_working.to_working = IDENTITY;
 
+    let sliders = SlidersPayload {
+        exposure,
+        ..SlidersPayload::default()
+    };
+
     let (w, h) = img.dimensions();
     pollster::block_on(render_image(
         img.as_raw(),
         w,
         h,
         4,
-        &SlidersPayload::default(),
+        &sliders,
         &already_working,
         output,
         8,
@@ -675,6 +687,68 @@ fn the_gamut_compression_keeps_the_luminance_a_clamp_would_lose() {
             if neutral { "should be inside" } else { "should exceed" }
         );
     }
+}
+
+/// A colour brighter than the destination's white keeps its chromaticity.
+///
+/// Luminance cannot be kept there — the gamut narrows to a point at white, so
+/// the only colour that holds a luminance of 1 is white itself, and aiming at
+/// the neutral of the pixel's own brightness would render every bright
+/// saturated colour white. Scaling to fit gives up the luminance instead, which
+/// had no representation to lose, and moves x and y not at all.
+///
+/// The probe's chromaticity is inside sRGB — saturated, but with no negative
+/// channel — so scaling it to fit lands every channel in range and the
+/// compression itself has nothing left to do. That leaves the scaling as the
+/// only thing under test. A negative channel is the compression's own case,
+/// since no amount of scaling lifts one back into range.
+#[test]
+fn colour_brighter_than_white_keeps_its_chromaticity() {
+    const PROBE: [u8; 3] = [255, 105, 210];
+    const EXPOSURE: f32 = 2.0;
+
+    let working: [f64; 3] =
+        std::array::from_fn(|c| srgb_to_linear(PROBE[c] as f64 / 255.0) * 2f64.powf(EXPOSURE as f64));
+    let dst = apply_matrix(&WORKING_TO_SRGB, working);
+    let luma: f64 = (0..3).map(|c| WORKING_LUMA[c] * working[c]).sum();
+
+    assert!(
+        luma > 1.0 && dst.iter().all(|&c| c >= 0.0),
+        "probe is luma {luma:.3} at {dst:?} — it has to be brighter than white \
+         and free of negative channels for this to test the scaling rather than \
+         the compression"
+    );
+
+    let out = render_to_exposed(&[PROBE], OutputSpace::Srgb, EXPOSURE);
+    let got = pixel(&out, 0);
+    let linear: [f64; 3] = std::array::from_fn(|c| srgb_to_linear(got[c] as f64 / 255.0));
+
+    // Chromaticity, as the channel ratios a scale cannot change: scaling linear
+    // RGB scales XYZ with it, so x and y stay put.
+    let ratio = |v: [f64; 3]| -> [f64; 3] {
+        let sum: f64 = v.iter().sum();
+        std::array::from_fn(|c| v[c] / sum)
+    };
+    let (want, have) = (ratio(dst), ratio(linear));
+
+    for c in 0..3 {
+        assert!(
+            (have[c] - want[c]).abs() < 0.005,
+            "channel {c} of {got:?} sits at {:.4} of the colour, not {:.4} — the \
+             fit to white moved the chromaticity instead of only the luminance",
+            have[c],
+            want[c]
+        );
+    }
+
+    // And prove it is not vacuous: aiming at the neutral of this pixel's own
+    // brightness is what the clamped luminance used to do, and it renders white.
+    assert_ne!(
+        got,
+        [255, 255, 255],
+        "a blown saturated colour rendered white, which is what keeping the \
+         luminance above white costs"
+    );
 }
 
 /// An in-gamut colour must come through the compression untouched, or every

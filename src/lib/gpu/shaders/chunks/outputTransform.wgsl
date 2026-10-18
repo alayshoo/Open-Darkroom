@@ -43,19 +43,33 @@ struct OutputSpace {
 
 // Pull a colour the destination cannot hold in towards its own luminance.
 //
-// Hue and luminance are both kept: the colour moves along the straight line to
-// the neutral of the same brightness, and stops the moment every channel is in
-// range. A colour already inside is returned untouched, so this costs nothing in
-// the gamut it is mapping into — unlike a per-channel clamp, which drops the
-// most saturated channel first and slides the hue of everything it touches.
+// Hue is always kept: the colour moves along the straight line to the neutral of
+// the same brightness, and stops the moment every channel is in range. Luminance
+// is kept too for anything at or below the destination's white — unlike a
+// per-channel clamp, which keeps neither, dropping the most saturated channel
+// first and sliding the hue of everything it touches. A colour already inside is
+// returned untouched, so this costs nothing in the gamut it is mapping into.
+//
+// Above white, luminance is the one thing that cannot survive: the gamut narrows
+// to a point there, so holding the luminance would mean neutral and every bright
+// saturated colour would render white. Such a colour is scaled to fit instead,
+// which keeps its chromaticity exactly — scaling linear RGB scales XYZ with it,
+// so x and y do not move — and gives up only a luminance that had nowhere to go.
 //
 // All destinations share the working space's white, so the neutral axis of any
 // of them is the working-space luminance repeated across the three channels.
 fn gamut_compress(rgb: vec3f, luma: f32) -> vec3f {
-  // A luminance above white or below black has no neutral inside the gamut to
-  // aim at; the nearest one is the endpoint itself.
-  let grey = clamp(luma, 0.0, 1.0);
-  let offset = rgb - vec3f(grey);
+  // Gated on luminance, not on channel range: a colour darker than white that
+  // merely falls outside the gamut is the compression's own case below, and has
+  // a luminance worth keeping rather than scaling away.
+  let peak = max(rgb.r, max(rgb.g, rgb.b));
+  let fit = select(1.0, 1.0 / max(peak, 1.0), luma > 1.0);
+  let signal = rgb * fit;
+
+  // Scaling a colour scales its luminance, so the neutral to aim at is the one
+  // the scaled colour has.
+  let grey = clamp(luma * fit, 0.0, 1.0);
+  let offset = signal - vec3f(grey);
 
   // How far each channel can travel from the neutral before leaving 0..1, as a
   // fraction of how far it is asking to travel. A channel sitting on the
