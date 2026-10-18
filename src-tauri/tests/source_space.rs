@@ -10,7 +10,7 @@
 // are checked against profiles lcms2 builds itself rather than against our own
 // restatement of the same numbers.
 
-use image::{ImageBuffer, Rgba};
+use image::{ImageBuffer, ImageDecoder, Rgba};
 use lcms2::{CIExyY, CIExyYTRIPLE, Profile, TagSignature, ToneCurve};
 
 use open_darkroom_lib::color::{linearize_u16_f32, to_linear_u16, LUT_SIZE};
@@ -219,6 +219,130 @@ fn a_profile_missing_a_colorant_falls_back_to_srgb() {
 
     assert!(!space.baked, "there is no conversion to bake with");
     assert_matrix_close("partial fallback", space.to_working, SRGB_TO_WORKING, 1e-9);
+}
+
+// ── A real file ───────────────────────────────────────────────────────────────
+
+/// Display P3 -> linear Rec.2020, column-major. Derived from the two spaces'
+/// published chromaticities, not from anything in `icc.rs`.
+const P3_TO_WORKING: [f32; 9] = [
+    0.753_833,
+    0.045_744,
+    -0.001_210,
+    0.198_597,
+    0.941_777,
+    0.017_602,
+    0.047_570,
+    0.012_479,
+    0.983_609,
+];
+
+fn tagged_jpeg() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("display-p3.jpg")
+}
+
+/// Everything above reads a profile this suite holds in memory. A real file
+/// keeps one in an APP2 segment, and the decoder has to hand it back before it
+/// is consumed — the one step between a tagged file and the maths that nothing
+/// else here covers.
+///
+/// The fixture is Display P3, so ignoring the tag is not a no-op: its matrix
+/// differs from the untagged one by 0.13 in the red column, which is the
+/// difference between a red the file means and a red it does not.
+#[test]
+fn a_tagged_jpeg_is_read_through_the_profile_it_carries() {
+    let mut decoder = image::ImageReader::open(tagged_jpeg())
+        .expect("open the fixture")
+        .with_guessed_format()
+        .expect("guess the format")
+        .into_decoder()
+        .expect("decoder");
+
+    let icc = decoder
+        .icc_profile()
+        .ok()
+        .flatten()
+        .expect("the fixture carries a profile — regenerate with the example");
+
+    let space = SourceSpace::resolve(Some(icc));
+
+    assert!(!space.baked, "a matrix profile converts on the GPU");
+    assert_matrix_close("Display P3", space.to_working, P3_TO_WORKING, 2e-3);
+
+    let drift = (0..9)
+        .map(|i| (space.to_working[i] - SRGB_TO_WORKING[i]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(
+        drift > 0.1,
+        "the tag made no difference: {:?}",
+        space.to_working
+    );
+}
+
+/// And the pixels behind it. The file's patches are read back through the
+/// decode the app runs, so what is asserted is the whole path a tagged file
+/// takes: APP2 segment, profile, curve, matrix.
+///
+/// A neutral is the control. It is the one colour every RGB space agrees on,
+/// so it has to survive a conversion that moves the primaries a long way.
+#[test]
+fn a_tagged_jpeg_converts_its_pixels_through_that_profile() {
+    let mut decoder = image::ImageReader::open(tagged_jpeg())
+        .expect("open the fixture")
+        .with_guessed_format()
+        .expect("guess the format")
+        .into_decoder()
+        .expect("decoder");
+    let space = SourceSpace::resolve(decoder.icc_profile().ok().flatten());
+    let img = image::DynamicImage::from_decoder(decoder).expect("decode");
+
+    let (width, height) = (img.width(), img.height());
+    let samples = img.into_rgb16().into_raw();
+    prepare_image(&samples, width, height, 3, &space).expect("prepare");
+
+    // Patch centres, one per 64-pixel band, in the order the example wrote
+    // them: red, green, blue, mid grey.
+    let at = |band: u32| {
+        let row = band * 64 + 32;
+        let i = ((row * width) + width / 2) as usize * 3;
+        [samples[i], samples[i + 1], samples[i + 2]]
+    };
+
+    let luts = space.luts(|v| v);
+    let to_working = |px: [u16; 3]| {
+        let lin: Vec<f32> = (0..3)
+            .map(|c| luts[c][(px[c] as usize * (LUT_SIZE - 1)) / u16::MAX as usize])
+            .collect();
+        let mut out = [0.0f32; 3];
+        for row in 0..3 {
+            out[row] = (0..3).map(|col| space.to_working[col * 3 + row] * lin[col]).sum();
+        }
+        out
+    };
+
+    let grey = to_working(at(3));
+    for c in 1..3 {
+        assert!(
+            (grey[c] - grey[0]).abs() < 2e-3,
+            "a neutral must stay neutral through the conversion: {grey:?}"
+        );
+    }
+
+    // P3's red carries further into Rec.2020 than sRGB's does: 0.754 against
+    // 0.627. Which of the two it lands on is the whole question, so it is
+    // asked that way rather than as a tolerance — the few parts per thousand
+    // it sits off either mark are the JPEG's quantisation, not the conversion.
+    let red = to_working(at(0));
+    let from_p3 = (red[0] - P3_TO_WORKING[0]).abs();
+    let from_srgb = (red[0] - SRGB_TO_WORKING[0]).abs();
+    assert!(
+        from_p3 < 0.02 && from_p3 < from_srgb,
+        "the file's red reached the working space as {red:?}, which is \
+         {from_p3} from its own primaries and {from_srgb} from sRGB's"
+    );
 }
 
 // ── The baked path ────────────────────────────────────────────────────────────
