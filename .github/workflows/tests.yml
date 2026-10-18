@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to a branch makes the first run's answer worthless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same stack .claude/hooks/session-start.sh installs. Tauri links
+      # against system GTK and WebKit, and the lib does not configure without
+      # them — which takes the test binaries with it. llvmpipe is the software
+      # Vulkan adapter the GPU suites need on a machine with no GPU.
+      - name: System dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            librsvg2-dev \
+            patchelf \
+            mesa-vulkan-drivers
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # llvmpipe warns on every adapter request without this, which buries the
+      # real output.
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+        env:
+          XDG_RUNTIME_DIR: /tmp/xdg-runtime
+
+  frontend:
+    name: pnpm test:unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # svelte-check reads a tsconfig SvelteKit generates, and the unit project
+      # compiles the `.svelte.ts` files that sync sets up the types for.
+      - run: pnpm exec svelte-kit sync
+
+      - run: pnpm test:unit
