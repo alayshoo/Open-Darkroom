@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 169 Rust tests, 25 TypeScript, 18 in-browser.
+Nothing is `#[ignore]`d. 200 Rust tests, 83 TypeScript, 27 in-browser.
 
 ---
 
@@ -26,7 +26,7 @@ develop.wgsl           steps 1-10, into the perceptual working space
 calcSharpTexture.wgsl  h_main — luma, blurred along x at four scales
 calcSharpTexture.wgsl  v_main — blurs finished, three bands subtracted out
 composite.wgsl         the bands applied by scaling the colour
-colorSpaceEncode.wgsl  output transform + the single clamp
+colorSpaceEncode.wgsl  output transform + the single clamp (chunks/outputTransform.wgsl)
 ```
 
 `develop.wgsl` deliberately does **not** clamp: the headroom has to survive as far
@@ -37,7 +37,7 @@ The two blur passes are skipped whenever no band can reach the screen. That is
 only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
 so composite is a no-op regardless of what the detail texture holds.
 
-## L1 — `shader_contracts.rs` (14)
+## L1 — `shader_contracts.rs` (18)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -167,7 +167,7 @@ correct — a single-pass render clamps at those edges too, so the results agree
 `chunk_size_does_not_change_a_sharpened_render` is what holds that to bit
 equality, and it is the test that fails first if the arithmetic drifts.
 
-## L1 — `image_prep.rs` (20)
+## L1 — `image_prep.rs` (23)
 
 | Test | Asserts |
 |---|---|
@@ -192,7 +192,88 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
-## L2 — `colorimetry.rs` (7)
+## L1 — `source_space.rs` (20)
+
+What a file says its own numbers mean, and how that reaches the GPU. Nothing
+downstream can tell a mistake here from a deliberate look: a transposed matrix, a
+channel routed through the wrong curve, or a column written four bytes early all
+produce a plausible image in the wrong colours, and every slider the user then
+moves is compensating for it.
+
+The matrices are checked against profiles lcms2 builds itself rather than against
+our own restatement of the same numbers, which is why a Rec.2020 profile
+decomposing to the identity is a real assertion and not a tautology.
+
+| Test | Asserts |
+|---|---|
+| `an_untagged_file_is_srgb_and_converts_on_the_gpu` | no profile means sRGB, matrix path |
+| `a_tagged_srgb_profile_agrees_with_the_untagged_constant` | a real sRGB profile decomposes to `SRGB_TO_WORKING` |
+| `a_rec2020_profile_decomposes_to_the_identity` | which a transpose cannot survive |
+| `an_unreadable_profile_falls_back_to_srgb` | garbage bytes are no profile, so they are an untagged file |
+| `a_greyscale_profile_undoes_its_own_curve_on_every_channel` | one TRC for three channels, identity matrix, matrix path kept |
+| `a_profile_the_decoder_already_rendered_falls_back_to_srgb` | Lab/CMYK/XYZ describe numbers we no longer hold |
+| `a_profile_missing_a_colorant_takes_the_cpu_path` | all six tags or none |
+| `a_conversion_that_cannot_be_built_fails_the_open` | a profile lcms2 refuses is not silently ignored — see below |
+| `a_lut_profile_bakes_to_the_same_place_the_matrix_path_reaches` | 6 probes, lcms2's grid against three curves and a 3x3 |
+| `baking_carries_alpha_through_untouched` | alpha survives the three-wide reweaving |
+| `baking_agrees_between_three_and_four_channel_sources` | both shapes reach the same colours |
+| `a_lut_profile_opens_through_the_baked_path` | the whole open, flag and matrix included |
+| `the_baked_path_hands_the_upload_an_identity_curve` | no second decode over already-linear data |
+| `a_baked_source_sets_the_payload_flag_and_sends_the_identity` | the flag and matrix the frontend reads |
+| `each_channel_goes_through_its_own_curve` | three gammas, routed and applied in order |
+| `alpha_is_not_sent_through_a_curve` | alpha carries no transfer encoding |
+| `the_resampled_route_routes_each_channel_through_its_own_curve` | the linear u16 path has its own indexing |
+| `a_downscaled_overview_carries_the_per_channel_curves` | and `prepare_image` reaches it |
+| `the_uniform_pads_each_matrix_column_to_sixteen_bytes` | a `mat3x3<f32>` is three vec4 columns |
+| `the_payload_carries_the_matrix_and_the_baked_flag` | at the offsets `openImage.ts` reads |
+
+### Which path a profile takes
+
+`bake` hands lcms2 `PixelFormat::RGB_16`, so it can only convert a profile whose
+own colour space is RGB. The decoder has already produced three or four channels
+of u16 whatever the profile says, so what decides the path is whether the profile
+still describes that buffer:
+
+| Profile | Path | Why |
+|---|---|---|
+| none, or unreadable bytes | sRGB on the GPU | what an untagged file means in practice |
+| RGB, curves + colorants | its own matrix, on the GPU | the darkroom block keeps the file's channels |
+| RGB, A2B0 only | baked on the CPU | no separable channels to preserve |
+| greyscale | its own TRC, identity matrix | one channel replicated across three; a neutral stays neutral |
+| Lab, CMYK, XYZ | sRGB on the GPU | the decoder rendered these to RGB on its own terms |
+
+Greyscale keeps the matrix path on purpose: a scanned black-and-white negative is
+the case, and the per-channel black, white and gamma still address the three
+channels the decoder made.
+
+### The LUT profile fixture
+
+`tests/fixtures/srgb-lut.icc` is the input `bake` exists for: an RGB profile
+carrying its conversion as an A2B0 pipeline rather than as curves and colorants,
+which is the shape a scanner's profile has.
+
+lcms2's safe API cannot build one from stages — a `Pipeline` is only ever created
+empty and concatenated — so `examples/make_lut_profile.rs` borrows one. It builds
+a device link for sRGB → Lab, which holds exactly such a pipeline, and rehouses
+that pipeline in an ordinary input profile. Regenerate with:
+
+```
+cargo run --example make_lut_profile
+```
+
+It describes sRGB on purpose. That is what lets the baked conversion be checked
+against the matrix path rather than against a restatement of itself, and the two
+agree to 5e-4 of full scale — a tenth of an 8-bit code value, which is the grid's
+own interpolation error. A coarse grid keeps the committed file at 30 KB; the
+default precalculation writes 216 KB for no accuracy a test can use.
+
+That refusal is also the guard on the pixel type. lcms2 checks a transform's
+element type against the format's bytes per pixel with a plain `assert_eq!`, so a
+one-wide element against `RGB_16` panicked rather than returning — inside a Tauri
+command, on opening an ordinary file. A clean `Err` is what says the check was
+passed and the conversion was genuinely attempted.
+
+## L2 — `colorimetry.rs` (8)
 
 The colorimetric constants and the Planckian locus in `calcParams.wgsl`, measured
 against published values. Everything else in the white-balance suite is
@@ -207,8 +288,9 @@ measured is the constant the pipeline compiles, not a copy kept in the test.
 |---|---|
 | `the_bradford_matrices_are_a_true_inverse_pair` | `M_BRADFORD_INV · M_BRADFORD` = I |
 | `the_xyz_and_rgb_matrices_are_a_true_inverse_pair` | `M_XYZ_TO_RGB · M_RGB_TO_XYZ` = I |
-| `the_rgb_to_xyz_matrix_maps_white_to_d65` | primaries sum to D65, identifying the matrix as sRGB's |
-| `the_luminance_coefficients_are_bt709` | the matrix Y row and the `LR`/`LG`/`LB` constants both match BT.709 |
+| `the_rgb_to_xyz_matrix_maps_white_to_d65` | primaries sum to D65, identifying the matrix as a D65 space's |
+| `the_luminance_coefficients_are_bt2020` | the matrix Y row and the `LR`/`LG`/`LB` constants both match BT.2020 |
+| `the_source_matrix_is_composed_before_white_balance` | `wb_matrix` = WB · source, not the reverse |
 | `the_locus_matches_published_blackbody_chromaticities` | 15 temperatures vs tabulated CIE 1931 values |
 | `the_locus_is_continuous_across_its_branch_boundaries` | no step at 2222 K or 4000 K |
 | `the_locus_runs_monotonically_across_the_slider_range` | 133 points over 2700–12000 K |
@@ -251,7 +333,7 @@ as a whole; for one probe per slider see [`sliders_gpu.rs`](#l2--sliders_gpurs-3
 | `a_solid_patch_lands_on_its_own_bin` | flat colour occupies ≤ 2 adjacent bins |
 | `histogram_agrees_with_the_developed_image` | the two copies of the chain still match |
 
-## L2 — `sliders_gpu.rs` (40)
+## L2 — `sliders_gpu.rs` (41)
 
 One synthetic probe per control the UI exposes. `develop_gpu.rs` covers the chain
 as a whole; this covers each slider on its own — correct direction, correct
@@ -294,12 +376,13 @@ code-value shift), and tint (green scaled, then renormalised).
 | `blacks_act_only_in_the_bottom_quarter` | closes at sRGB 64, reaches pure black |
 | `the_four_masks_cover_four_different_ranges` | all 6 pairs differ; the two sides never cross |
 | `the_region_controls_keep_the_tone_order_in_combination` | **13 cases** incl. all four at both rails |
-| `saturation_at_the_bottom_rail_gives_neutral_grey` | −100 lands on BT.709 luma exactly |
+| `saturation_at_the_bottom_rail_gives_neutral_grey` | −100 lands on the input's CIE Y exactly |
 | `positive_saturation_widens_the_channel_spread` | both directions move correctly |
 | `vibrance_boosts_muted_colours_more_than_vivid_ones` | the property that distinguishes it from saturation |
+| `vibrance_measures_saturation_in_the_destination_space` | a closed form that rules out the working-space measurement |
 | `vibrance_leaves_a_neutral_neutral` | no cast at either rail |
 | `vibrance_does_not_resurrect_crushed_shadows` | 3 crushing setups, no black pixel lit, still active higher up |
-| `a_hundred_and_twenty_degrees_permutes_the_primaries` | exact channel rotation about (1,1,1) |
+| `hue_rotates_about_the_neutral_axis` | a full turn is I, a neutral does not move, ±120 go the right way |
 | `hue_rotation_is_reversible_and_wraps` | ±60 differ, ±180 agree |
 | `hue_leaves_a_neutral_neutral` | 5 angles, no cast |
 | `every_slider_changes_the_rendered_image` | **all 24 lanes**, moved alone, alter the output |
@@ -329,7 +412,7 @@ is where Lightroom's Basic panel works. That is what puts the mask boundaries at
 sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
 real mid-grey instead of on a bright highlight.
 
-## L2 — `export_gpu.rs` (14)
+## L2 — `export_gpu.rs` (16)
 
 Export mechanics: the parts that break on unusual dimensions, not unusual sliders.
 
@@ -349,6 +432,8 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `malformed_input_is_rejected_before_touching_the_gpu` | 6 bad inputs, including a bad channel count |
 | `a_three_channel_source_renders_exactly_like_its_rgba_equivalent` | byte-identical at 8 and 16 bits |
 | `chunking_a_three_channel_source_leaves_no_seam` | 5 chunk sizes at a stride of three |
+| `a_neutral_render_round_trips_through_the_working_space` | 8 probes, sRGB → Rec.2020 → sRGB unchanged |
+| `the_export_applies_the_source_matrix_it_is_given` | a file already in the working space takes the output transform alone |
 
 ## L2 — `encoding.rs` (11)
 
@@ -366,15 +451,18 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_webp_lossless_flag_reaches_the_encoder` | lossless exact, lossy not |
 | `an_unsupported_tiff_bit_depth_is_reported` | 12-bit errors by name |
 
-## L1 — `tests/unit/` (25, TypeScript)
+## L1 — `tests/unit/` (83, TypeScript)
 
 | Test | Asserts |
 |---|---|
 | `calcMatrixHelpers` × 5 | identity, diagonals, column-major order, non-commutativity, shape |
 | `openImage` × 9 | header, pixel slicing, the overview region, R/G/B histogram order, no region overlap, odd sizes |
-| `sharpnessPage` × 12 | the sharpness controls' ranges, defaults, steps and history wiring |
+| `sharpnessPage` × 11 | the sharpness controls' ranges, defaults, steps and history wiring |
+| `openImage` × 3 more | the source matrix's float order, the baked flag, the pixels after the 64-byte header |
+| `wgslInclude` × 10 | the directive's grammar, chunk flattening, and every shipped shader resolving |
+| `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 
-## L3 — `tests/browser/` (18, real WebGPU)
+## L3 — `tests/browser/` (27, real WebGPU)
 
 Drives the frontend's own pipeline modules, including the full six-pass chain. A
 failure here that passes in L2 is a TypeScript wiring bug.
@@ -398,4 +486,7 @@ failure here that passes in L2 is a TypeScript wiring bug.
 | `leaves the image alone when the amount is zero` | bit-exact no-op |
 | `fades the mask out as the render scale falls` | the zoomed-out preview stops sharpening |
 | `moves the image with texture and with clarity` | both bands reach the pixels, and differ |
+| `bins the same values the preview renders` | 4 saturated probes: the histogram and the preview share one output transform |
+| `returns the image it was given, pixel for pixel, at identity` | a payload framed as the backend frames one, through the whole chain |
+| `holds the edges in place` | corners and both ends of every row |
 | `agrees with the renderer about when the blur can be skipped` | `sharpnessIsVisible` tracks the shader's fade |

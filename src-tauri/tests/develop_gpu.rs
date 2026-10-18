@@ -16,6 +16,7 @@ use common::{
 
 use open_darkroom_lib::export_rendering::SlidersPayload;
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
+use open_darkroom_lib::icc::SRGB_TO_WORKING;
 
 // ── calcParams: matrix construction ───────────────────────────────────────────
 
@@ -44,13 +45,16 @@ fn default_sliders_build_identity_matrices() {
         );
     }
 
-    // At the neutral reference temperature the adaptation cancels exactly, so
-    // this must be identity to f32 rounding — not merely close to it. A looser
-    // bound here would hide a tint on every unedited image.
+    // `wb_matrix` carries the source → working-space conversion composed ahead
+    // of the white balance, so at the neutral reference temperature it must be
+    // exactly the source matrix — the adaptation cancels and leaves nothing of
+    // its own behind. Asserting the identity here would only pass if the
+    // conversion had been dropped; asserting the source matrix catches both a
+    // stray tint and a conversion that never happened.
     let wb = p.wb_matrix();
     for col in 0..3 {
         for row in 0..3 {
-            let want = if col == row { 1.0 } else { 0.0 };
+            let want = SRGB_TO_WORKING[col * 3 + row];
             assert!(
                 (wb[col][row] - want).abs() < 1e-5,
                 "wb_matrix[{col}][{row}]: expected {want}, got {}",

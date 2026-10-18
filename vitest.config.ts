@@ -54,12 +54,18 @@ export default defineConfig({
                 // Playwright's Chromium ships --disable-gpu, which leaves
                 // navigator.gpu defined but with no adapter behind it.
                 ignoreDefaultArgs: ["--disable-gpu"],
+                // Both set by the session-start hook in a cloud container, and
+                // unset on a developer's machine, which has a Chromium
+                // Playwright already agrees with and an adapter of its own.
+                executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
+                args: (process.env.CHROMIUM_FLAGS ?? "").split(" ").filter(Boolean),
               },
             }),
             // Headed on purpose: headless Chromium returns no WebGPU adapter on
             // this platform under any flag combination tried (swiftshader,
-            // Vulkan, ANGLE), while headed gets the real hardware device. A
-            // browser window appears for a few seconds during the run.
+            // Vulkan, ANGLE), while headed gets a device — the real hardware
+            // one locally, a software one in a container. A browser window
+            // appears for a few seconds during the run.
             headless: false,
             instances: [{ browser: "chromium" }],
           },

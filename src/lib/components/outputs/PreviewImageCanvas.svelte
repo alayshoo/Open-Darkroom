@@ -127,7 +127,7 @@
                 imagePayload.height,
             );
 
-            localRenderer.loadImage(image);
+            localRenderer.loadImage(image, imagePayload.srcToWorking);
             // The canvas backing store is the preview texture, so this is how
             // far the render sits from full resolution.
             localRenderer.setView(

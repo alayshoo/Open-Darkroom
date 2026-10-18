@@ -35,6 +35,7 @@ import {
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
 import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
+import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -192,6 +193,7 @@ async function develop(
   ]);
 
   calcParams.updateSliders(sliders);
+  calcParams.updateSourceSpace(SRGB_TO_WORKING);
   if (renderScale !== undefined) calcParams.updateView(renderScale, FULL_WIDTH, FULL_HEIGHT);
 
   const encoder = gpu.device.createCommandEncoder();
@@ -286,6 +288,7 @@ async function histogram(
 ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array; scale: number }> {
   const pipeline = createHistogramPipeline(gpu);
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
+  pipeline.setSourceSpace(SRGB_TO_WORKING);
   try {
     // No target: the app draws the curves from the bins on the GPU, but what is
     // under test here is the binning, so this stops at the buffer.
@@ -652,6 +655,49 @@ describe("histogram compute", () => {
     expect(centroid(bins.r)).toBeLessThan(centroid(bins.g));
     expect(centroid(bins.g)).toBeLessThan(centroid(bins.b));
   });
+
+  // The histogram runs its own copy of the develop chain, so it can agree with
+  // the shader it was copied from and still describe a different image than the
+  // one on screen. It did: it binned the working space while the preview showed
+  // the destination, and the two disagreed by twenty code values on saturated
+  // content without either looking wrong.
+  //
+  // Both now end in the shared output transform, which is what this checks
+  // numerically rather than by looking for the chunk's text. Saturated colours
+  // are the point: a neutral lands in the same bin either way.
+  it("bins the same values the preview renders", async () => {
+    const probes: [number, number, number][] = [
+      [220, 40, 40],
+      [40, 200, 90],
+      [60, 70, 210],
+      [200, 180, 40],
+    ];
+
+    const sliders: Sliders = { ...defaultSlidersRGB, saturation: 25, vibrance: 40 };
+
+    for (const [r, g, b] of probes) {
+      const rgb = solid(r, g, b);
+      const rendered = await develop(rgb, sliders);
+      const bins = await histogram(rgb, sliders);
+
+      // A solid colour splits one vote between two adjacent bins, so the
+      // weighted centre of each channel is where the preview's value landed.
+      const channels: [string, Uint32Array, number][] = [
+        ["red", bins.r, rendered[0]],
+        ["green", bins.g, rendered[1]],
+        ["blue", bins.b, rendered[2]],
+      ];
+
+      for (const [name, channel, value] of channels) {
+        expect(sum(channel), `${name} lost votes on ${[r, g, b]}`).toBe(TOTAL_WEIGHT);
+        expect(
+          centroid(channel),
+          `${name} on ${[r, g, b]}: the preview rendered ${value}, the bins centre on ` +
+            `${centroid(channel).toFixed(2)} — the two are measuring different images`,
+        ).toBeCloseTo(value, 0);
+      }
+    }
+  });
 });
 
 describe("histogram scale reduction", () => {
@@ -736,8 +782,11 @@ function scatterChart(width: number, height: number): Uint8Array {
   return rgb;
 }
 
-/** Six u32s: preview, full-resolution and overview dimensions. */
-const HEADER = 24;
+/**
+ * Six u32s of dimensions, the source → working matrix, then the flags word.
+ * Must match PAYLOAD_HEADER_BYTES in image_opening.rs.
+ */
+const HEADER = 64;
 
 /** Frame pixels the way `build_payload` in image_opening.rs does. */
 function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBuffer {
@@ -756,6 +805,9 @@ function backendPayload(rgb: Uint8Array, width: number, height: number): ArrayBu
   view.setUint32(12, height, true);
   view.setUint32(16, width, true);
   view.setUint32(20, height, true);
+  // An untagged file's matrix, which is what the backend sends for one.
+  for (let i = 0; i < 9; i++) view.setFloat32(24 + i * 4, SRGB_TO_WORKING[i], true);
+  view.setUint32(60, 0, true);
   new Uint8Array(buffer, HEADER, pixels.length).set(pixels);
   new Uint8Array(buffer, HEADER + pixels.length, overviewBytes).set(pixels);
 

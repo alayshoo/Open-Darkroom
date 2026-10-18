@@ -144,6 +144,7 @@
             imagePayload.overviewWidth,
             imagePayload.overviewHeight,
         );
+        histPipeline.setSourceSpace(imagePayload.srcToWorking);
         requestRender();
     });
 

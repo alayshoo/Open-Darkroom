@@ -10,13 +10,17 @@
 
 mod common;
 
-use common::{CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS};
+use common::{
+    CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS, WORKING_SPACE_TS,
+};
 
 use open_darkroom_lib::export_rendering::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
-    DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT, VIEW_BYTES,
+    DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
+    SOURCE_SPACE_BYTES, VIEW_BYTES,
 };
-use open_darkroom_lib::image_opening::OPEN_CANCELLED;
+use open_darkroom_lib::icc::SRGB_TO_WORKING;
+use open_darkroom_lib::image_opening::{OPEN_CANCELLED, PAYLOAD_HEADER_BYTES};
 
 /// The frontend has to tell a dismissed file picker apart from an open that
 /// failed after the loaded image was released — the first leaves the current
@@ -29,6 +33,45 @@ fn typescript_matches_the_cancelled_open_sentinel() {
     assert!(
         OPEN_IMAGE_TS.contains(&format!("OPEN_CANCELLED = {quoted}")),
         "openImage.ts does not declare OPEN_CANCELLED = {quoted}"
+    );
+}
+
+/// The in-browser suite keeps its own copy of the untagged-file matrix so it can
+/// drive the chain the way the Rust suite does. A copy that drifts would leave
+/// those tests asserting a conversion the app no longer performs — and they are
+/// the only tests that check the TypeScript wiring at all.
+#[test]
+fn the_browser_suite_uses_the_same_untagged_matrix_as_rust() {
+    let numbers: Vec<f32> = WORKING_SPACE_TS
+        .split("SRGB_TO_WORKING = new Float32Array([")
+        .nth(1)
+        .expect("workingSpace.ts does not declare SRGB_TO_WORKING")
+        .split("])")
+        .next()
+        .unwrap()
+        .split(',')
+        .filter_map(|t| t.trim().parse().ok())
+        .collect();
+
+    assert_eq!(numbers.len(), 9, "expected nine elements, got {numbers:?}");
+    for (i, got) in numbers.iter().enumerate() {
+        assert!(
+            (got - SRGB_TO_WORKING[i]).abs() < 1e-7,
+            "workingSpace.ts element {i}: expected {}, got {got}",
+            SRGB_TO_WORKING[i]
+        );
+    }
+}
+
+/// The frontend reads the payload at a fixed offset, so the header size is a
+/// number two languages have to agree on. They have disagreed before: the
+/// pixels then come out of the middle of the header and nothing says why.
+#[test]
+fn typescript_reads_the_payload_header_at_the_same_size_as_rust() {
+    let declared = format!("HEADER_BYTES = {PAYLOAD_HEADER_BYTES};");
+    assert!(
+        OPEN_IMAGE_TS.contains(&declared),
+        "openImage.ts does not declare {declared}"
     );
 }
 
@@ -234,6 +277,11 @@ fn typescript_declares_the_same_buffer_sizes_as_rust() {
         number_after("PARAMS_BUFFER_SIZE"),
         PARAMS_BYTES as usize,
         "PARAMS_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+    assert_eq!(
+        number_after("SOURCE_BUFFER_SIZE"),
+        SOURCE_SPACE_BYTES as usize,
+        "SOURCE_BUFFER_SIZE in TypeScript disagrees with Rust"
     );
     assert_eq!(
         number_after("VIEW_BUFFER_SIZE"),
@@ -460,20 +508,112 @@ fn no_shader_still_carries_an_unresolved_include() {
 /// to carry it still see it.
 #[test]
 fn the_shaders_that_need_the_tone_maths_get_it() {
-    for (label, source) in [("develop.wgsl", DEVELOP_WGSL), ("histogram.wgsl", HISTOGRAM_WGSL)] {
+    // The transfer functions, which the output transform needs too: it undoes
+    // the working curve before the gamut matrix.
+    for (label, source) in [
+        ("develop.wgsl", DEVELOP_WGSL),
+        ("histogram.wgsl", HISTOGRAM_WGSL),
+        ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
+    ] {
         for needle in [
             "TONE_PIVOT",
             "CONTRAST_BASE",
             "fn contrast_curve",
             "fn encode_srgb",
             "fn decode_srgb",
-            "const LUMA",
         ] {
             assert!(
                 source.contains(needle),
                 "{label} no longer sees {needle} — check its includes"
             );
         }
+    }
+
+    // The luminance weights are a separate chunk, and only the two shaders that
+    // run the adjustment chain read them.
+    for (label, source) in [("develop.wgsl", DEVELOP_WGSL), ("histogram.wgsl", HISTOGRAM_WGSL)] {
+        assert!(
+            source.contains("const LUMA"),
+            "{label} no longer sees const LUMA — check its includes"
+        );
+    }
+}
+
+/// `LUMA` and calcParams' `LR`/`LG`/`LB` are the same luminance vector of the
+/// same working space, declared twice because one is a chunk the adjustment
+/// shaders include and the other feeds a matrix calcParams builds on the GPU.
+///
+/// They have disagreed before: the working space moved to Rec.2020 and only
+/// calcParams followed, so the saturation matrix collapsed a colour to one grey
+/// while vibrance mixed it towards another. Neither looks wrong on a neutral,
+/// which is what every render with default sliders is.
+#[test]
+fn the_two_luminance_vectors_describe_the_same_working_space() {
+    let weights = |source: &str, names: [&str; 3]| -> [f32; 3] {
+        names.map(|name| {
+            source
+                .split(&format!("{name}: f32 = "))
+                .nth(1)
+                .unwrap_or_else(|| panic!("no {name} declaration"))
+                .split(';')
+                .next()
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("{name} is not a float: {e}"))
+        })
+    };
+
+    let constants = weights(CALC_PARAMS_WGSL, ["LR", "LG", "LB"]);
+
+    let chunk: Vec<f32> = DEVELOP_WGSL
+        .split("const LUMA = vec3f(")
+        .nth(1)
+        .expect("develop.wgsl declares no const LUMA")
+        .split(')')
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|t| t.trim().parse().expect("LUMA component is not a float"))
+        .collect();
+
+    assert_eq!(chunk.len(), 3, "expected three components, got {chunk:?}");
+    for i in 0..3 {
+        assert_eq!(
+            chunk[i], constants[i],
+            "luma component {i}: chunks/luma.wgsl says {}, calcParams.wgsl says {}",
+            chunk[i], constants[i]
+        );
+    }
+
+    // And both are the working space's, not the sRGB space the chain used to
+    // run in — equal-but-wrong is the other way this drifts.
+    const BT2020: [f32; 3] = [0.2627002, 0.6779981, 0.0593017];
+    assert_eq!(chunk[..], BT2020[..], "the weights are not BT.2020's");
+}
+
+/// The preview is rendered through the output transform and the histogram is
+/// measured through it, so the two have to be the same transform. They were
+/// briefly not: the histogram binned the working space while the screen showed
+/// the destination, and the two disagreed by twenty code values on saturated
+/// content without either looking obviously wrong.
+#[test]
+fn the_preview_and_the_histogram_share_one_output_transform() {
+    for (label, source) in [
+        ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
+        ("histogram.wgsl", HISTOGRAM_WGSL),
+    ] {
+        for needle in ["const M_WORKING_TO_DESTINATION", "fn to_destination"] {
+            assert!(
+                source.contains(needle),
+                "{label} no longer sees {needle} — check its includes"
+            );
+        }
+        assert_eq!(
+            source.matches("const M_WORKING_TO_DESTINATION").count(),
+            1,
+            "{label} declares the destination matrix more than once"
+        );
     }
 }
 
@@ -482,7 +622,7 @@ fn the_shaders_that_need_the_tone_maths_get_it() {
 #[test]
 fn every_shader_that_binds_a_struct_also_declares_it() {
     for (label, source) in SHADERS {
-        for name in ["Params", "SharpParams"] {
+        for name in ["Params", "SharpParams", "SourceSpace"] {
             if !source.contains(&format!(": {name};")) {
                 continue;
             }

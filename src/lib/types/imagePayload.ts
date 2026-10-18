@@ -14,4 +14,10 @@ export interface ImagePayload {
     histR: Uint32Array;
     histG: Uint32Array;
     histB: Uint32Array;
+    // Source RGB → linear Rec.2020, column-major. The darkroom block runs in
+    // the file's own primaries; this converts out of them afterwards.
+    srcToWorking: Float32Array;
+    // Set when the backend had to apply the profile itself, so the pixels are
+    // already in the working space and srcToWorking is the identity.
+    colourBaked: boolean;
 }

@@ -13,7 +13,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const DIRECTIVE = /^[ \t]*\/\/!include[ \t]+"([^"]+)"[ \t]*$/;
+// A carriage return is allowed before the line end: a CRLF checkout split on
+// a bare newline leaves one attached, while build.rs' `lines()` drops it for
+// free — so without this the two resolvers disagree on every shader on Windows.
+const DIRECTIVE = /^[ \t]*\/\/!include[ \t]+"([^"]+)"[ \t]*\r?$/;
 
 /**
  * Resolve every directive in `source`, reporting each chunk it pulled in.
@@ -54,7 +57,7 @@ export function resolveIncludes(source, shaderRoot, origin) {
         }
 
         included.push(chunk);
-        return text.replace(/\n$/, "");
+        return text.replace(/\r?\n$/, "");
     });
 
     return { code: out.join("\n"), included };

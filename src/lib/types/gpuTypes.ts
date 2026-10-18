@@ -64,7 +64,10 @@ export interface RenderStage {
 import type { Sliders } from "./imgParameters";
 
 export interface Renderer {
-    loadImage: (image: GPUImage) => void;
+    // `srcToWorking` is passed alongside the texture rather than set separately
+    // so the two cannot disagree: a new image with a previous image's primaries
+    // would render wrong colours with nothing to indicate why.
+    loadImage: (image: GPUImage, srcToWorking: Float32Array) => void;
     setSliders: (sliders: Sliders) => void;
     setView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
@@ -75,6 +78,12 @@ export interface Renderer {
 
 
 export interface HistogramPipeline {
+    // The open image's primaries, as a matrix into the working space. The
+    // histogram runs its own copy of the develop chain, so it needs the same
+    // conversion the preview got — without it the two describe different
+    // images. Set when the overview texture is uploaded, for the same reason
+    // the renderer takes it alongside the preview.
+    setSourceSpace: (srcToWorking: Float32Array) => void;
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
     // in one submit. Omitting the target bins without drawing.
     render: (

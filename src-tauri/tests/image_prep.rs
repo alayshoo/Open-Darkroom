@@ -11,7 +11,10 @@ use half::f16;
 use image::{ImageBuffer, Rgba};
 use open_darkroom_lib::image_opening::Rgba16Image;
 
-use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, LINEAR_BYTES_PER_PIXEL};
+use open_darkroom_lib::color::{
+    build_srgb_to_linear_lut_u16, linearize_u16, same_curve, LINEAR_BYTES_PER_PIXEL,
+};
+use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::image_opening::{
     build_payload, compute_histograms, downscale_to_max_edge, downscale_to_target_pixels,
     payload_len_for, prepare_image, PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE,
@@ -21,7 +24,7 @@ use open_darkroom_lib::image_opening::{
 /// Prepare an RGBA fixture, which is the shape a source declaring alpha decodes to.
 fn prepare(img: &Rgba16Image) -> PreparedImage {
     let (w, h) = img.dimensions();
-    prepare_image(img.as_raw(), w, h, 4)
+    prepare_image(img.as_raw(), w, h, 4, &SourceSpace::default()).expect("prepare")
 }
 
 /// Downscale an RGBA fixture, discarding the dimensions the caller already knows.
@@ -202,7 +205,7 @@ fn preview_uses_the_shared_linearisation() {
     let prepared = prepare(&img);
 
     let lut = build_srgb_to_linear_lut_u16();
-    let expected = linearize_u16(img.as_raw(), 4, &lut);
+    let expected = linearize_u16(img.as_raw(), 4, &same_curve(&lut));
 
     assert_eq!(
         prepared.preview_pixels, expected,
@@ -219,7 +222,8 @@ fn preparing_a_three_channel_source_matches_its_rgba_equivalent() {
         let img = rgb_ramp(w, h);
 
         let from_rgba = prepare(&img);
-        let from_rgb = prepare_image(&without_alpha(&img), w, h, 3);
+        let from_rgb = prepare_image(&without_alpha(&img), w, h, 3, &SourceSpace::default())
+            .expect("prepare");
 
         assert_eq!(
             (from_rgb.preview_width, from_rgb.preview_height),
