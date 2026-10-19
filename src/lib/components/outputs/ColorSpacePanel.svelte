@@ -347,8 +347,8 @@
                 Compresses R, G and B separately, like film: bright colours
                 desaturate sooner but their hues can drift.
             {/if}
-            Applied to the preview, histogram and export only while this panel
-            is open.
+            Applied to the preview, histogram and export, and kept when this
+            panel is closed.
         </p>
     </div>
 

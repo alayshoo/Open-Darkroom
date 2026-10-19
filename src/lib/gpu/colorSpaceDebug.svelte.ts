@@ -36,11 +36,11 @@ class ColorSpaceDebug {
     rolloffMode = $state<RolloffMode>(defaultToneMap.rolloffMode);
 
     /**
-     * The roll-off the chain and the export use. Only applied while the panel
-     * is showing, so closing it is an A/B comparison and nothing leaks out.
+     * The roll-off the chain and the export use. It outlives closing the panel,
+     * but turning the debug tools off drops it.
      */
     get toneMap(): ToneMap {
-        if (!this.enabled || !settings.debugTools) return defaultToneMap;
+        if (!settings.debugTools) return defaultToneMap;
         return { rolloff: this.rolloff, rolloffMode: this.rolloffMode };
     }
 
