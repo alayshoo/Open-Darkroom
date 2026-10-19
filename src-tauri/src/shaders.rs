@@ -16,3 +16,10 @@ flattened!(CALC_SHARP_TEXTURE_WGSL, "calcSharpTexture.wgsl");
 flattened!(COMPOSITE_WGSL, "composite.wgsl");
 flattened!(COLOR_SPACE_ENCODE_WGSL, "colorSpaceEncode.wgsl");
 flattened!(HISTOGRAM_WGSL, "histogram.wgsl");
+
+// Frontend-only colour-space tools, flattened so shader_contracts.rs can check
+// them against the shared develop chain.
+flattened!(COLOR_SPACE_WGSL, "colorSpace.wgsl");
+flattened!(COLOR_SPACE_SCALE_WGSL, "colorSpaceScale.wgsl");
+flattened!(CHROMATICITY_DRAW_WGSL, "chromaticityDraw.wgsl");
+flattened!(COLOR_VOLUME_DRAW_WGSL, "colorVolumeDraw.wgsl");

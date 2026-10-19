@@ -11,7 +11,9 @@
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
+    import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
+    import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { settings } from "$lib/settings/settings.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
@@ -450,6 +452,10 @@
                 // average.
                 debugStats.clear();
             },
+            toggleColorSpace: () => {
+                if (!settings.debugTools) return;
+                colorSpaceDebug.toggle();
+            },
             toggleSettings: () => settings.toggle(),
         },
         closeSettings: () => settings.close(),
@@ -474,6 +480,12 @@
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
     <div class="toolbar shrink-0"></div>
+    <!-- Its own column, so opening it shifts the image rather than covering it. -->
+    {#if settings.debugTools && colorSpaceDebug.enabled}
+        <div class="colour-space-bar shrink-0">
+            <ColorSpacePanel {sliders} {imagePayload} />
+        </div>
+    {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas {sliders} {imagePayload} />
@@ -1304,6 +1316,22 @@
             transparent 100%
         );
         pointer-events: none;
+    }
+
+    /* Lifted above the canvas like the side bar. The padding leaves room for
+       the panels' drop shadows, which the scroll container would clip. */
+    .colour-space-bar {
+        width: 300px;
+        padding: 0 28px 24px 0;
+        position: relative;
+        z-index: 10;
+        pointer-events: auto;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+
+    .colour-space-bar::-webkit-scrollbar {
+        display: none;
     }
 
     .side-bar {

@@ -7,6 +7,7 @@
     import { getContext } from "svelte";
     import { settings } from "$lib/settings/settings.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
+    import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
 
     // The layout shares a getter rather than the session itself, so reading it
@@ -20,7 +21,10 @@
     function toggleDebugTools() {
         settings.debugTools = !settings.debugTools;
         debugStats.enabled = settings.debugTools;
-        if (!settings.debugTools) debugStats.histogramEnabled = true;
+        if (!settings.debugTools) {
+            debugStats.histogramEnabled = true;
+            colorSpaceDebug.enabled = false;
+        }
         debugStats.clear();
     }
 
@@ -75,7 +79,7 @@
     >
         <SettingsRow
             label="Debug tools"
-            description="Frame stats overlay (F1) and the live histogram switch (F2)."
+            description="Frame stats overlay (F1), the live histogram switch (F2) and the colour space panel (F3)."
         >
             <SettingsToggle
                 checked={settings.debugTools}

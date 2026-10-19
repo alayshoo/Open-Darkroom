@@ -24,7 +24,7 @@ export interface FrameSample {
 }
 
 /**
- * What one histogram update cost.
+ * What one off-frame update cost — a histogram, or a colour-space plot.
  *
  * Nothing here waits: the bins are drawn on the GPU, so an update records its
  * passes and submits. That leaves two separate costs rather than one total —
@@ -32,7 +32,7 @@ export interface FrameSample {
  * which finishes before the GPU has started. Adding them would describe no real
  * duration, so they stay apart.
  */
-export interface HistogramSample {
+export interface UpdateSample {
     /** Per-pass GPU times, empty when the adapter has no timestamp support. */
     passes: PassTiming[];
     /** Recording the command buffer and submitting it. */
@@ -66,7 +66,7 @@ class DebugStats {
     /** Histogram updates run on their own cadence, so they are kept apart from
      *  the frame samples rather than folded into whichever frame they landed on. */
     histogramVersion = $state(0);
-    readonly histogramSamples: HistogramSample[] = [];
+    readonly histogramSamples: UpdateSample[] = [];
 
     record(sample: FrameSample) {
         this.samples.push(sample);
@@ -75,17 +75,29 @@ class DebugStats {
         this.version++;
     }
 
-    recordHistogram(sample: HistogramSample) {
+    recordHistogram(sample: UpdateSample) {
         this.histogramSamples.push(sample);
         if (this.histogramSamples.length > CAPACITY) this.histogramSamples.shift();
         this.histogramVersion++;
     }
 
+    /** Colour-space plot updates, kept apart like the histogram's. */
+    colorSpaceVersion = $state(0);
+    readonly colorSpaceSamples: UpdateSample[] = [];
+
+    recordColorSpace(sample: UpdateSample) {
+        this.colorSpaceSamples.push(sample);
+        if (this.colorSpaceSamples.length > CAPACITY) this.colorSpaceSamples.shift();
+        this.colorSpaceVersion++;
+    }
+
     clear() {
         this.samples.length = 0;
         this.histogramSamples.length = 0;
+        this.colorSpaceSamples.length = 0;
         this.version++;
         this.histogramVersion++;
+        this.colorSpaceVersion++;
     }
 }
 

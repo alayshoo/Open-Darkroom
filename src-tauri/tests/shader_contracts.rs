@@ -11,8 +11,9 @@
 mod common;
 
 use common::{
-    CALC_PARAMS_PIPELINE_TS, EXPORT_RENDERING_RS, EXPORT_SETTINGS_TS, HISTOGRAM_WGSL,
-    OPEN_IMAGE_TS, OUTPUT_SPACE_BUFFER_TS, OUTPUT_SPACE_TS, WORKING_SPACE_TS,
+    CALC_PARAMS_PIPELINE_TS, CHROMATICITY_DRAW_WGSL, COLOR_SPACE_SCALE_WGSL, COLOR_SPACE_WGSL,
+    COLOR_VOLUME_DRAW_WGSL, EXPORT_RENDERING_RS, EXPORT_SETTINGS_TS, HISTOGRAM_WGSL, OPEN_IMAGE_TS,
+    OUTPUT_SPACE_BUFFER_TS, OUTPUT_SPACE_TS, WORKING_SPACE_TS,
 };
 
 use open_darkroom_lib::export_rendering::{
@@ -78,14 +79,27 @@ fn typescript_reads_the_payload_header_at_the_same_size_as_rust() {
     );
 }
 
-/// Every shader the export path compiles, flattened by build.rs.
-const SHADERS: [(&str, &str); 6] = [
+/// Every shader flattened by build.rs — the export path's, and the frontend's
+/// colour-space tools, which run the same develop chain.
+const SHADERS: [(&str, &str); 10] = [
     ("calcParams.wgsl", CALC_PARAMS_WGSL),
     ("develop.wgsl", DEVELOP_WGSL),
     ("calcSharpTexture.wgsl", CALC_SHARP_TEXTURE_WGSL),
     ("composite.wgsl", COMPOSITE_WGSL),
     ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
     ("histogram.wgsl", HISTOGRAM_WGSL),
+    ("colorSpace.wgsl", COLOR_SPACE_WGSL),
+    ("colorSpaceScale.wgsl", COLOR_SPACE_SCALE_WGSL),
+    ("chromaticityDraw.wgsl", CHROMATICITY_DRAW_WGSL),
+    ("colorVolumeDraw.wgsl", COLOR_VOLUME_DRAW_WGSL),
+];
+
+/// The shaders that run the adjustment chain, and so have to carry exactly the
+/// same copy of it.
+const CHAIN_SHADERS: [(&str, &str); 3] = [
+    ("develop.wgsl", DEVELOP_WGSL),
+    ("histogram.wgsl", HISTOGRAM_WGSL),
+    ("colorSpace.wgsl", COLOR_SPACE_WGSL),
 ];
 
 // ── WGSL parsing ──────────────────────────────────────────────────────────────
@@ -425,7 +439,7 @@ fn params_field_offsets_match_the_readback_accessors() {
     expect("vibrance", 60);
 }
 
-// ── The develop chain, duplicated in two shaders ──────────────────────────────
+// ── The develop chain, shared by three shaders ────────────────────────────────
 
 /// Pull a delimited region out of a shader as normalised lines.
 fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) -> Vec<String> {
@@ -444,12 +458,7 @@ fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) 
         .collect()
 }
 
-/// Pull the shared adjustment chain out of a shader: everything from the first
-/// numbered step through the linear→sRGB conversion.
-/// Steps 1-10 of the adjustment chain — everything the two shaders have to
-/// agree on. What each does afterwards is its own business: develop hands the
-/// perceptual signal to composite.wgsl unclamped, while histogram clamps it and
-/// bins it.
+/// Steps 1-10 of the adjustment chain, which every chain shader must share.
 fn develop_chain(source: &str, label: &str) -> Vec<String> {
     wgsl_region(
         source,
@@ -459,35 +468,185 @@ fn develop_chain(source: &str, label: &str) -> Vec<String> {
     )
 }
 
+/// The chain lives in chunks/developChain.wgsl and is included, never copied.
 #[test]
-fn develop_and_histogram_apply_the_same_chain() {
-    let develop = develop_chain(DEVELOP_WGSL, "develop.wgsl");
-    let histogram = develop_chain(HISTOGRAM_WGSL, "histogram.wgsl");
+fn every_chain_shader_includes_the_one_develop_chain() {
+    for (label, source) in CHAIN_SHADERS {
+        assert_eq!(
+            source.matches("fn develop(source: vec3f)").count(),
+            1,
+            "{label} should see the develop chain exactly once — a second copy \
+             means it has been pasted in rather than included"
+        );
+        assert_eq!(
+            source.matches("// 1. Darkroom matrix").count(),
+            1,
+            "{label} carries the chain's steps more than once"
+        );
+    }
 
+    // And the one copy each of them sees is the same copy.
+    let reference = develop_chain(DEVELOP_WGSL, "develop.wgsl");
     assert!(
-        develop.len() > 20,
+        reference.len() > 20,
         "chain extraction looks wrong — only {} lines",
-        develop.len()
+        reference.len()
     );
 
-    if develop != histogram {
-        let mut report = String::from(
-            "develop.wgsl and histogram.wgsl no longer apply the same adjustment chain.\n\
-             The histogram would describe an image the preview never renders.\n\n",
-        );
-        for (i, (d, h)) in develop.iter().zip(histogram.iter()).enumerate() {
-            if d != h {
-                report.push_str(&format!("line {i}:\n  develop:   {d}\n  histogram: {h}\n"));
+    for (label, source) in CHAIN_SHADERS {
+        let chain = develop_chain(source, label);
+        if chain != reference {
+            let mut report = format!(
+                "{label} no longer carries the same adjustment chain as develop.wgsl.\n\
+                 It would describe an image the preview never renders.\n\n"
+            );
+            for (i, (a, b)) in reference.iter().zip(chain.iter()).enumerate() {
+                if a != b {
+                    report.push_str(&format!("line {i}:\n  chunk: {a}\n  {label}: {b}\n"));
+                }
             }
+            if chain.len() != reference.len() {
+                report.push_str(&format!(
+                    "\nlength differs: the chunk has {} lines, {label} has {}\n",
+                    reference.len(),
+                    chain.len()
+                ));
+            }
+            panic!("{report}");
         }
-        if develop.len() != histogram.len() {
-            report.push_str(&format!(
-                "\nlength differs: develop has {} lines, histogram has {}\n",
-                develop.len(),
-                histogram.len()
-            ));
+    }
+}
+
+// ── The colorimetry the colour-space tools measure in ─────────────────────────
+
+/// Linear RGB → XYZ for a set of primaries and a white point, column-major.
+/// Derived independently of outputSpace.ts and output_space.rs on purpose.
+fn rgb_to_xyz_column_major(primaries: [[f64; 2]; 3], white: [f64; 2]) -> [f64; 9] {
+    let mut m = [0.0; 9];
+    for (col, [x, y]) in primaries.iter().enumerate() {
+        m[col * 3] = x / y;
+        m[col * 3 + 1] = 1.0;
+        m[col * 3 + 2] = (1.0 - x - y) / y;
+    }
+
+    let w = [
+        white[0] / white[1],
+        1.0,
+        (1.0 - white[0] - white[1]) / white[1],
+    ];
+    let inverse = invert_column_major(m);
+    let scale: [f64; 3] = std::array::from_fn(|col| {
+        (0..3).map(|row| inverse[row * 3 + col] * w[row]).sum()
+    });
+
+    for col in 0..3 {
+        for row in 0..3 {
+            m[col * 3 + row] *= scale[col];
         }
-        panic!("{report}");
+    }
+    m
+}
+
+/// A 3×3 inverse by cofactors, in and out of column-major.
+fn invert_column_major(m: [f64; 9]) -> [f64; 9] {
+    let at = |col: usize, row: usize| m[col * 3 + row];
+
+    let mut cofactors = [0.0; 9];
+    for col in 0..3 {
+        for row in 0..3 {
+            let (c0, c1) = ((col + 1) % 3, (col + 2) % 3);
+            let (r0, r1) = ((row + 1) % 3, (row + 2) % 3);
+            // Transposed on the way out, which is what makes this the inverse
+            // rather than the adjugate.
+            cofactors[row * 3 + col] =
+                at(c0, r0) * at(c1, r1) - at(c0, r1) * at(c1, r0);
+        }
+    }
+
+    // Expanded along the first column, which in column-major order is the
+    // first three entries.
+    let det: f64 = (0..3).map(|row| at(0, row) * cofactors[row * 3]).sum();
+    assert!(det.abs() > 1e-12, "matrix is singular");
+    cofactors.map(|v| v / det)
+}
+
+/// Pull a `const NAME = mat3x3<f32>( vec3f(..), vec3f(..), vec3f(..) );` out of
+/// WGSL as a column-major array of nine floats.
+fn wgsl_mat3(source: &str, name: &str) -> [f64; 9] {
+    let body = source
+        .split(&format!("const {name} = mat3x3<f32>("))
+        .nth(1)
+        .unwrap_or_else(|| panic!("no {name} declaration"))
+        .split(");")
+        .next()
+        .unwrap();
+
+    let values: Vec<f64> = body
+        .split("vec3f(")
+        .skip(1)
+        .flat_map(|col| {
+            col.split(')')
+                .next()
+                .unwrap()
+                .split(',')
+                .map(|t| t.trim().parse().expect("matrix component is not a float"))
+                .collect::<Vec<f64>>()
+        })
+        .collect();
+
+    assert_eq!(values.len(), 9, "{name}: expected nine components");
+    values.try_into().unwrap()
+}
+
+/// The working space ↔ XYZ constants in chunks/colorimetry.wgsl must follow the
+/// working primaries.
+#[test]
+fn the_colorimetry_constants_match_the_working_primaries() {
+    use open_darkroom_lib::icc::{D65, WORKING_PRIMARIES};
+
+    let derived = rgb_to_xyz_column_major(WORKING_PRIMARIES, D65);
+    let declared = wgsl_mat3(COLOR_SPACE_WGSL, "M_WORKING_TO_XYZ");
+    for i in 0..9 {
+        assert!(
+            (declared[i] - derived[i]).abs() < 5e-7,
+            "M_WORKING_TO_XYZ[{i}]: the chunk says {}, the primaries give {}",
+            declared[i],
+            derived[i]
+        );
+    }
+
+    let inverse = invert_column_major(derived);
+    let declared = wgsl_mat3(COLOR_SPACE_WGSL, "M_XYZ_TO_WORKING");
+    for i in 0..9 {
+        assert!(
+            (declared[i] - inverse[i]).abs() < 5e-7,
+            "M_XYZ_TO_WORKING[{i}]: the chunk says {}, the inverse gives {}",
+            declared[i],
+            inverse[i]
+        );
+    }
+}
+
+/// The diagram and the statistics read the same `GamutOverlay` description.
+#[test]
+fn the_gamut_overlay_is_described_once() {
+    for (label, source) in [
+        ("colorSpace.wgsl", COLOR_SPACE_WGSL),
+        ("chromaticityDraw.wgsl", CHROMATICITY_DRAW_WGSL),
+    ] {
+        assert_eq!(
+            source.matches("struct GamutOverlay {").count(),
+            1,
+            "{label} declares the gamut overlay more than once"
+        );
+        assert!(
+            source.contains("fn inside_gamut"),
+            "{label} no longer sees the containment test — check its includes"
+        );
+        assert!(
+            source.contains(": GamutOverlay;"),
+            "{label} includes the overlay without binding it"
+        );
     }
 }
 

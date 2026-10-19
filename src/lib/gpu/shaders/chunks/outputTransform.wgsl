@@ -95,8 +95,8 @@ fn encode_transfer(c: vec3f, curve: u32) -> vec3f {
   return encode_srgb(c);
 }
 
-// Linear working space → encoded destination, fitted to the destination gamut.
-fn to_destination(working: vec3f, space: OutputSpace) -> vec3f {
+// Linear working space → linear destination, fitted to the destination gamut.
+fn to_destination_linear(working: vec3f, space: OutputSpace) -> vec3f {
   var signal = working;
 
   // Soft proof: squeeze the signal through the export space's gamut and bring
@@ -106,6 +106,10 @@ fn to_destination(working: vec3f, space: OutputSpace) -> vec3f {
     signal = space.from_proof * gamut_compress(space.to_proof * signal, dot(signal, LUMA));
   }
 
-  let mapped = gamut_compress(space.to_destination * signal, dot(signal, LUMA));
-  return encode_transfer(mapped, space.curve);
+  return gamut_compress(space.to_destination * signal, dot(signal, LUMA));
+}
+
+// Linear working space → encoded destination, fitted to the destination gamut.
+fn to_destination(working: vec3f, space: OutputSpace) -> vec3f {
+  return encode_transfer(to_destination_linear(working, space), space.curve);
 }
