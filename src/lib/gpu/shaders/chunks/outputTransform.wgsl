@@ -41,16 +41,8 @@ struct OutputSpace {
   proof: u32,
 }
 
-// Pull a colour the destination cannot hold in towards its own luminance.
-//
-// Hue and luminance are both kept: the colour moves along the straight line to
-// the neutral of the same brightness, and stops the moment every channel is in
-// range. A colour already inside is returned untouched, so this costs nothing in
-// the gamut it is mapping into — unlike a per-channel clamp, which drops the
-// most saturated channel first and slides the hue of everything it touches.
-//
-// All destinations share the working space's white, so the neutral axis of any
-// of them is the working-space luminance repeated across the three channels.
+// Pull an out-of-gamut colour along a straight line towards the neutral of its
+// own luminance, keeping hue. Luminance outside 0..1 resolves to white or black.
 fn gamut_compress(rgb: vec3f, luma: f32) -> vec3f {
   // A luminance above white or below black has no neutral inside the gamut to
   // aim at; the nearest one is the endpoint itself.

@@ -484,7 +484,7 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_export_applies_the_source_matrix_it_is_given` | a file already in the working space takes the output transform alone |
 | `the_gamut_compression_keeps_the_luminance_a_clamp_would_lose` | the one thing exactly true of the compression — see below |
 | `colour_the_destination_can_hold_passes_through_unchanged` | in-gamut colour is not quietly desaturated |
-| `colour_brighter_than_white_resolves_to_white` | pushing exposure blows colour out to white, desaturating on the way |
+| `colour_brighter_than_white_resolves_to_white` | a colour pushed past white renders pure white |
 | `the_working_space_destination_only_applies_its_curve` | Rec.2020 out converts no primaries, so the BT.2020 OETF alone |
 | `the_destination_primaries_move_colour_and_leave_neutrals` | sRGB vs Display P3: same white, different gamut |
 | `each_destination_encodes_with_its_own_curve` | Adobe RGB's pure power vs sRGB's linear toe, in the shadows |
@@ -495,12 +495,13 @@ The gamut compression pulls a colour the destination cannot hold towards the
 neutral of its own brightness. Hue is kept because the colour moves along a
 straight line to that neutral, and luminance is kept *exactly*: the neutral has
 the colour's own luminance, and luminance is linear, so every point on the line
-between them has it too. That holds for any amount of compression, which makes it
+between them has it too. For any luminance within 0..1 that holds for any amount
+of compression, which makes it
 the one property worth asserting rather than approximating.
 
 A per-channel clamp keeps neither. It drops whichever channel left the range and
 leaves the others, which darkens the colour and slides its hue — for a Rec.2020
-red into sRGB, by about 0.05 of luminance against a tolerance of 0.01. The test
+red into sRGB, by about 0.05 of luminance against a tolerance of 0.005. The test
 checks that gap too, so it cannot pass by accident on a probe that was in gamut
 all along.
 
