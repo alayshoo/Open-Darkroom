@@ -14,6 +14,7 @@
  */
 
 import { load, type Store } from "@tauri-apps/plugin-store";
+import { defaultToneMap, type RolloffMode } from "$lib/types/toneMap";
 
 /** Sits next to the identifier's other per-user data. */
 export const SETTINGS_FILE = "settings.json";
@@ -30,6 +31,8 @@ export const DEFAULTS = {
      * no more, so shortcuts.svelte.ts checks the shape it gets back.
      */
     shortcuts: {} as Record<string, string[]>,
+    rolloff: defaultToneMap.rolloff,
+    rolloffMode: defaultToneMap.rolloffMode as RolloffMode,
 };
 
 export type Persisted = typeof DEFAULTS;

@@ -12,6 +12,7 @@
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { type Sliders } from "$lib/types/imgParameters";
     import { proofing } from "$lib/gpu/proofing.svelte";
+    import { settings } from "$lib/settings/settings.svelte";
 
     // Props
     let {
@@ -145,6 +146,12 @@
     $effect(() => {
         if (!renderer) return;
         renderer.setOutputSpace(gpu.displaySpace, proofing.space);
+        renderer.requestRender();
+    });
+
+    $effect(() => {
+        if (!renderer) return;
+        renderer.setToneMap(settings.toneMap);
         renderer.requestRender();
     });
 

@@ -1,6 +1,7 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
 import type { Sliders } from "$lib/types/imgParameters";
+import type { ToneMap } from "$lib/types/toneMap";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
 import { createFrameTimer } from "./frameTimer";
@@ -208,6 +209,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         outputSpace.set(destination, proof);
     }
 
+    function setToneMap(toneMap: ToneMap) {
+        calcParams.updateToneMap(toneMap);
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
@@ -345,5 +350,5 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // black image.
     setOutputSpace(gpu.displaySpace, null);
 
-    return { setSourceSpace, setOutputSpace, render, readBins, destroy };
+    return { setSourceSpace, setOutputSpace, setToneMap, render, readBins, destroy };
 }

@@ -23,6 +23,21 @@ fn decode_srgb(c: vec3f) -> vec3f {
   return select(hi, lo, c < vec3f(0.04045));
 }
 
+// Linear value the highlight shoulder maps to exactly 1: three stops above white.
+const ROLLOFF_WHITE: f32 = 8.0;
+
+// Highlight shoulder: identity up to `start`, then extended Reinhard with
+// matching slope at the join, reaching 1 at ROLLOFF_WHITE and holding it above.
+fn shoulder(x: f32, start: f32) -> f32 {
+  if (x <= start || start >= 1.0) {
+    return x;
+  }
+  let span = 1.0 - start;
+  let t = (x - start) / span;
+  let t_white = (ROLLOFF_WHITE - start) / span;
+  return min(start + span * t * (1.0 + t / (t_white * t_white)) / (1.0 + t), 1.0);
+}
+
 // Contrast as a power curve on each side of the pivot.
 //
 //   k > 1  steepens the midtones  (positive contrast)

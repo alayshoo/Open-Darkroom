@@ -1,6 +1,7 @@
 // src/lib/gpu/renderer.ts
 
 import { defaultSlidersRGB, type Sliders } from "../types/imgParameters";
+import type { ToneMap } from "../types/toneMap";
 import {
     SHARP_FORMAT,
     WORKING_FORMAT,
@@ -166,6 +167,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // when the preview redraws, as it does for the sliders.
     function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
         outputSpace.set(destination, proof);
+    }
+
+    function setToneMap(toneMap: ToneMap) {
+        calcParams.updateToneMap(toneMap);
     }
 
     function setSliders(sliders: Sliders) {
@@ -352,5 +357,5 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     setSliders( defaultSlidersRGB );
     setOutputSpace(gpu.displaySpace, null);
 
-    return { loadImage, setSliders, setOutputSpace, setView, requestRender, destroy };
+    return { loadImage, setSliders, setOutputSpace, setView, setToneMap, requestRender, destroy };
 }

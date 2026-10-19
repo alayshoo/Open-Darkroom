@@ -304,7 +304,7 @@
             showExportModal = true;
         });
         try {
-            await exportImage(sliders, exportSettings);
+            await exportImage(sliders, settings.toneMap, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
