@@ -9,7 +9,7 @@
     import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
     import { proofing } from "$lib/gpu/proofing.svelte";
-    import { settings } from "$lib/settings/settings.svelte";
+    import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { type ImagePayload } from "$lib/types/imagePayload";
 
     let {
@@ -164,7 +164,7 @@
 
     $effect(() => {
         if (!histPipeline) return;
-        histPipeline.setToneMap(settings.toneMap);
+        histPipeline.setToneMap(colorSpaceDebug.toneMap);
         requestRender();
     });
 

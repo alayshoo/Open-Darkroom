@@ -3,6 +3,8 @@
 // Session-only state of the F3 colour-space panel.
 
 import { OUTPUT_SPACE_IDS, type OutputSpaceId } from "./outputSpace";
+import { settings } from "$lib/settings/settings.svelte";
+import { defaultToneMap, type RolloffMode, type ToneMap } from "$lib/types/toneMap";
 
 /** Triangles shown by default: sRGB and the working space. */
 const INITIAL: readonly OutputSpaceId[] = ["srgb", "rec2020"];
@@ -28,6 +30,19 @@ class ColorSpaceDebug {
     /** Where the volume is being looked at from, in radians. */
     yaw = $state(0.6);
     pitch = $state(0.42);
+
+    /** Highlight roll-off under test, 0–100. */
+    rolloff = $state(defaultToneMap.rolloff);
+    rolloffMode = $state<RolloffMode>(defaultToneMap.rolloffMode);
+
+    /**
+     * The roll-off the chain and the export use. It outlives closing the panel,
+     * but turning the debug tools off drops it.
+     */
+    get toneMap(): ToneMap {
+        if (!settings.debugTools) return defaultToneMap;
+        return { rolloff: this.rolloff, rolloffMode: this.rolloffMode };
+    }
 
     toggle() {
         this.enabled = !this.enabled;

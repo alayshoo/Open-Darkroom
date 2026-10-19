@@ -227,7 +227,7 @@ export const shortcutActions = [
         id: "toggleColorSpace",
         group: "debug",
         label: "Colour space panel",
-        description: "The chromaticity diagram and the colour volume, on the left.",
+        description: "The highlight roll-off, the chromaticity diagram and the colour volume, on the left.",
         defaults: ["F3"],
     },
 ] as const satisfies readonly ShortcutAction[];

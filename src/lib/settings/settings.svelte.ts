@@ -13,7 +13,6 @@
  */
 
 import { DEFAULTS, loadSettings, saveSetting } from "./persistence";
-import type { RolloffMode, ToneMap } from "$lib/types/toneMap";
 
 class Settings {
     /** Whether the modal is up. */
@@ -39,39 +38,6 @@ class Settings {
     }
 
     /**
-     * Highlight roll-off strength, 0–100. Applies to the preview and exports.
-     * Set live while a slider drags, so it is written to the file on commit.
-     */
-    #rolloff = $state(DEFAULTS.rolloff);
-
-    get rolloff() {
-        return this.#rolloff;
-    }
-
-    set rolloff(value: number) {
-        this.#rolloff = value;
-    }
-
-    saveRolloff() {
-        void saveSetting("rolloff", this.#rolloff);
-    }
-
-    #rolloffMode = $state<RolloffMode>(DEFAULTS.rolloffMode);
-
-    get rolloffMode() {
-        return this.#rolloffMode;
-    }
-
-    set rolloffMode(value: RolloffMode) {
-        this.#rolloffMode = value;
-        void saveSetting("rolloffMode", value);
-    }
-
-    get toneMap(): ToneMap {
-        return { rolloff: this.#rolloff, rolloffMode: this.#rolloffMode };
-    }
-
-    /**
      * Settles once the stored file has been applied. Reading is a round trip
      * through the backend, so the defaults are what show until it lands — and
      * the assignments here go to the private fields, since a value that came
@@ -79,12 +45,6 @@ class Settings {
      */
     readonly hydrated: Promise<void> = loadSettings().then((stored) => {
         if (stored.debugTools !== undefined) this.#debugTools = stored.debugTools;
-        if (stored.rolloff !== undefined) {
-            this.#rolloff = Math.min(100, Math.max(0, stored.rolloff));
-        }
-        if (stored.rolloffMode === "luminance" || stored.rolloffMode === "perChannel") {
-            this.#rolloffMode = stored.rolloffMode;
-        }
     });
 
     show(section?: string) {
