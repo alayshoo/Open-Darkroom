@@ -72,7 +72,7 @@
 <div class="menu-button-wrapper relative">
     <button
         bind:this={buttonEl}
-        class="menu-button relative inline-flex justify-center items-center h-7 px-2 py-0 rounded-[7px] border-0 cursor-app"
+        class="menu-button relative inline-flex justify-center items-center h-7 px-2 py-0 rounded-[7px] border-0 cursor-auto"
         class:active={isOpen}
         onclick={() => menuBar.toggle(id)}
         onmouseenter={() => menuBar.hover(id)}
@@ -91,7 +91,7 @@
                     <div class="menu-separator h-0.25 mx-2 my-1"></div>
                 {:else}
                     <button
-                        class="menu-item flex items-center justify-between w-full h-7.5 px-2.5 py-0 border-0 rounded-[8px] cursor-app"
+                        class="menu-item flex items-center justify-between w-full h-7.5 px-2.5 py-0 border-0 rounded-[8px] cursor-auto"
                         onclick={() => handleItemClick(item)}
                     >
                         <span class="menu-item-label flex-1">{item.label}</span>

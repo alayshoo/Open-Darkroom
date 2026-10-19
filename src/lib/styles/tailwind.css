@@ -25,14 +25,3 @@
     --color-color4: var(--color4);
     --color-color5: var(--color5);
 }
-
-/*
- * The app's custom cursor, as a utility. Components that opt out of the
- * `a, button` pointer cursor in global.css use this to fall back to `auto`
- * while keeping the custom bitmap.
- */
-@utility cursor-app {
-    cursor:
-        url("/cursors/cursor32x32.png") 7 7,
-        auto;
-}

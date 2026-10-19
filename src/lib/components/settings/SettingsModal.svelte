@@ -45,7 +45,7 @@
                 <h2 class="sidebar-title m-0 mt-1.5 mb-2.5 px-2">Settings</h2>
                 {#each settingsSections as section (section.id)}
                     <button
-                        class="nav-item flex items-center gap-2.5 h-8 px-2 rounded-[8px] border-0 cursor-app"
+                        class="nav-item flex items-center gap-2.5 h-8 px-2 rounded-[8px] border-0 cursor-auto"
                         class:active={section.id === active.id}
                         class:glass={section.id === active.id}
                         onclick={() => (settings.section = section.id)}

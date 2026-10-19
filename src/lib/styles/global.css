@@ -29,9 +29,6 @@
 
         /* Disable the context menu on mobile/touch */
         -webkit-touch-callout: none;
-
-        /*change cursor to custom icon*/
-        cursor: url("/cursors/cursor32x32.png") 7 7, auto;
     }
 
     /*Prevent scrolling on trackpads*/
@@ -49,41 +46,31 @@
     .selectable {
         user-select: text;
         -webkit-user-select: text;
-        cursor: auto;
-    }
-
-    /* Text selection cursor (I-beam) */
-    input,
-    textarea,
-    [contenteditable="true"],
-    .selectable {
-        user-select: text;
-        -webkit-user-select: text;
-        cursor: url("/cursors/cursor32x32.png") 7 7, text;
+        cursor: text;
     }
 
     /* Pointer cursor (for links, buttons) */
     a,
     button,
     [role="button"] {
-        cursor: url("/cursors/cursor32x32.png") 7 7, pointer;
+        cursor: pointer;
     }
 
     /* Grab cursor (for draggable elements) */
     .draggable {
-        cursor: url("/cursors/cursor32x32.png") 7 7, grab;
+        cursor: grab;
     }
 
     .draggable:active {
-        cursor: url("/cursors/cursor32x32.png") 7 7, grabbing;
+        cursor: grabbing;
     }
 
     /* Resize cursors */
     .resize-horizontal {
-        cursor: url("/cursors/cursor32x32.png") 7 7, ew-resize;
+        cursor: ew-resize;
     }
 
     .resize-vertical {
-        cursor: url("/cursors/cursor32x32.png") 7 7, ns-resize;
+        cursor: ns-resize;
     }
 }

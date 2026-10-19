@@ -85,7 +85,7 @@
             <span class="chip inline-flex items-center gap-1 rounded-[6px] pl-2 pr-1">
                 {display(binding)}
                 <button
-                    class="chip-clear inline-flex items-center justify-center border-0 rounded-[4px] cursor-app"
+                    class="chip-clear inline-flex items-center justify-center border-0 rounded-[4px] cursor-auto"
                     aria-label="Remove {display(binding)} from {action.label}"
                     title="Remove"
                     onclick={() => shortcuts.remove(id, binding)}
