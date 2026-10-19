@@ -50,32 +50,19 @@ export interface Targets {
 }
 
 export interface ColorSpacePipeline {
-    /** The open image's primaries, as a matrix into the working space — the
-     *  same conversion the preview and the histogram are given, for the same
-     *  reason: this runs its own copy of the develop chain. */
+    /** The open image's source → working space matrix. */
     setSourceSpace: (srcToWorking: Float32Array) => void;
-    /** What the panel is measuring: which gamuts it draws and counts, whether
-     *  it measures before or after the output transform, and whether the colour
-     *  volume is switched on. */
+    /** Which gamuts are drawn and counted, and what is measured. */
     setOverlays: (state: GamutOverlayState) => void;
-    /** Where the output transform is rendering to, for the measurement taken
-     *  after it. Set from the same place the preview's is, so the two describe
-     *  one picture. */
+    /** The output transform's destination, for measuring after it. */
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
     /** Where the colour volume is being looked at from. */
     setVolumeView: (view: VolumeView) => void;
-    /** Bins the image and draws both plots, in one submit. A target left out is
-     *  simply not drawn — the bins are taken either way. */
+    /** Bins the image and draws both plots. A target left out is not drawn. */
     render: (inputTexture: GPUTexture, sliders: Sliders, targets: Targets) => void;
-    /** The plots again from the bins already taken. Turning the volume does not
-     *  change what was measured, only where it is seen from, so it costs a draw
-     *  rather than another pass over the image. */
+    /** Draws the plots again from the existing bins. */
     redraw: (targets: Targets) => void;
-    /** The out-of-gamut tallies, which only mean anything on the CPU.
-     *
-     *  This is the round trip the histogram exists without, and it costs what
-     *  it always did — so the caller asks for it once the plots have settled
-     *  rather than on every frame of a slider drag. */
+    /** Reads the out-of-gamut tallies back. Only one read may be in flight. */
     readStats: () => Promise<GamutStats>;
     destroy: () => void;
 }
@@ -296,16 +283,13 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         outputSpace.set(destination, proof);
     }
 
-    // One staging block, reused: this is written when the view turns, which is
-    // often, but never more than once per frame.
     const cameraStaging = new Float32Array(CAMERA_BUFFER_SIZE / 4);
 
     function setVolumeView(view: VolumeView) {
         cameraStaging[0] = view.yaw;
         cameraStaging[1] = view.pitch;
         cameraStaging[2] = view.aspect;
-        // Half the box's extent in clip units. A little over the half-diagonal
-        // of the unit cube, so no corner leaves the panel at any angle.
+        // Half the box's extent in clip units, enough to keep every corner in view.
         cameraStaging[3] = 0.95;
         device.queue.writeBuffer(camera, 0, cameraStaging);
     }
@@ -331,8 +315,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         if (measure) timer.resolve(encoder);
         device.queue.submit([encoder.finish()]);
 
-        // Nothing is awaited, so this is the CPU cost of recording the work and
-        // handing it over — not how long the work took.
+        // CPU cost of recording and submitting, not GPU time.
         if (measure) {
             const recordMs = performance.now() - start;
             void timer.read().then((passes) => {
@@ -391,8 +374,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         finish(encoder, measure, start);
     }
 
-    // Allocated on the first readback rather than with the buffers above, so
-    // nothing is held for a panel that was never opened.
+    // Allocated on the first readback.
     let staging: GPUBuffer | null = null;
 
     async function readStats(): Promise<GamutStats> {
@@ -431,8 +413,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         staging?.destroy();
     }
 
-    // An unwritten uniform is a zero matrix, which would measure a black image
-    // the moment the transform toggle was turned on.
+    // Avoid zero-filled uniforms before the panel's first update.
     setOutputSpace(gpu.displaySpace, null);
     setVolumeView({ yaw: 0.6, pitch: 0.42, aspect: 1 });
 

@@ -1,17 +1,10 @@
 // $lib/gpu/colorSpaceDebug.svelte.ts
 //
-// Whether the colour-space panel is up, and which gamuts it is drawing.
-//
-// Kept beside the frame stats rather than in settings: this is a diagnostic
-// whose state is only meaningful while the panel is open, so there is nothing
-// worth outliving the session. The panel renders when something it depends on
-// changes — a slider, a new image, a checkbox — and not otherwise.
+// Session-only state of the F3 colour-space panel.
 
 import { OUTPUT_SPACE_IDS, type OutputSpaceId } from "./outputSpace";
 
-/** Which triangles the diagram starts with: the one everything is compared
- *  against, and the working space the chain runs in, which is the ceiling
- *  nothing in the image can plot outside of. */
+/** Triangles shown by default: sRGB and the working space. */
 const INITIAL: readonly OutputSpaceId[] = ["srgb", "rec2020"];
 
 function initialOverlays(): Record<OutputSpaceId, boolean> {
@@ -21,32 +14,15 @@ function initialOverlays(): Record<OutputSpaceId, boolean> {
 }
 
 class ColorSpaceDebug {
-    /** Whether the sidebar is showing, and so whether anything is measured at
-     *  all — a full pass over the overview is not free. */
+    /** Whether the panel is open; nothing is measured while it is closed. */
     enabled = $state(false);
 
     overlays = $state<Record<OutputSpaceId, boolean>>(initialOverlays());
 
-    /**
-     * Whether the panel measures what the output transform produces rather than
-     * what the adjustments asked for.
-     *
-     * Off is the question the plots exist to answer — the colour the edit wants,
-     * which the transform has not yet had to give up. On is what the screen is
-     * showing, and the difference between the two is the gamut compression
-     * doing its work. The percentages read differently either side of it: after
-     * the transform, nothing can fall outside the space being rendered to, so a
-     * zero there says the compression worked rather than that the colour fitted.
-     */
+    /** Measure after the output transform instead of before it. */
     transformed = $state(false);
 
-    /**
-     * Whether the colour volume is drawn at all.
-     *
-     * It is the expensive half of the panel — a ray per fragment, and a third
-     * grid to fill — and it is the half that is not always wanted, so it
-     * switches off on its own. The grid is not even binned while it is off.
-     */
+    /** Whether the colour volume is binned and drawn. */
     volume = $state(true);
 
     /** Where the volume is being looked at from, in radians. */
@@ -61,8 +37,7 @@ class ColorSpaceDebug {
         this.overlays = { ...this.overlays, [id]: !this.overlays[id] };
     }
 
-    /** Turn the box by a drag, keeping the eye off the poles where the
-     *  lightness axis would collapse to a point. */
+    /** Turn the box by a drag, keeping the pitch off the poles. */
     turn(dx: number, dy: number) {
         this.yaw += dx;
         this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + dy));

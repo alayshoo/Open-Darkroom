@@ -1,17 +1,6 @@
-// Steps 1-10 of the adjustment chain: the file's own channels in, linear
-// working space out, nothing clamped.
-//
-// Three shaders run it — develop.wgsl renders it, histogram.wgsl bins it, and
-// colorSpace.wgsl measures its gamut. They have to agree to the bit: a
-// histogram or a gamut plot of a different chain describes an image nobody is
-// being shown.
-//
-// Requires a `params` binding of type Params, plus chunks/luma.wgsl for LUMA
-// and M_WORKING_TO_SRGB and chunks/tone.wgsl for the sRGB pair and the curve.
-//
-// The result is deliberately unclamped and still in the working space. What
-// each caller does next is its own business: develop encodes and hands off to
-// sharpening, the other two carry on into the output transform.
+// Steps 1-10 of the adjustment chain: source channels in, unclamped linear
+// working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
+// Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
 fn develop(source: vec3f) -> vec3f {
   var rgb = source;
 

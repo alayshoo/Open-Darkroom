@@ -480,8 +480,7 @@
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
     <div class="toolbar shrink-0"></div>
-    <!-- Takes its own column rather than floating over the canvas, so opening
-         it moves the image's centre across instead of covering it. -->
+    <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
         <div class="colour-space-bar shrink-0">
             <ColorSpacePanel {sliders} {imagePayload} />
@@ -1319,10 +1318,8 @@
         pointer-events: none;
     }
 
-    /* Same treatment as the side bar: its own column in the shell, lifted above
-       the canvas so a zoomed image runs underneath it. The padding is the room
-       the panels' drop shadows need — a scroll container clips at its padding
-       box, so without it the shadows are cut off down the right-hand edge. */
+    /* Lifted above the canvas like the side bar. The padding leaves room for
+       the panels' drop shadows, which the scroll container would clip. */
     .colour-space-bar {
         width: 300px;
         padding: 0 28px 24px 0;

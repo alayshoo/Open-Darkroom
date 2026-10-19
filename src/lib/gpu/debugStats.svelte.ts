@@ -81,8 +81,7 @@ class DebugStats {
         this.histogramVersion++;
     }
 
-    /** Colour-space plots run on their own cadence too, and only while the F3
-     *  panel is up, so they are kept apart in the same way. */
+    /** Colour-space plot updates, kept apart like the histogram's. */
     colorSpaceVersion = $state(0);
     readonly colorSpaceSamples: UpdateSample[] = [];
 

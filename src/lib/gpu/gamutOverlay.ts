@@ -1,11 +1,7 @@
 // src/lib/gpu/gamutOverlay.ts
 //
 // The `GamutOverlay` storage buffer, as chunks/gamutGrids.wgsl declares it.
-//
-// One description of the gamuts, read by three things: the compute pass that
-// counts how much of the image falls outside each one, the diagram that draws
-// their triangles, and the panel that lists them. The triangles and the
-// percentages therefore cannot disagree — they are the same three points.
+// Shared by the gamut statistics, the chromaticity diagram and the panel.
 
 import type { GPUSession } from "$lib/types/gpuTypes";
 import {
@@ -15,12 +11,8 @@ import {
     type OutputSpaceId,
 } from "./outputSpace";
 
-/**
- * The spectral locus in CIE 1931 xy, at 10nm from 380nm to 700nm. The last
- * point joins the first across the line of purples, which the diagram draws as
- * part of the boundary — a purple is as real a colour as a spectral one, it
- * just takes two wavelengths to make.
- */
+/** The spectral locus in CIE 1931 xy, at 10nm from 380nm to 700nm. The last
+ *  point joins the first across the line of purples. */
 export const SPECTRAL_LOCUS: readonly [number, number][] = [
     [0.1741, 0.0050], [0.1738, 0.0049], [0.1733, 0.0048], [0.1726, 0.0048],
     [0.1714, 0.0051], [0.1689, 0.0069], [0.1644, 0.0109], [0.1566, 0.0177],
@@ -39,17 +31,10 @@ export const LOCUS_POINTS = 33;
 /** Must match GAMUT_SPACES there. The order is the order of the slots. */
 export const GAMUT_SPACES = 4;
 
-/**
- * Which space each slot in the buffer describes. The export menu's order, so
- * the panel lists them narrowest first.
- */
+/** Which space each slot in the buffer describes, narrowest first. */
 export const GAMUT_ORDER: readonly OutputSpaceId[] = OUTPUT_SPACE_IDS;
 
-/**
- * The colour each triangle is drawn in. Uploaded with the primaries rather than
- * repeated in the shader, so a swatch in the panel and a line on the diagram
- * are the same value.
- */
+/** The colour each triangle and its panel swatch are drawn in. */
 export const GAMUT_TINTS: Record<OutputSpaceId, string> = {
     "srgb": "#6fd3ff",
     "display-p3": "#8ae08a",
@@ -57,10 +42,7 @@ export const GAMUT_TINTS: Record<OutputSpaceId, string> = {
     "rec2020": "#ff87b3",
 };
 
-/**
- * Where each field starts, in words. The matrix leads because a WGSL mat3x3 is
- * 16-byte aligned, and three 16-byte columns is what it occupies.
- */
+/** Where each field starts, in words. A WGSL mat3x3 occupies three vec4 columns. */
 const DESTINATION_TO_XYZ = 0;
 const SPACES_OFFSET = 12;
 /** Words per GamutSpace: three chromaticities, the flag and the tint. */

@@ -96,10 +96,6 @@ fn encode_transfer(c: vec3f, curve: u32) -> vec3f {
 }
 
 // Linear working space → linear destination, fitted to the destination gamut.
-//
-// Everything the transform does to colour happens here; the curve that follows
-// is an encoding. The colour-space tools stop at this line, since a gamut is a
-// question about colour and not about how it is written down.
 fn to_destination_linear(working: vec3f, space: OutputSpace) -> vec3f {
   var signal = working;
 

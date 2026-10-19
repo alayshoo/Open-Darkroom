@@ -1,12 +1,6 @@
 // src/lib/gpu/shaders/colorSpaceScale.wgsl
 //
-// What the two colour-space plots normalise against: the fullest cell of each
-// grid. One workgroup reduces both, so the answer never leaves the GPU — the
-// same arrangement histogramScale.wgsl uses, and for the same reason.
-//
-// The volume's figure is read for the softness of the solid's edge rather than
-// for a height, so a grid nobody switched on reduces to 1 and costs the pass
-// nothing it would not have cost anyway.
+// The fullest cell of each colour-space grid, which the draws normalise against.
 
 //!include "chunks/gamutGrids.wgsl"
 
@@ -18,8 +12,7 @@ const THREADS: u32 = 256u;
 
 var<workgroup> partial: array<u32, THREADS>;
 
-// A max over `partial`, left in slot 0. Every invocation runs the same number
-// of iterations so that all of them reach each barrier.
+// A max over `partial`, left in slot 0. Uniform control flow for the barriers.
 fn reduce(lid: u32) {
   for (var stride = THREADS / 2u; stride > 0u; stride >>= 1u) {
     workgroupBarrier();

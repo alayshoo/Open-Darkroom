@@ -458,10 +458,7 @@ fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) 
         .collect()
 }
 
-/// Steps 1-10 of the adjustment chain — everything the three shaders have to
-/// agree on. What each does afterwards is its own business: develop hands the
-/// perceptual signal to composite.wgsl unclamped, histogram takes it through
-/// the output transform and bins it, and colorSpace measures its gamut.
+/// Steps 1-10 of the adjustment chain, which every chain shader must share.
 fn develop_chain(source: &str, label: &str) -> Vec<String> {
     wgsl_region(
         source,
@@ -472,12 +469,6 @@ fn develop_chain(source: &str, label: &str) -> Vec<String> {
 }
 
 /// The chain lives in chunks/developChain.wgsl and is included, never copied.
-///
-/// It was copied once, between develop.wgsl and histogram.wgsl, and the two
-/// drifted: the histogram then described an image the preview never rendered.
-/// A third reader — the colour-space panel, which measures the chain's gamut —
-/// is what made the copy untenable, so the only thing left to guard is that
-/// nobody reintroduces one.
 #[test]
 fn every_chain_shader_includes_the_one_develop_chain() {
     for (label, source) in CHAIN_SHADERS {
@@ -529,11 +520,7 @@ fn every_chain_shader_includes_the_one_develop_chain() {
 // ── The colorimetry the colour-space tools measure in ─────────────────────────
 
 /// Linear RGB → XYZ for a set of primaries and a white point, column-major.
-///
-/// A third copy of a derivation src/lib/gpu/outputSpace.ts and
-/// src-tauri/src/output_space.rs each hold, written out here because this test
-/// is what the other two are checked against — reusing one of them would make
-/// the check circular.
+/// Derived independently of outputSpace.ts and output_space.rs on purpose.
 fn rgb_to_xyz_column_major(primaries: [[f64; 2]; 3], white: [f64; 2]) -> [f64; 9] {
     let mut m = [0.0; 9];
     for (col, [x, y]) in primaries.iter().enumerate() {
@@ -611,12 +598,8 @@ fn wgsl_mat3(source: &str, name: &str) -> [f64; 9] {
     values.try_into().unwrap()
 }
 
-/// The chromaticity diagram and the colour volume both start by leaving the
-/// working space for XYZ, and the shaders carry that matrix as a constant
-/// because the working space is fixed. A constant is exactly what drifts when
-/// the primaries move, and nothing about the plots would look obviously wrong:
-/// the cloud would simply sit in the wrong place on a diagram whose axes are
-/// still labelled correctly.
+/// The working space ↔ XYZ constants in chunks/colorimetry.wgsl must follow the
+/// working primaries.
 #[test]
 fn the_colorimetry_constants_match_the_working_primaries() {
     use open_darkroom_lib::icc::{D65, WORKING_PRIMARIES};
@@ -644,10 +627,7 @@ fn the_colorimetry_constants_match_the_working_primaries() {
     }
 }
 
-/// The gamut the diagram draws and the gamut the statistics count have to be
-/// one description, or the panel reports a percentage against a triangle other
-/// than the one on screen. They are: both read the same `GamutOverlay` buffer,
-/// built once on the CPU from the published chromaticities.
+/// The diagram and the statistics read the same `GamutOverlay` description.
 #[test]
 fn the_gamut_overlay_is_described_once() {
     for (label, source) in [

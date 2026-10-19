@@ -35,15 +35,14 @@
     let image: GPUImage | null = $state(null);
     let stats: GamutStats | null = $state(null);
 
-    // The plots are binned, normalised and drawn without reaching the CPU, so a
-    // redraw needs nothing kept on this side. The tallies are the exception —
-    // percentages only mean anything as numbers — so they are read back once a
-    // drag has settled rather than on every frame of it.
+    // The out-of-gamut tallies are read back once a drag has settled.
     const STATS_SETTLE_MS = 160;
 
     let dirty = false;
     let frameHandle: number | null = null;
     let statsHandle: ReturnType<typeof setTimeout> | null = null;
+    let statsReading = false;
+    let volumeAspect = $state(1);
 
     function requestRender() {
         dirty = true;
@@ -112,9 +111,20 @@
         statsHandle = null;
         const current = pipeline;
         if (!current) return;
-        const read = await current.readStats();
-        // The panel may have been closed while the map was in flight.
-        if (pipeline === current) stats = read;
+        // The staging buffer can only be mapped once at a time.
+        if (statsReading) {
+            statsHandle = setTimeout(readStats, STATS_SETTLE_MS);
+            return;
+        }
+        statsReading = true;
+        try {
+            const read = await current.readStats();
+            if (pipeline === current) stats = read;
+        } catch {
+            // The pipeline was destroyed while the map was in flight.
+        } finally {
+            statsReading = false;
+        }
     }
 
     /** Keep a canvas' backing store at native device pixels. */
@@ -134,8 +144,7 @@
                 if (canvas.width !== w || canvas.height !== h) {
                     canvas.width = w;
                     canvas.height = h;
-                    // Resizing drops the swapchain contents, so the plots have
-                    // to be drawn again — but only drawn, not recomputed.
+                    if (canvas === volumeCanvas && h > 0) volumeAspect = w / h;
                     requestRender();
                 }
             }
@@ -220,9 +229,7 @@
             volume: colorSpaceDebug.volume,
             destination: gpu.displaySpace,
         });
-        // A space that has just been switched off, or a measurement taken from
-        // the other side of the transform, leaves a stale tally behind — and
-        // the next pass is what clears it.
+        // The current tallies no longer match what is being measured.
         stats = null;
         requestRender();
     });
@@ -240,9 +247,7 @@
         pipeline.setVolumeView({
             yaw: colorSpaceDebug.yaw,
             pitch: colorSpaceDebug.pitch,
-            aspect: volumeCanvas?.width
-                ? volumeCanvas.width / volumeCanvas.height
-                : 1,
+            aspect: volumeAspect,
         });
         requestRedraw();
     });
@@ -361,9 +366,7 @@
             </label>
         </div>
 
-        <!-- Kept mounted while it is off: the canvas is the panel's size, and
-             tearing it down would make the sidebar jump every time the switch
-             moved. Nothing is binned or drawn into it meanwhile. -->
+        <!-- Kept mounted while off so the panel keeps its size. -->
         <div class="volume-slot" class:off={!colorSpaceDebug.volume}>
             <canvas
                 class="volume"
@@ -434,9 +437,7 @@
         cursor: grabbing;
     }
 
-    /* The heading's own bottom margin belongs to the row here, not to the
-       heading: inside a flex line it counts towards the item's height, so
-       centring against it rides the title up off the switch beside it. */
+    /* The row carries the heading's margin so the title centres on the switch. */
     .volume-head {
         display: flex;
         align-items: center;

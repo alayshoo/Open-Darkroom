@@ -1,13 +1,7 @@
 // src/lib/gpu/shaders/colorVolumeDraw.wgsl
 //
-// The colour volume as a solid: the image's colours occupying a box through
-// Oklab, lightness up and a/b across, inside the wireframe that bounds it.
-//
-// Raymarched rather than drawn as points. A point cloud needs a depth buffer,
-// a draw sized to the grid and a vertex for every cell whether or not anything
-// is in it; a ray per fragment needs none of that, occludes itself exactly, and
-// gives the wireframe a depth to be hidden behind. It costs one full-screen
-// pass, which runs when the view turns or the bins change and not otherwise.
+// The colour volume: occupied Oklab cells raymarched as a solid inside a
+// wireframe box, lightness up and a/b across.
 
 //!include "chunks/tone.wgsl"
 //!include "chunks/colorimetry.wgsl"
@@ -20,22 +14,20 @@
 struct Camera {
   yaw:    f32,
   pitch:  f32,
-  // Width over height of the target, so the box stays a box.
+  // Width over height of the target.
   aspect: f32,
-  // Half the box's extent in clip units: how much of the panel it fills.
+  // Half the box's extent in clip units.
   zoom:   f32,
 }
 
 @group(0) @binding(2) var<uniform> camera: Camera;
 
-// Steps along the ray. The box is 48 cells on its longest diagonal, so a little
-// over that resolves every cell the ray passes through.
+// Steps along the ray, enough to visit every cell on the box's diagonal.
 const STEPS: u32 = 96u;
 
 const BOX_TINT = vec3f(0.68, 0.71, 0.76);
 const EDGE_ALPHA: f32 = 0.7;
-// How much of that an edge keeps when the solid is standing in front of it.
-// Dropping those edges outright leaves a box with no back, which reads flat.
+// Opacity kept by edges the solid hides.
 const HIDDEN_EDGE: f32 = 0.3;
 
 struct VertexOut {
@@ -61,8 +53,7 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   return out;
 }
 
-// The camera's basis. Yaw turns the box about its lightness axis; pitch lifts
-// the eye above it.
+// The camera's basis. Yaw turns about the lightness axis; pitch tilts the eye.
 fn basis() -> mat3x3<f32> {
   let cy = cos(camera.yaw);
   let sy = sin(camera.yaw);
@@ -75,9 +66,8 @@ fn basis() -> mat3x3<f32> {
   return mat3x3<f32>(right, up, forward);
 }
 
-/// Where a point in the unit box lands on the panel, and how far along the ray
-/// that reaches it the point sits — measured from the box's centre, which is
-/// why reading it back costs the same two units the ray starts before.
+/// A point in the unit box projected to the panel, with its depth measured
+/// from the box's centre.
 fn project(cell: vec3f, view: mat3x3<f32>) -> vec3f {
   let centred = cell - vec3f(0.5);
   let eye = transpose(view) * centred;
@@ -103,18 +93,13 @@ fn occupancy(cell: vec3f) -> u32 {
   return volBins[(at.z * VOL_BINS + at.y) * VOL_BINS + at.x];
 }
 
-/// The colour a cell stands for, which is the colour of its own coordinates.
-/// Clamped rather than gamut-compressed: this is a swatch of one colour, and
-/// the honest thing for one the display cannot hold is the nearest it can.
+/// The colour of a cell's own coordinates, clamped to the display.
 fn cell_colour(cell: vec3f) -> vec3f {
   let working = oklab_to_working(volume_lab(cell));
   return encode_srgb(clamp(working, vec3f(0.0), vec3f(1.0)));
 }
 
-/// A little shading off the surface, so the solid reads as one rather than as a
-/// flat patch of colour. Taken from how far away the surface is, which varies
-/// smoothly — reading the neighbouring cells instead speckles every face, since
-/// occupancy is a yes or no and the cells are large enough to see.
+/// Depth-based shading, so the solid does not read as a flat patch.
 fn relief(t: f32, span: vec2f) -> f32 {
   let depth = clamp((t - span.x) / max(span.y - span.x, 1e-5), 0.0, 1.0);
   return mix(1.15, 0.78, depth);
@@ -133,8 +118,7 @@ fn segment_distance(a: vec2f, b: vec2f, p: vec2f) -> f32 {
   return length(p - (a + ab * t));
 }
 
-/// Where along a segment the closest point to `p` fell, for the depth of an
-/// edge at the fragment that is drawing it.
+/// Where along a segment the closest point to `p` falls.
 fn segment_at(a: vec2f, b: vec2f, p: vec2f) -> f32 {
   let ab = b - a;
   return clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
@@ -145,8 +129,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   let px = max(fwidth(in.uv.x), 1e-5);
   let view = basis();
 
-  // An orthographic ray: the panel is a window onto the box rather than a lens,
-  // so parallel edges stay parallel and a length means the same everywhere.
+  // Orthographic ray.
   let right = view[0];
   let up = view[1];
   let forward = view[2];
@@ -159,8 +142,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
   var colour = vec3f(0.0);
   var alpha = 0.0;
-  // How far along the ray the solid was struck, and so what the wireframe has
-  // to be in front of to be seen.
+  // Where along the ray the solid was hit, for hiding the wireframe behind it.
   var hit = 1e9;
 
   if (span.y > span.x && span.y > 0.0) {
@@ -173,9 +155,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
       let count = occupancy(cell);
       if (count == 0u) { continue; }
 
-      // The first cell the ray meets is the surface. Its coverage softens the
-      // edge of the solid, where a cell holding two pixels would otherwise read
-      // as solid as the middle of a sky.
+      // The first occupied cell is the surface; sparse cells are drawn fainter.
       let density = log(1.0 + f32(count)) / log(1.0 + f32(scale[1]));
       colour = cell_colour(cell) * relief(t, span);
       alpha = clamp(0.35 + 2.2 * density, 0.0, 1.0);
@@ -184,14 +164,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     }
   }
 
-  // The box, as twelve edges between its eight corners. Drawn from the same
-  // camera as the solid, so an edge the solid stands in front of can be told
-  // from one it stands behind, and kept faint rather than painted over it.
+  // The box's twelve edges, faded where the solid stands in front of them.
   var front = 0.0;
   var back = 0.0;
   for (var e = 0u; e < 12u; e++) {
-    // Each axis contributes four edges, one for each corner of the face it
-    // runs across.
+    // Four edges per axis.
     let axis = e / 4u;
     let corner = e % 4u;
     let other = vec2f(f32(corner & 1u), f32((corner >> 1u) & 1u));
@@ -211,8 +188,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let line = 1.0 - smoothstep(0.0, px * 1.6, segment_distance(pa.xy, pb.xy, in.uv));
     if (line <= 0.0) { continue; }
 
-    // The projection measures depth from the box's centre; the ray starts two
-    // units before it.
+    // Projected depth is from the box's centre; the ray starts two units before.
     let depth = mix(pa.z, pb.z, segment_at(pa.xy, pb.xy, in.uv)) + 2.0;
     if (hit < 1e8 && depth > hit) {
       back = max(back, line);

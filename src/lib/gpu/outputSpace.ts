@@ -126,20 +126,12 @@ export function destinationToWorking(id: OutputSpaceId): Float32Array {
     return new Float32Array(multiplyMat3(invertMat3(working), destination));
 }
 
-/**
- * Linear RGB of a space → CIE XYZ, column-major.
- *
- * The colour-space tools measure chromaticity and Oklab, both of which start
- * here. For the working space the shaders carry the same matrix as a constant,
- * since the working space is fixed and there is nothing to upload;
- * shader_contracts.rs checks the two still agree. The destination is not fixed,
- * so a measurement taken after the output transform uploads its own.
- */
+/** Linear RGB of a space → CIE XYZ, column-major. */
 export function spaceToXyz(id: OutputSpaceId): Float32Array {
     return new Float32Array(rgbToXyz(PRIMARIES[id], D65));
 }
 
-/** The working space's, which the shaders hold as a constant. */
+/** The working space's, which the shaders hold as M_WORKING_TO_XYZ. */
 export function workingToXyz(): Float32Array {
     return spaceToXyz(WORKING_SPACE);
 }
