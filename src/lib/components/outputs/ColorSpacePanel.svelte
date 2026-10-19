@@ -13,10 +13,10 @@
     } from "$lib/gpu/pipelines/colorSpacePipeline";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { proofing } from "$lib/gpu/proofing.svelte";
-    import { settings } from "$lib/settings/settings.svelte";
     import { GAMUT_ORDER, GAMUT_TINTS } from "$lib/gpu/gamutOverlay";
     import { OUTPUT_SPACE_LABELS, WORKING_SPACE } from "$lib/gpu/outputSpace";
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import type { RolloffMode } from "$lib/types/toneMap";
 
     let {
         sliders,
@@ -245,7 +245,7 @@
 
     $effect(() => {
         if (!pipeline) return;
-        pipeline.setToneMap(settings.toneMap);
+        pipeline.setToneMap(colorSpaceDebug.toneMap);
         requestRender();
     });
 
@@ -271,6 +271,11 @@
         if (stats.counted === 0) return null;
         return (100 * (stats.outside[id] ?? 0)) / stats.counted;
     }
+
+    const ROLLOFF_MODES: { id: RolloffMode; label: string }[] = [
+        { id: "luminance", label: "Luminance" },
+        { id: "perChannel", label: "Per channel" },
+    ];
 
     function formatPercentage(value: number) {
         if (value === 0) return "0%";
@@ -307,6 +312,46 @@
 </script>
 
 <div class="colour-space flex flex-col gap-3">
+    <div class="panel glass rounded-[12px] p-2.5">
+        <h2>Highlight roll-off</h2>
+        <label class="rolloff">
+            <span class="name">Strength</span>
+            <input
+                class="range"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                bind:value={colorSpaceDebug.rolloff}
+                ondblclick={() => (colorSpaceDebug.rolloff = 0)}
+            />
+            <span class="outside">{colorSpaceDebug.rolloff}</span>
+        </label>
+        {#each ROLLOFF_MODES as mode (mode.id)}
+            <label>
+                <input
+                    type="radio"
+                    name="rolloff-mode"
+                    checked={colorSpaceDebug.rolloffMode === mode.id}
+                    onchange={() => (colorSpaceDebug.rolloffMode = mode.id)}
+                />
+                <span class="name">{mode.label}</span>
+            </label>
+        {/each}
+
+        <p class="note">
+            {#if colorSpaceDebug.rolloffMode === "luminance"}
+                Compresses brightness and keeps each hue, which fades to white
+                as it nears the top.
+            {:else}
+                Compresses R, G and B separately, like film: bright colours
+                desaturate sooner but their hues can drift.
+            {/if}
+            Applied to the preview, histogram and export only while this panel
+            is open.
+        </p>
+    </div>
+
     <div class="panel glass rounded-[12px] p-2.5">
         <h2>Chromaticity · CIE 1931</h2>
         <canvas class="chromaticity" bind:this={chromaticityCanvas}></canvas>
@@ -513,6 +558,18 @@
         margin: 0;
         accent-color: rgba(255, 255, 255, 0.72);
         cursor: pointer;
+    }
+
+    input.range {
+        flex: 1;
+        width: auto;
+        min-width: 0;
+        height: 11px;
+    }
+
+    .rolloff .outside {
+        min-width: 2.2em;
+        text-align: right;
     }
 
     .swatch {
