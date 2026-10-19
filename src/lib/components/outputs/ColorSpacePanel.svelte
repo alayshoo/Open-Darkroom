@@ -434,11 +434,23 @@
         cursor: grabbing;
     }
 
+    /* The heading's own bottom margin belongs to the row here, not to the
+       heading: inside a flex line it counts towards the item's height, so
+       centring against it rides the title up off the switch beside it. */
     .volume-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 0.5rem;
+        margin-bottom: 0.4rem;
+    }
+
+    .volume-head h2 {
+        margin: 0;
+    }
+
+    .switch {
+        padding: 0;
     }
 
     .volume-slot {
