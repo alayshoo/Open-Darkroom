@@ -484,7 +484,7 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_export_applies_the_source_matrix_it_is_given` | a file already in the working space takes the output transform alone |
 | `the_gamut_compression_keeps_the_luminance_a_clamp_would_lose` | the one thing exactly true of the compression — see below |
 | `colour_the_destination_can_hold_passes_through_unchanged` | in-gamut colour is not quietly desaturated |
-| `colour_brighter_than_white_keeps_its_chromaticity` | above white, luminance gives way and hue does not |
+| `colour_brighter_than_white_resolves_to_white` | pushing exposure blows colour out to white, desaturating on the way |
 | `the_working_space_destination_only_applies_its_curve` | Rec.2020 out converts no primaries, so the BT.2020 OETF alone |
 | `the_destination_primaries_move_colour_and_leave_neutrals` | sRGB vs Display P3: same white, different gamut |
 | `each_destination_encodes_with_its_own_curve` | Adobe RGB's pure power vs sRGB's linear toe, in the shadows |
@@ -504,19 +504,10 @@ red into sRGB, by about 0.05 of luminance against a tolerance of 0.01. The test
 checks that gap too, so it cannot pass by accident on a probe that was in gamut
 all along.
 
-Above white, luminance is the one thing that cannot be kept. The gamut narrows to
-a point at white, so the only colour holding a luminance of 1 is white itself,
-and aiming at the neutral of the pixel's own brightness would render every bright
-saturated colour white — a blown neon sign included. Such a colour is scaled to
-fit instead: scaling linear RGB scales XYZ with it, so x and y do not move at
-all, and the luminance given up had no representation to lose.
-
-The gate is luminance, not channel range. A colour darker than white that merely
-falls outside the gamut still takes the luminance-preserving path above, which is
-why the Rec.2020 primaries are unaffected by the scaling. A near-neutral blown
-pixel has a near-neutral chromaticity, so it still resolves to white without
-needing a case of its own; a specular highlight stays neutral and a saturated
-light source stays saturated, under one rule.
+One case is not a gamut question: a pixel whose luminance is itself above white
+has no in-gamut neutral to aim at, and resolves to white. That is a deliberate
+change from the clamp, which left such a pixel its most-clipped channel and so
+tinted blown highlights.
 
 ## L2 — `encoding.rs` (15)
 
