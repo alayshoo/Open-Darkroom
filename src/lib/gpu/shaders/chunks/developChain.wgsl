@@ -49,11 +49,11 @@ fn hsl_band_adjust(h: f32) -> vec3f {
       lo = i;
     }
   }
-  let from = params.hsl_bands[lo];
-  let to = params.hsl_bands[(lo + 1u) % 8u];
-  let span = (to.w - from.w + 360.0) % 360.0;
-  let t = smoothstep(0.0, 1.0, ((h - from.w + 360.0) % 360.0) / span);
-  return mix(from.xyz, to.xyz, t);
+  let band_lo = params.hsl_bands[lo];
+  let band_hi = params.hsl_bands[(lo + 1u) % 8u];
+  let span = (band_hi.w - band_lo.w + 360.0) % 360.0;
+  let t = smoothstep(0.0, 1.0, ((h - band_lo.w + 360.0) % 360.0) / span);
+  return mix(band_lo.xyz, band_hi.xyz, t);
 }
 
 fn signed_cbrt(v: vec3f) -> vec3f {

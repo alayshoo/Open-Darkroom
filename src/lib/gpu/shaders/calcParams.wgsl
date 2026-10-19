@@ -490,7 +490,7 @@ fn calc_hsl_bands() -> bool {
         centres = HSL_CENTRES_HSV;
     }
 
-    var active = false;
+    var any_set = false;
     for (var i = 0u; i < 8u; i++) {
         let c    = centres[i];
         let up   = (centres[(i + 1u) % 8u] - c + 360.0) % 360.0;
@@ -504,9 +504,9 @@ fn calc_hsl_bands() -> bool {
             exp2(s[i].z / 100.0 * MAX_HSL_LIGHTNESS),
             c,
         );
-        active = active || any(s[i] != vec3f(0.0));
+        any_set = any_set || any(s[i] != vec3f(0.0));
     }
-    return active;
+    return any_set;
 }
 
 
