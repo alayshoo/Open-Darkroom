@@ -21,8 +21,8 @@ Nothing is `#[ignore]`d. 245 Rust tests, 95 TypeScript, 32 in-browser.
 Six passes, and the tests are split along the same seams.
 
 ```
-calcParams.wgsl        compute — sliders + view → Params, SharpParams
-develop.wgsl           steps 1-10, into the perceptual working space
+calcParams.wgsl        compute — sliders + view + tone map → Params, SharpParams
+develop.wgsl           steps 1-11, into the perceptual working space
 calcSharpTexture.wgsl  h_main — luma, blurred along x at four scales
 calcSharpTexture.wgsl  v_main — blurs finished, three bands subtracted out
 composite.wgsl         the bands applied by scaling the colour
@@ -43,7 +43,7 @@ The two blur passes are skipped whenever no band can reach the screen. That is
 only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
 so composite is a no-op regardless of what the detail texture holds.
 
-## L1 — `shader_contracts.rs` (24)
+## L1 — `shader_contracts.rs` (27)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -54,6 +54,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `typescript_slider_packing_matches_the_wgsl_struct` | `slidersToArray` order == WGSL order |
 | `typescript_declares_the_same_buffer_sizes_as_rust` | TS buffer-size constants == Rust |
 | `view_struct_is_all_f32_and_matches_the_declared_size` | `View` is f32-only and 16 bytes |
+| `tone_map_struct_is_all_f32_and_matches_the_declared_size` | `ToneMap` is f32-only and 16 bytes |
 | `rust_default_sliders_match_the_frontend_defaults` | `SlidersPayload::default()` == `defaultSlidersRGB` |
 | `params_struct_is_identical_across_every_shader` | `Params` same in all 3 WGSL files |
 | `params_struct_matches_the_declared_size` | `Params` = 256 bytes |
@@ -460,7 +461,7 @@ is where Lightroom's Basic panel works. That is what puts the mask boundaries at
 sRGB 64 / 128 / 191 instead of 137 / 188 / 225, and what makes contrast pivot on
 real mid-grey instead of on a bright highlight.
 
-## L2 — `export_gpu.rs` (22)
+## L2 — `export_gpu.rs` (25)
 
 Export mechanics: the parts that break on unusual dimensions, not unusual sliders.
 
@@ -485,6 +486,9 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_gamut_compression_keeps_the_luminance_a_clamp_would_lose` | the one thing exactly true of the compression — see below |
 | `colour_the_destination_can_hold_passes_through_unchanged` | in-gamut colour is not quietly desaturated |
 | `colour_brighter_than_white_resolves_to_white` | a colour pushed past white renders pure white |
+| `highlight_rolloff_keeps_gradation_above_white` | with the roll-off, +1 to +4 EV stay distinct and below white |
+| `highlight_rolloff_leaves_tones_below_its_shoulder_alone` | both modes leave darker tones byte-identical |
+| `highlight_rolloff_modes_differ_on_saturated_colour` | the mode setting reaches the shader |
 | `the_working_space_destination_only_applies_its_curve` | Rec.2020 out converts no primaries, so the BT.2020 OETF alone |
 | `the_destination_primaries_move_colour_and_leave_neutrals` | sRGB vs Display P3: same white, different gamut |
 | `each_destination_encodes_with_its_own_curve` | Adobe RGB's pure power vs sRGB's linear toe, in the shadows |

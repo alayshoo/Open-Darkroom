@@ -67,6 +67,15 @@ struct SourceSpace {
     to_working: mat3x3<f32>,   //  0 — 48 bytes (3 cols × 16)
 }                              // total: 48 bytes
 
+// App-wide highlight roll-off preference. Neither an edit nor part of the view,
+// so it lives in a uniform of its own.
+struct ToneMap {
+    rolloff:      f32,   //  0   (0–100)
+    rolloff_mode: f32,   //  4   (0 luminance, 1 per channel)
+    _pad0:        f32,   //  8
+    _pad1:        f32,   // 12
+}                        // total: 16 bytes
+
 //!include "chunks/params.wgsl"
 
 // Parameters for the sharpness stage, kept apart from Params because a
@@ -81,6 +90,7 @@ struct SourceSpace {
 @group(0) @binding(2) var<uniform> view: View;
 @group(0) @binding(3) var<storage, read_write> sharp: SharpParams;
 @group(0) @binding(4) var<uniform> source: SourceSpace;
+@group(0) @binding(5) var<uniform> tone_map: ToneMap;
 
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -159,6 +169,10 @@ const LB: f32 = 0.0593017;
 // the output black and white point sliders.
 const MAX_WIDE_REGION:   f32 = 0.20;   // highlights, shadows (mask width 0.5)
 const MAX_NARROW_REGION: f32 = 0.07;   // whites, blacks      (mask width 0.25)
+
+// How far below white the highlight roll-off starts at full strength, in linear
+// light. 0.5 is sRGB 188.
+const MAX_ROLLOFF_SPAN: f32 = 0.5;
 
 // ── Sharpness ────────────────────────────────────────────────────────────────
 //
@@ -464,8 +478,8 @@ fn main() {
     params._pad4         = 0.0;
     params.hueSat_matrix = calc_hue_sat_matrix();
     params.vibrance      = sliders.vibrance / 100.0;
-    params._pad5         = 0.0;
-    params._pad6         = 0.0;
+    params.rolloff_start = 1.0 - clamp(tone_map.rolloff / 100.0, 0.0, 1.0) * MAX_ROLLOFF_SPAN;
+    params.rolloff_mode  = tone_map.rolloff_mode;
     params._pad7         = 0.0;
 
     // Sharpness. Every radius is a full-resolution measurement, so each has to be

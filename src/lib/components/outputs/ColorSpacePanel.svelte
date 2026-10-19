@@ -13,6 +13,7 @@
     } from "$lib/gpu/pipelines/colorSpacePipeline";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { proofing } from "$lib/gpu/proofing.svelte";
+    import { settings } from "$lib/settings/settings.svelte";
     import { GAMUT_ORDER, GAMUT_TINTS } from "$lib/gpu/gamutOverlay";
     import { OUTPUT_SPACE_LABELS, WORKING_SPACE } from "$lib/gpu/outputSpace";
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -239,6 +240,12 @@
     $effect(() => {
         if (!pipeline) return;
         pipeline.setOutputSpace(gpu.displaySpace, proofing.space);
+        requestRender();
+    });
+
+    $effect(() => {
+        if (!pipeline) return;
+        pipeline.setToneMap(settings.toneMap);
         requestRender();
     });
 

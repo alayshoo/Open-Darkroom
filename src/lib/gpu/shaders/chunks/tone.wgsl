@@ -23,6 +23,17 @@ fn decode_srgb(c: vec3f) -> vec3f {
   return select(hi, lo, c < vec3f(0.04045));
 }
 
+// Highlight shoulder: identity up to `start`, then an asymptotic approach to 1
+// with matching slope at the join, so values above white keep their ordering.
+fn shoulder(x: f32, start: f32) -> f32 {
+  if (x <= start || start >= 1.0) {
+    return x;
+  }
+  let span = 1.0 - start;
+  let t = (x - start) / span;
+  return start + span * t / (1.0 + t);
+}
+
 // Contrast as a power curve on each side of the pivot.
 //
 //   k > 1  steepens the midtones  (positive contrast)

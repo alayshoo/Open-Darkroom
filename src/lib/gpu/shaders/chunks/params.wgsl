@@ -21,7 +21,7 @@ struct Params {
   _pad4:          f32,          // 172  (align hueSat_matrix to 16)
   hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
   vibrance:       f32,          // 240
-  _pad5:          f32,          // 244
-  _pad6:          f32,          // 248
+  rolloff_start:  f32,          // 244  (1 = off)
+  rolloff_mode:   f32,          // 248  (0 luminance, 1 per channel)
   _pad7:          f32,          // 252
 }                               // total: 256 bytes

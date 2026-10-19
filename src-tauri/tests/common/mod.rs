@@ -17,8 +17,8 @@ use wgpu::util::DeviceExt;
 use open_darkroom_lib::color::{build_srgb_to_linear_lut_u16, linearize_u16, same_curve};
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::export_rendering::{
-    output_space_to_bytes, render_image, sliders_to_bytes, view_to_bytes, SlidersPayload,
-    ViewPayload, PARAMS_BYTES, SHARP_PARAMS_BYTES,
+    output_space_to_bytes, render_image, sliders_to_bytes, tone_map_to_bytes, view_to_bytes,
+    SlidersPayload, ViewPayload, PARAMS_BYTES, SHARP_PARAMS_BYTES,
     source_space_to_bytes,
 };
 use open_darkroom_lib::output_space::OutputSpace;
@@ -411,10 +411,16 @@ impl Params {
     pub fn vibrance(&self) -> f32 {
         self.0[60]
     }
+    pub fn rolloff_start(&self) -> f32 {
+        self.0[61]
+    }
+    pub fn rolloff_mode(&self) -> f32 {
+        self.0[62]
+    }
 
     /// Every meaningful lane, skipping the explicit padding slots.
     pub fn significant_values(&self) -> Vec<(usize, f32)> {
-        const PADDING: [usize; 10] = [21, 22, 23, 27, 31, 35, 43, 61, 62, 63];
+        const PADDING: [usize; 8] = [21, 22, 23, 27, 31, 35, 43, 63];
         self.0
             .iter()
             .enumerate()
@@ -470,6 +476,12 @@ fn calc_buffers_in(
     let source_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("test_source_buf"),
         contents: &source_space_to_bytes(space),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let tone_map_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("test_tone_map_buf"),
+        contents: &tone_map_to_bytes(&sliders.tone_map),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -532,6 +544,10 @@ fn calc_buffers_in(
             wgpu::BindGroupEntry {
                 binding: 4,
                 resource: source_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: tone_map_buf.as_entire_binding(),
             },
         ],
     });

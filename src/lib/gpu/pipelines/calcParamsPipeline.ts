@@ -2,6 +2,7 @@
 
 import type { Sliders } from "$lib/types/imgParameters";
 import type { GPUSession } from "$lib/types/gpuTypes";
+import { defaultToneMap, type ToneMap } from "$lib/types/toneMap";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
 
 // 30 f32 fields = 120 bytes, rounded up to the 16-byte alignment a uniform
@@ -12,6 +13,7 @@ export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 // SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
 export const SOURCE_BUFFER_SIZE  = 48;
+export const TONE_MAP_BUFFER_SIZE = 16;  // ToneMap struct (two f32, 16-aligned)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
@@ -19,6 +21,7 @@ export interface CalcParamsPipeline {
     updateSliders: (sliders: Sliders) => void;
     updateView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     updateSourceSpace: (srcToWorking: Float32Array) => void;
+    updateToneMap: (toneMap: ToneMap) => void;
     recordCalcParams: (
         encoder: GPUCommandEncoder,
         timestampWrites?: GPUComputePassTimestampWrites,
@@ -73,6 +76,13 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
+    // ToneMap uniform buffer — the app-wide highlight roll-off preference
+    const toneMapBuffer = device.createBuffer({
+        label: "Tone Map Uniform Buffer",
+        size: TONE_MAP_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
     const bindGroupLayout = device.createBindGroupLayout({
         label: "Calc Params Bind Group Layout",
         entries: [
@@ -101,6 +111,11 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "uniform" },
             },
+            {
+                binding: 5,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
+            },
         ],
     });
 
@@ -124,6 +139,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
             { binding: 2, resource: { buffer: viewBuffer } },
             { binding: 3, resource: { buffer: sharpBuffer } },
             { binding: 4, resource: { buffer: sourceBuffer } },
+            { binding: 5, resource: { buffer: toneMapBuffer } },
         ],
     });
 
@@ -148,6 +164,12 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         device.queue.writeBuffer(sourceBuffer, 0, padded.buffer, padded.byteOffset, padded.byteLength);
     }
 
+    function updateToneMap(toneMap: ToneMap) {
+        const mode = toneMap.rolloffMode === "perChannel" ? 1 : 0;
+        const data = new Float32Array([toneMap.rolloff, mode, 0, 0]);
+        device.queue.writeBuffer(toneMapBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
+    }
+
     function recordCalcParams(
         encoder: GPUCommandEncoder,
         timestampWrites?: GPUComputePassTimestampWrites,
@@ -168,6 +190,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         viewBuffer.destroy();
         sharpBuffer.destroy();
         sourceBuffer.destroy();
+        toneMapBuffer.destroy();
     }
 
     // A render is full resolution until something says otherwise. The dimensions
@@ -175,6 +198,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
     // rather than collapsing.
     updateView(1, 0, 0);
     updateSourceSpace(new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]));
+    updateToneMap(defaultToneMap);
 
     return {
         paramsBuffer,
@@ -182,6 +206,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         updateSliders,
         updateView,
         updateSourceSpace,
+        updateToneMap,
         recordCalcParams,
         destroy,
     };

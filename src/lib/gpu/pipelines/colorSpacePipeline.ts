@@ -1,6 +1,7 @@
 // src/lib/gpu/pipelines/colorSpacePipeline.ts
 
 import type { Sliders } from "$lib/types/imgParameters";
+import type { ToneMap } from "$lib/types/toneMap";
 import type { GPUSession } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline } from "./calcParamsPipeline";
 import { createFrameTimer } from "./frameTimer";
@@ -56,6 +57,8 @@ export interface ColorSpacePipeline {
     setOverlays: (state: GamutOverlayState) => void;
     /** The output transform's destination, for measuring after it. */
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
+    /** The highlight roll-off preference the preview renders with. */
+    setToneMap: (toneMap: ToneMap) => void;
     /** Where the colour volume is being looked at from. */
     setVolumeView: (view: VolumeView) => void;
     /** Bins the image and draws both plots. A target left out is not drawn. */
@@ -283,6 +286,10 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         outputSpace.set(destination, proof);
     }
 
+    function setToneMap(toneMap: ToneMap) {
+        calcParams.updateToneMap(toneMap);
+    }
+
     const cameraStaging = new Float32Array(CAMERA_BUFFER_SIZE / 4);
 
     function setVolumeView(view: VolumeView) {
@@ -421,6 +428,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         setSourceSpace,
         setOverlays,
         setOutputSpace,
+        setToneMap,
         setVolumeView,
         render,
         redraw,

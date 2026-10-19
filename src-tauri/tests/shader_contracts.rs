@@ -19,7 +19,7 @@ use common::{
 use open_darkroom_lib::export_rendering::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
     DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
-    SOURCE_SPACE_BYTES, VIEW_BYTES,
+    SOURCE_SPACE_BYTES, TONE_MAP_BYTES, VIEW_BYTES,
 };
 use open_darkroom_lib::export_rendering::OUTPUT_SPACE_BYTES;
 use open_darkroom_lib::icc::SRGB_TO_WORKING;
@@ -304,6 +304,26 @@ fn typescript_declares_the_same_buffer_sizes_as_rust() {
         number_after("VIEW_BUFFER_SIZE"),
         VIEW_BYTES,
         "VIEW_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+    assert_eq!(
+        number_after("TONE_MAP_BUFFER_SIZE"),
+        TONE_MAP_BYTES,
+        "TONE_MAP_BUFFER_SIZE in TypeScript disagrees with Rust"
+    );
+}
+
+#[test]
+fn tone_map_struct_is_all_f32_and_matches_the_declared_size() {
+    let fields = wgsl_struct(CALC_PARAMS_WGSL, "ToneMap");
+
+    assert!(
+        fields.iter().all(|f| f.ty == "f32"),
+        "every ToneMap field must be an f32 — the CPU packers write a flat f32 array"
+    );
+    assert_eq!(
+        struct_size(&fields).next_multiple_of(16),
+        TONE_MAP_BYTES,
+        "TONE_MAP_BYTES disagrees with the WGSL ToneMap struct"
     );
 }
 

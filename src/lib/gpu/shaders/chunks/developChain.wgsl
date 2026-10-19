@@ -1,4 +1,4 @@
-// Steps 1-10 of the adjustment chain: source channels in, unclamped linear
+// Steps 1-11 of the adjustment chain: source channels in, unclamped linear
 // working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
 // Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
 fn develop(source: vec3f) -> vec3f {
@@ -90,7 +90,7 @@ fn develop(source: vec3f) -> vec3f {
   // into view as bright speckle — a dark ramp reading 0,0,0,1,3 without
   // vibrance came back 2,6,24,0,0 with it.
   //
-  // Flooring here is free: step 11 clamps to the same floor one line later.
+  // Flooring here is free: the output transform clamps to the same floor.
   // Headroom above white is untouched, which is the half the clamp still needs.
   // Flooring only the measurement is not enough — the ratio then jumps from 0
   // to 1 the instant one channel crosses zero while the others are still under
@@ -114,6 +114,22 @@ fn develop(source: vec3f) -> vec3f {
   let pixelSat = (maxC - minC) / max(maxC, 1e-4);
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
+
+  // 11. Highlight roll-off — compresses everything above the shoulder into 0..1.
+  // Luminance mode scales the pixel and keeps its hue; per-channel mode
+  // shoulders each channel, which desaturates bright colour but shifts hue.
+  if (params.rolloff_mode < 0.5) {
+    let luma_ro = dot(rgb, LUMA);
+    if (luma_ro > params.rolloff_start) {
+      rgb *= shoulder(luma_ro, params.rolloff_start) / luma_ro;
+    }
+  } else {
+    rgb = vec3f(
+      shoulder(rgb.r, params.rolloff_start),
+      shoulder(rgb.g, params.rolloff_start),
+      shoulder(rgb.b, params.rolloff_start),
+    );
+  }
 
   return rgb;
 }

@@ -47,6 +47,10 @@ pub const SHARP_PARAMS_BYTES: u64 = 48;
 /// `mat3x3<f32>`, three 16-byte columns.
 pub const SOURCE_SPACE_BYTES: u64 = 48;
 
+/// Size of the `ToneMap` uniform read by calcParams.wgsl: two f32 of payload,
+/// padded to the 16 bytes a uniform struct binds at.
+pub const TONE_MAP_BYTES: usize = 16;
+
 /// Smallest sigma the blur kernel is given, and the widest radius it can ask
 /// for. Both mirror `MIN_SIGMA` in calcParams.wgsl and `MAX_RADIUS` in
 /// calcSharpTexture.wgsl.
@@ -169,6 +173,10 @@ pub struct SlidersPayload {
     pub usm_radius:           f32,
     pub usm_luma_threshold:   f32,
     pub usm_detail_threshold: f32,
+    /// App-wide preference rather than an edit, carried here so every render
+    /// path receives it. Packed into its own uniform, not the `Sliders` one.
+    #[serde(default)]
+    pub tone_map: ToneMapPayload,
 }
 
 impl Default for SlidersPayload {
@@ -207,8 +215,41 @@ impl Default for SlidersPayload {
             usm_radius:           1.0,
             usm_luma_threshold:   0.0,
             usm_detail_threshold: 0.0,
+            tone_map:             ToneMapPayload::default(),
         }
     }
+}
+
+/// How the highlight roll-off compresses values above its shoulder.
+#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RolloffMode {
+    /// Scales the whole pixel, keeping its hue.
+    #[default]
+    Luminance,
+    /// Shoulders each channel on its own, desaturating towards white.
+    PerChannel,
+}
+
+/// The highlight roll-off preference. Strength 0 leaves the chain untouched.
+#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ToneMapPayload {
+    /// 0–100.
+    pub rolloff: f32,
+    pub rolloff_mode: RolloffMode,
+}
+
+/// Pack the roll-off into the uniform buffer matching the WGSL `ToneMap` struct.
+pub fn tone_map_to_bytes(t: &ToneMapPayload) -> [u8; TONE_MAP_BYTES] {
+    let mode: f32 = match t.rolloff_mode {
+        RolloffMode::Luminance => 0.0,
+        RolloffMode::PerChannel => 1.0,
+    };
+    let mut bytes = [0u8; TONE_MAP_BYTES];
+    bytes[0..4].copy_from_slice(&t.rolloff.to_le_bytes());
+    bytes[4..8].copy_from_slice(&mode.to_le_bytes());
+    bytes
 }
 
 /// Pack sliders into the uniform buffer matching the WGSL Sliders struct.
@@ -498,6 +539,12 @@ pub async fn render_image_with_chunk_rows(
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
+    let tone_map_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("tone_map_buf"),
+        contents: &tone_map_to_bytes(&sliders.tone_map),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let calc_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("calc_bgl"),
         entries: &[
@@ -543,6 +590,16 @@ pub async fn render_image_with_chunk_rows(
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
@@ -606,6 +663,10 @@ pub async fn render_image_with_chunk_rows(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: sharp_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: tone_map_buf.as_entire_binding(),
             },
         ],
     });

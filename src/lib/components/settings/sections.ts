@@ -10,6 +10,7 @@
 import type { Component } from "svelte";
 import DebugSection from "./sections/DebugSection.svelte";
 import ShortcutsSection from "./sections/ShortcutsSection.svelte";
+import ToneSection from "./sections/ToneSection.svelte";
 
 export interface SettingsSection {
     /** Stable id; what `settings.section` holds. */
@@ -26,6 +27,12 @@ export const settingsSections: SettingsSection[] = [
         label: "Shortcuts",
         icon: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8.5 15h7",
         component: ShortcutsSection,
+    },
+    {
+        id: "tone",
+        label: "Tone",
+        icon: "M3 20L12 11C15.5 7.5 18 5 21 4M3 4h18",
+        component: ToneSection,
     },
     {
         id: "debug",
