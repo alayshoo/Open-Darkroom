@@ -714,7 +714,7 @@ fn rolloff(rolloff: f32, rolloff_mode: RolloffMode) -> ToneMapPayload {
 }
 
 /// With the roll-off on, successive stops above white stay distinct instead of
-/// clipping to one flat white.
+/// clipping to one flat white, and the shoulder still reaches white at its end.
 #[test]
 fn highlight_rolloff_keeps_gradation_above_white() {
     const GREY: [u8; 3] = [180, 180, 180];
@@ -727,6 +727,9 @@ fn highlight_rolloff_keeps_gradation_above_white() {
         assert!(got[0] > previous, "+{exposure} EV did not brighten: {got:?}");
         previous = got[0];
     }
+
+    let past_white = pixel(&render_to_tone_mapped(&[GREY], OutputSpace::Srgb, 5.0, full), 0);
+    assert_eq!(past_white, [255, 255, 255], "the shoulder never reached white");
 
     let clipped = pixel(&render_to_exposed(&[GREY], OutputSpace::Srgb, 2.0), 0);
     assert_eq!(clipped, [255, 255, 255], "without the roll-off +2 EV should clip");

@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 245 Rust tests, 95 TypeScript, 32 in-browser.
+Nothing is `#[ignore]`d. 251 Rust tests, 95 TypeScript, 32 in-browser.
 
 ---
 
@@ -486,7 +486,7 @@ Export mechanics: the parts that break on unusual dimensions, not unusual slider
 | `the_gamut_compression_keeps_the_luminance_a_clamp_would_lose` | the one thing exactly true of the compression — see below |
 | `colour_the_destination_can_hold_passes_through_unchanged` | in-gamut colour is not quietly desaturated |
 | `colour_brighter_than_white_resolves_to_white` | a colour pushed past white renders pure white |
-| `highlight_rolloff_keeps_gradation_above_white` | with the roll-off, +1 to +4 EV stay distinct and below white |
+| `highlight_rolloff_keeps_gradation_above_white` | with the roll-off, +1 to +4 EV stay distinct and below white, +5 EV is white |
 | `highlight_rolloff_leaves_tones_below_its_shoulder_alone` | both modes leave darker tones byte-identical |
 | `highlight_rolloff_modes_differ_on_saturated_colour` | the mode setting reaches the shader |
 | `the_working_space_destination_only_applies_its_curve` | Rec.2020 out converts no primaries, so the BT.2020 OETF alone |

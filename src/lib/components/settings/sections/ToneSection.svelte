@@ -16,7 +16,7 @@
 <div class="section flex flex-col gap-4">
     <SettingsGroup
         title="Highlight roll-off"
-        note="Without a roll-off, anything brighter than white is clipped, so blown areas merge into one flat white patch. The roll-off gently compresses the brightest tones instead, so highlights keep some gradation and fade to white smoothly. Higher strength starts the compression lower in the tonal range. Applies to the preview, the histogram and every export."
+        note="Without a roll-off, anything brighter than white is clipped, so blown areas merge into one flat white patch. The roll-off gently compresses the brightest tones instead, so highlights keep some gradation and fade to white smoothly, reaching it three stops above white. Higher strength starts the compression lower in the tonal range, which also dims the brightest tones that were already white. Applies to the preview, the histogram and every export."
     >
         <SettingsRow label="Strength" value={`${settings.rolloff}`} />
         <div class="slider-row px-3 pb-2.5 pt-1">
