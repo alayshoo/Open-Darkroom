@@ -28,7 +28,7 @@
                 : "Every shortcut is at its default."}
         </p>
         <button
-            class="reset shrink-0 rounded-[8px] border-0 px-3 h-8 cursor-app"
+            class="reset shrink-0 rounded-[8px] border-0 px-3 h-8 cursor-auto"
             disabled={!shortcuts.isAnyCustom}
             onclick={() => shortcuts.resetAll()}
         >

@@ -173,7 +173,7 @@
         class="chrome chrome-trailing flex items-center gap-0.5"
     >
         <button
-            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={() => appWindow.minimize()}
             title="Minimize"
         >
@@ -191,7 +191,7 @@
             </svg>
         </button>
         <button
-            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={handleToggleMaximize}
             title={isMaximized ? "Restore" : "Maximize"}
         >
@@ -232,7 +232,7 @@
             {/if}
         </button>
         <button
-            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-app"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={() => appWindow.close()}
             title="Close"
         >
