@@ -3,6 +3,7 @@
 // The colour volume: occupied Oklab cells raymarched as a solid inside a
 // wireframe box, lightness up and a/b across.
 
+//!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
 //!include "chunks/colorimetry.wgsl"
 //!include "chunks/gamutGrids.wgsl"
@@ -95,8 +96,8 @@ fn occupancy(cell: vec3f) -> u32 {
 
 /// The colour of a cell's own coordinates, clamped to the display.
 fn cell_colour(cell: vec3f) -> vec3f {
-  let working = oklab_to_working(volume_lab(cell));
-  return encode_srgb(clamp(working, vec3f(0.0), vec3f(1.0)));
+  let display = M_WORKING_TO_SRGB * oklab_to_working(volume_lab(cell));
+  return encode_srgb(clamp(display, vec3f(0.0), vec3f(1.0)));
 }
 
 /// Depth-based shading, so the solid does not read as a flat patch.

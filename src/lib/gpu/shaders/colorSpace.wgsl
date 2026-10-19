@@ -34,7 +34,7 @@ const WORKGROUP_THREADS: u32 = 256u;
 fn measured_xyz(coord: vec2u) -> vec3f {
   let working = develop(textureLoad(inputTexture, coord, 0).rgb);
   if (overlay.transformed == 0u) {
-    return M_WORKING_TO_XYZ * max(working, vec3f(0.0));
+    return M_WORKING_TO_XYZ * working;
   }
   // Linear, before the transfer curve.
   let destination = to_destination_linear(working, outputSpace);

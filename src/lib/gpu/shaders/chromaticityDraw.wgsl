@@ -3,6 +3,7 @@
 // The CIE 1931 diagram: the filled spectral locus, the image's chromaticities
 // as a density cloud, and a triangle for every enabled gamut.
 
+//!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
 //!include "chunks/colorimetry.wgsl"
 //!include "chunks/gamutGrids.wgsl"
@@ -67,18 +68,18 @@ fn inside_locus(uv: vec2f) -> bool {
   return inside;
 }
 
-// The colour of a chromaticity at the brightest the working space holds it.
-// Chromaticities outside Rec.2020 are clipped towards its boundary.
+// The colour of a chromaticity at the brightest the display holds it.
+// Chromaticities outside sRGB are clipped towards its boundary.
 fn locus_colour(uv: vec2f) -> vec3f {
   let xy = uv * PLOT_SPAN;
   if (xy.y < COLORIMETRY_EPSILON) { return vec3f(0.0); }
 
   let xyz = vec3f(xy.x / xy.y, 1.0, (1.0 - xy.x - xy.y) / xy.y);
-  let working = max(M_XYZ_TO_WORKING * xyz, vec3f(0.0));
-  let peak = max(working.r, max(working.g, working.b));
+  let display = max(M_WORKING_TO_SRGB * (M_XYZ_TO_WORKING * xyz), vec3f(0.0));
+  let peak = max(display.r, max(display.g, display.b));
   if (peak < COLORIMETRY_EPSILON) { return vec3f(0.0); }
 
-  return encode_srgb(working / peak);
+  return encode_srgb(display / peak);
 }
 
 fn segment_distance(a: vec2f, b: vec2f, p: vec2f) -> f32 {
