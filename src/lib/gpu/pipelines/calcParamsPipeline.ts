@@ -5,15 +5,15 @@ import type { GPUSession } from "$lib/types/gpuTypes";
 import { defaultToneMap, type ToneMap } from "$lib/types/toneMap";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
 
-// 30 f32 fields = 120 bytes, rounded up to the 16-byte alignment a uniform
+// 54 f32 fields = 216 bytes, rounded up to the 16-byte alignment a uniform
 // struct is bound at.
-export const SLIDERS_BUFFER_SIZE = 128;
-export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
+export const SLIDERS_BUFFER_SIZE = 224;
+export const PARAMS_BUFFER_SIZE  = 384;  // Params struct (must match shader)
 export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 // SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
 export const SOURCE_BUFFER_SIZE  = 48;
-export const TONE_MAP_BUFFER_SIZE = 16;  // ToneMap struct (two f32, 16-aligned)
+export const TONE_MAP_BUFFER_SIZE = 16;  // ToneMap struct (three f32, 16-aligned)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
@@ -166,7 +166,8 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
 
     function updateToneMap(toneMap: ToneMap) {
         const mode = toneMap.rolloffMode === "perChannel" ? 1 : 0;
-        const data = new Float32Array([toneMap.rolloff, mode, 0, 0]);
+        const hslModel = toneMap.hslModel === "hsv" ? 1 : 0;
+        const data = new Float32Array([toneMap.rolloff, mode, hslModel, 0]);
         device.queue.writeBuffer(toneMapBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
@@ -245,5 +246,29 @@ function slidersToArray(s: Sliders): Float32Array {
         s.usmRadius,
         s.usmLumaThreshold,
         s.usmDetailThreshold,
+        s.hslRedHue,
+        s.hslRedSat,
+        s.hslRedLum,
+        s.hslOrangeHue,
+        s.hslOrangeSat,
+        s.hslOrangeLum,
+        s.hslYellowHue,
+        s.hslYellowSat,
+        s.hslYellowLum,
+        s.hslGreenHue,
+        s.hslGreenSat,
+        s.hslGreenLum,
+        s.hslAquaHue,
+        s.hslAquaSat,
+        s.hslAquaLum,
+        s.hslBlueHue,
+        s.hslBlueSat,
+        s.hslBlueLum,
+        s.hslPurpleHue,
+        s.hslPurpleSat,
+        s.hslPurpleLum,
+        s.hslMagentaHue,
+        s.hslMagentaSat,
+        s.hslMagentaLum,
     ]);
 }

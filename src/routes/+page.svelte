@@ -21,6 +21,7 @@
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
+    import HslBandGroup from "$lib/components/inputs/values/HslBandGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
@@ -1077,6 +1078,18 @@
                                                     newValue: newVal,
                                                 })}
                                         ></SingleValSliderGroup>
+                                        <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
+                                        <span class="section-title pb-1.5">Colour Mixer</span>
+                                        <HslBandGroup
+                                            bind:sliders
+                                            onCommit={(key, oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key,
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></HslBandGroup>
                                         <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     </div>
                                 </div>

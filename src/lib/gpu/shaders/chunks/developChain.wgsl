@@ -1,6 +1,113 @@
-// Steps 1-11 of the adjustment chain: source channels in, unclamped linear
+// Steps 1-12 of the adjustment chain: source channels in, unclamped linear
 // working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
 // Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
+
+// Linear sRGB → linear Rec.2020, the inverse of M_WORKING_TO_SRGB in luma.wgsl.
+const M_SRGB_TO_WORKING = mat3x3<f32>(
+  vec3f(0.6274039, 0.0690973, 0.0163915),
+  vec3f(0.3292830, 0.9195404, 0.0880133),
+  vec3f(0.0433131, 0.0113623, 0.8955952),
+);
+
+// OKLab from linear Rec.2020. The LMS rows are normalised so that white maps to
+// exactly (1, 1, 1), which keeps neutrals at zero chroma.
+const M_WORKING_TO_LMS = mat3x3<f32>(
+  vec3f(0.6167558, 0.2651330, 0.1001026),
+  vec3f(0.3601984, 0.6358394, 0.2039065),
+  vec3f(0.0230458, 0.0990276, 0.6959909),
+);
+const M_LMS_TO_WORKING = mat3x3<f32>(
+  vec3f( 2.1399068, -0.8847358, -0.0485737),
+  vec3f(-1.2463895,  2.1632308, -0.4545031),
+  vec3f( 0.1064827, -0.2784950,  1.5030769),
+);
+const M_LMS_TO_OKLAB = mat3x3<f32>(
+  vec3f(0.2104543,  1.9779985,  0.0259040),
+  vec3f(0.7936178, -2.4285922,  0.7827718),
+  vec3f(-0.0040720, 0.4505937, -0.8086758),
+);
+const M_OKLAB_TO_LMS = mat3x3<f32>(
+  vec3f(1.0,        1.0,        1.0),
+  vec3f(0.3963378, -0.1055613, -0.0894842),
+  vec3f(0.2158038, -0.0638542, -1.2914855),
+);
+
+// Chroma below which a pixel's hue is too unstable to assign to a band. The
+// colour adjustments fade in across it, so grain in the neutrals is left alone.
+const HSL_OKLCH_NEUTRAL_CHROMA: f32 = 0.03;
+const HSL_HSV_NEUTRAL_CHROMA:   f32 = 0.08;
+
+// Hue shift, chroma scale, lightness scale.
+const HSL_NEUTRAL = vec3f(0.0, 1.0, 1.0);
+
+// The bands' adjustments at hue `h` (degrees). Each band crossfades into its
+// neighbours between their centres, so the weights always sum to one.
+fn hsl_band_adjust(h: f32) -> vec3f {
+  var lo = 7u;
+  for (var i = 0u; i < 8u; i++) {
+    if (h >= params.hsl_bands[i].w) {
+      lo = i;
+    }
+  }
+  let from = params.hsl_bands[lo];
+  let to = params.hsl_bands[(lo + 1u) % 8u];
+  let span = (to.w - from.w + 360.0) % 360.0;
+  let t = smoothstep(0.0, 1.0, ((h - from.w + 360.0) % 360.0) / span);
+  return mix(from.xyz, to.xyz, t);
+}
+
+fn signed_cbrt(v: vec3f) -> vec3f {
+  return sign(v) * pow(abs(v), vec3f(1.0 / 3.0));
+}
+
+// Per-colour adjustment in OKLCh: hue rotates h, saturation scales C and
+// luminance scales L, each independently of the others.
+fn hsl_oklch(rgb: vec3f) -> vec3f {
+  let lab = M_LMS_TO_OKLAB * signed_cbrt(M_WORKING_TO_LMS * rgb);
+  let chroma = length(lab.yz);
+  let fade = smoothstep(0.0, HSL_OKLCH_NEUTRAL_CHROMA, chroma);
+  if (fade <= 0.0) {
+    return rgb;
+  }
+  let hue = (degrees(atan2(lab.z, lab.y)) + 360.0) % 360.0;
+  let adj = mix(HSL_NEUTRAL, hsl_band_adjust(hue), fade);
+
+  let h = radians(hue + adj.x);
+  let c = chroma * adj.y;
+  let lms = M_OKLAB_TO_LMS * vec3f(lab.x * adj.z, c * cos(h), c * sin(h));
+  return M_LMS_TO_WORKING * (lms * lms * lms);
+}
+
+// Per-colour adjustment in HSV on sRGB-encoded values, the classic hexcone
+// model: hue rotates H, saturation scales S and luminance scales V.
+fn hsl_hsv(rgb: vec3f) -> vec3f {
+  let e = encode_srgb(M_WORKING_TO_SRGB * rgb);
+  let v = max(e.r, max(e.g, e.b));
+  let c = v - min(e.r, min(e.g, e.b));
+  let fade = smoothstep(0.0, HSL_HSV_NEUTRAL_CHROMA, c);
+  if (v <= 0.0 || fade <= 0.0) {
+    return rgb;
+  }
+
+  var hue: f32;
+  if (v == e.r) {
+    hue = 60.0 * (e.g - e.b) / c;
+  } else if (v == e.g) {
+    hue = 60.0 * ((e.b - e.r) / c + 2.0);
+  } else {
+    hue = 60.0 * ((e.r - e.g) / c + 4.0);
+  }
+  hue = (hue + 360.0) % 360.0;
+  let adj = mix(HSL_NEUTRAL, hsl_band_adjust(hue), fade);
+
+  let out_v = v * adj.z;
+  let out_c = c * adj.y * adj.z;
+  let out_h = (hue + adj.x + 360.0) % 360.0;
+  let k = (vec3f(5.0, 3.0, 1.0) + out_h / 60.0) % 6.0;
+  let out = out_v - out_c * clamp(min(k, 4.0 - k), vec3f(0.0), vec3f(1.0));
+  return M_SRGB_TO_WORKING * decode_srgb(out);
+}
+
 fn develop(source: vec3f) -> vec3f {
   var rgb = source;
 
@@ -80,7 +187,14 @@ fn develop(source: vec3f) -> vec3f {
   // 9. Hue + Saturation (pre-composed matrix from CPU)
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
-  // 10. Vibrance — boost under-saturated pixels more
+  // 10. Per-colour hue / saturation / luminance, skipped while every band is neutral
+  if (params.hsl_mode > 1.5) {
+    rgb = hsl_hsv(rgb);
+  } else if (params.hsl_mode > 0.5) {
+    rgb = hsl_oklch(rgb);
+  }
+
+  // 11. Vibrance — boost under-saturated pixels more
   //
   // The whole step runs on the colour floored at black, because the saturation
   // it measures — the HSV one, (max - min) / max — has no meaning below zero.
@@ -115,7 +229,7 @@ fn develop(source: vec3f) -> vec3f {
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
 
-  // 11. Highlight roll-off — compresses everything above the shoulder into 0..1.
+  // 12. Highlight roll-off — compresses everything above the shoulder into 0..1.
   // Luminance mode scales the pixel and keeps its hue; per-channel mode
   // shoulders each channel, which desaturates bright colour but shifts hue.
   if (params.rolloff_mode < 0.5) {

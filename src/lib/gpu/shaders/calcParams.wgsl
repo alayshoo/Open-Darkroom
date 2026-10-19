@@ -46,8 +46,33 @@ struct Sliders {
     usm_radius:           f32,   // 108
     usm_luma_threshold:   f32,   // 112
     usm_detail_threshold: f32,   // 116
-}                                // 120 bytes of fields; a uniform struct is
-                                 // 16-aligned, so the binding is 128.
+    // Per-colour HSL, hue / saturation / luminance for each band in hue order.
+    hsl_red_hue:          f32,   // 120   (-100–100)
+    hsl_red_sat:          f32,   // 124
+    hsl_red_lum:          f32,   // 128
+    hsl_orange_hue:       f32,   // 132
+    hsl_orange_sat:       f32,   // 136
+    hsl_orange_lum:       f32,   // 140
+    hsl_yellow_hue:       f32,   // 144
+    hsl_yellow_sat:       f32,   // 148
+    hsl_yellow_lum:       f32,   // 152
+    hsl_green_hue:        f32,   // 156
+    hsl_green_sat:        f32,   // 160
+    hsl_green_lum:        f32,   // 164
+    hsl_aqua_hue:         f32,   // 168
+    hsl_aqua_sat:         f32,   // 172
+    hsl_aqua_lum:         f32,   // 176
+    hsl_blue_hue:         f32,   // 180
+    hsl_blue_sat:         f32,   // 184
+    hsl_blue_lum:         f32,   // 188
+    hsl_purple_hue:       f32,   // 192
+    hsl_purple_sat:       f32,   // 196
+    hsl_purple_lum:       f32,   // 200
+    hsl_magenta_hue:      f32,   // 204
+    hsl_magenta_sat:      f32,   // 208
+    hsl_magenta_lum:      f32,   // 212
+}                                // 216 bytes of fields; a uniform struct is
+                                 // 16-aligned, so the binding is 224.
 
 // Where this render sits relative to the full-resolution image. Sharpness radii
 // are specified in full-resolution pixels, so anything working in texture space
@@ -67,12 +92,12 @@ struct SourceSpace {
     to_working: mat3x3<f32>,   //  0 — 48 bytes (3 cols × 16)
 }                              // total: 48 bytes
 
-// App-wide highlight roll-off preference. Neither an edit nor part of the view,
-// so it lives in a uniform of its own.
+// App-wide rendering preferences tuned from the debug panel. Neither an edit nor
+// part of the view, so they live in a uniform of their own.
 struct ToneMap {
     rolloff:      f32,   //  0   (0–100)
     rolloff_mode: f32,   //  4   (0 luminance, 1 per channel)
-    _pad0:        f32,   //  8
+    hsl_model:    f32,   //  8   (0 OKLCh, 1 HSV)
     _pad1:        f32,   // 12
 }                        // total: 16 bytes
 
@@ -234,6 +259,18 @@ const MAX_CLARITY_AMOUNT: f32 = 1.0;
 // drastic move, and the slider needed rescaling regardless: as a linear-light
 // offset on a -1..1 range, +0.2 took sRGB 32 to 128.
 const MAX_BRIGHTNESS: f32 = 0.25;
+
+// Hue of each HSL band's centre, in degrees, per colour model. The OKLCh ones are
+// the hues of the sRGB primaries, secondaries and their midpoints in OKLCh.
+const HSL_CENTRES_OKLCH = array<f32, 8>(29.2, 52.8, 109.8, 142.5, 194.8, 264.1, 293.8, 328.4);
+const HSL_CENTRES_HSV   = array<f32, 8>(0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0);
+
+// A band's hue slider at its rail moves that band halfway to its neighbour, so a
+// band on its own can never overtake the next one.
+const HSL_HUE_REACH: f32 = 0.5;
+
+// Lightness scale at the luminance rail, in log2 units.
+const MAX_HSL_LIGHTNESS: f32 = 0.5;
 
 
 // A band whose kernel has shrunk below a pixel fades out rather than aliasing.
@@ -434,6 +471,45 @@ fn calc_hue_sat_matrix() -> mat4x4<f32> {
 }
 
 
+// ── Per-colour HSL bands ─────────────────────────────────────────────────────
+
+// Returns whether any band is away from neutral.
+fn calc_hsl_bands() -> bool {
+    var s = array<vec3f, 8>(
+        vec3f(sliders.hsl_red_hue, sliders.hsl_red_sat, sliders.hsl_red_lum),
+        vec3f(sliders.hsl_orange_hue, sliders.hsl_orange_sat, sliders.hsl_orange_lum),
+        vec3f(sliders.hsl_yellow_hue, sliders.hsl_yellow_sat, sliders.hsl_yellow_lum),
+        vec3f(sliders.hsl_green_hue, sliders.hsl_green_sat, sliders.hsl_green_lum),
+        vec3f(sliders.hsl_aqua_hue, sliders.hsl_aqua_sat, sliders.hsl_aqua_lum),
+        vec3f(sliders.hsl_blue_hue, sliders.hsl_blue_sat, sliders.hsl_blue_lum),
+        vec3f(sliders.hsl_purple_hue, sliders.hsl_purple_sat, sliders.hsl_purple_lum),
+        vec3f(sliders.hsl_magenta_hue, sliders.hsl_magenta_sat, sliders.hsl_magenta_lum),
+    );
+    var centres = HSL_CENTRES_OKLCH;
+    if (tone_map.hsl_model > 0.5) {
+        centres = HSL_CENTRES_HSV;
+    }
+
+    var active = false;
+    for (var i = 0u; i < 8u; i++) {
+        let c    = centres[i];
+        let up   = (centres[(i + 1u) % 8u] - c + 360.0) % 360.0;
+        let down = (c - centres[(i + 7u) % 8u] + 360.0) % 360.0;
+        let hue  = s[i].x / 100.0;
+        let shift = hue * select(down, up, hue > 0.0) * HSL_HUE_REACH;
+
+        params.hsl_bands[i] = vec4f(
+            shift,
+            1.0 + s[i].y / 100.0,
+            exp2(s[i].z / 100.0 * MAX_HSL_LIGHTNESS),
+            c,
+        );
+        active = active || any(s[i] != vec3f(0.0));
+    }
+    return active;
+}
+
+
 // ── Main entry point (single invocation) ─────────────────────────────────────
 
 @compute @workgroup_size(1)
@@ -480,7 +556,7 @@ fn main() {
     params.vibrance      = sliders.vibrance / 100.0;
     params.rolloff_start = 1.0 - clamp(tone_map.rolloff / 100.0, 0.0, 1.0) * MAX_ROLLOFF_SPAN;
     params.rolloff_mode  = tone_map.rolloff_mode;
-    params._pad7         = 0.0;
+    params.hsl_mode      = select(0.0, 1.0 + tone_map.hsl_model, calc_hsl_bands());
 
     // Sharpness. Every radius is a full-resolution measurement, so each has to be
     // brought into the texture space this render actually works in before its

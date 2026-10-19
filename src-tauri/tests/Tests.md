@@ -22,7 +22,7 @@ Six passes, and the tests are split along the same seams.
 
 ```
 calcParams.wgsl        compute — sliders + view + tone map → Params, SharpParams
-develop.wgsl           steps 1-11, into the perceptual working space
+develop.wgsl           steps 1-12, into the perceptual working space
 calcSharpTexture.wgsl  h_main — luma, blurred along x at four scales
 calcSharpTexture.wgsl  v_main — blurs finished, three bands subtracted out
 composite.wgsl         the bands applied by scaling the colour
@@ -61,7 +61,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `sharp_params_struct_is_identical_across_every_shader` | `SharpParams` same in all 3 WGSL files |
 | `sharp_params_struct_matches_the_declared_size` | `SharpParams` = 48 bytes |
 | `params_field_offsets_match_the_readback_accessors` | test harness offsets still valid |
-| `develop_and_histogram_apply_the_same_chain` | steps 1-10 have not drifted between the two copies |
+| `develop_and_histogram_apply_the_same_chain` | steps 1-11 have not drifted between the two copies |
 | `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
 | `typescript_matches_the_cancelled_open_sentinel` | the string that tells a cancelled open from a failed one |
 | `the_preview_and_the_histogram_share_one_output_transform` | both see the struct, the transform and the compression, and bind the uniform |

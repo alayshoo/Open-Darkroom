@@ -420,7 +420,7 @@ impl Params {
 
     /// Every meaningful lane, skipping the explicit padding slots.
     pub fn significant_values(&self) -> Vec<(usize, f32)> {
-        const PADDING: [usize; 8] = [21, 22, 23, 27, 31, 35, 43, 63];
+        const PADDING: [usize; 7] = [21, 22, 23, 27, 31, 35, 43];
         self.0
             .iter()
             .enumerate()

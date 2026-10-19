@@ -4,7 +4,7 @@
 
 import { OUTPUT_SPACE_IDS, type OutputSpaceId } from "./outputSpace";
 import { settings } from "$lib/settings/settings.svelte";
-import { defaultToneMap, type RolloffMode, type ToneMap } from "$lib/types/toneMap";
+import { defaultToneMap, type HslModel, type RolloffMode, type ToneMap } from "$lib/types/toneMap";
 
 /** Triangles shown by default: sRGB and the working space. */
 const INITIAL: readonly OutputSpaceId[] = ["srgb", "rec2020"];
@@ -35,13 +35,16 @@ class ColorSpaceDebug {
     rolloff = $state(defaultToneMap.rolloff);
     rolloffMode = $state<RolloffMode>(defaultToneMap.rolloffMode);
 
+    /** Colour model the per-colour HSL bands work in. */
+    hslModel = $state<HslModel>(defaultToneMap.hslModel);
+
     /**
-     * The roll-off the chain and the export use. It outlives closing the panel,
-     * but turning the debug tools off drops it.
+     * The preferences the chain and the export use. They outlive closing the
+     * panel, but turning the debug tools off drops them.
      */
     get toneMap(): ToneMap {
         if (!settings.debugTools) return defaultToneMap;
-        return { rolloff: this.rolloff, rolloffMode: this.rolloffMode };
+        return { rolloff: this.rolloff, rolloffMode: this.rolloffMode, hslModel: this.hslModel };
     }
 
     toggle() {

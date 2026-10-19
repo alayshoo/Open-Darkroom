@@ -148,6 +148,12 @@ fn wgsl_size(ty: &str) -> usize {
         // A mat3x3 has 16-byte column stride, so it occupies 48 bytes, not 36.
         "mat3x3<f32>" => 48,
         "mat4x4<f32>" => 64,
+        array if array.starts_with("array<") => {
+            let (elem, count) = array["array<".len()..array.len() - 1]
+                .rsplit_once(',')
+                .unwrap_or_else(|| panic!("unsized array in layout calculation: {array}"));
+            wgsl_size(elem.trim()) * count.trim().parse::<usize>().expect("array length")
+        }
         other => panic!("unhandled WGSL type in layout calculation: {other}"),
     }
 }
@@ -478,7 +484,7 @@ fn wgsl_region(source: &str, label: &str, start_marker: &str, end_marker: &str) 
         .collect()
 }
 
-/// Steps 1-10 of the adjustment chain, which every chain shader must share.
+/// Steps 1-11 of the adjustment chain, which every chain shader must share.
 fn develop_chain(source: &str, label: &str) -> Vec<String> {
     wgsl_region(
         source,

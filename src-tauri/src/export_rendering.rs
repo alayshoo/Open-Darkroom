@@ -47,7 +47,7 @@ pub const SHARP_PARAMS_BYTES: u64 = 48;
 /// `mat3x3<f32>`, three 16-byte columns.
 pub const SOURCE_SPACE_BYTES: u64 = 48;
 
-/// Size of the `ToneMap` uniform read by calcParams.wgsl: two f32 of payload,
+/// Size of the `ToneMap` uniform read by calcParams.wgsl: three f32 of payload,
 /// padded to the 16 bytes a uniform struct binds at.
 pub const TONE_MAP_BYTES: usize = 16;
 
@@ -116,20 +116,20 @@ pub fn chunk_rows_for_margin(margin: u32) -> u32 {
 
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
-pub const PARAMS_BYTES: u64 = 256;
+pub const PARAMS_BYTES: u64 = 384;
 
 /// Size of the `OutputSpace` uniform read by colorSpaceEncode.wgsl and
 /// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, then two
 /// u32, padded to the 16 bytes a uniform struct binds at.
 pub const OUTPUT_SPACE_BYTES: u64 = 160;
 
-/// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 30
-/// f32 fields occupy 120 bytes; a uniform struct is bound 16-aligned, so the
+/// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 54
+/// f32 fields occupy 216 bytes; a uniform struct is bound 16-aligned, so the
 /// last 8 bytes are tail padding and are never written.
-pub const SLIDERS_BYTES: usize = 128;
+pub const SLIDERS_BYTES: usize = 224;
 
 /// Number of f32 fields in the `Sliders` struct, ahead of the tail padding.
-pub const SLIDER_COUNT: usize = 30;
+pub const SLIDER_COUNT: usize = 54;
 
 /// Size of the `View` uniform consumed by calcParams.wgsl. Three f32 of payload,
 /// padded to the 16 bytes a uniform struct binds at.
@@ -173,6 +173,30 @@ pub struct SlidersPayload {
     pub usm_radius:           f32,
     pub usm_luma_threshold:   f32,
     pub usm_detail_threshold: f32,
+    pub hsl_red_hue:          f32,
+    pub hsl_red_sat:          f32,
+    pub hsl_red_lum:          f32,
+    pub hsl_orange_hue:       f32,
+    pub hsl_orange_sat:       f32,
+    pub hsl_orange_lum:       f32,
+    pub hsl_yellow_hue:       f32,
+    pub hsl_yellow_sat:       f32,
+    pub hsl_yellow_lum:       f32,
+    pub hsl_green_hue:        f32,
+    pub hsl_green_sat:        f32,
+    pub hsl_green_lum:        f32,
+    pub hsl_aqua_hue:         f32,
+    pub hsl_aqua_sat:         f32,
+    pub hsl_aqua_lum:         f32,
+    pub hsl_blue_hue:         f32,
+    pub hsl_blue_sat:         f32,
+    pub hsl_blue_lum:         f32,
+    pub hsl_purple_hue:       f32,
+    pub hsl_purple_sat:       f32,
+    pub hsl_purple_lum:       f32,
+    pub hsl_magenta_hue:      f32,
+    pub hsl_magenta_sat:      f32,
+    pub hsl_magenta_lum:      f32,
     /// App-wide preference rather than an edit, carried here so every render
     /// path receives it. Packed into its own uniform, not the `Sliders` one.
     #[serde(default)]
@@ -215,6 +239,30 @@ impl Default for SlidersPayload {
             usm_radius:           1.0,
             usm_luma_threshold:   0.0,
             usm_detail_threshold: 0.0,
+            hsl_red_hue:          0.0,
+            hsl_red_sat:          0.0,
+            hsl_red_lum:          0.0,
+            hsl_orange_hue:       0.0,
+            hsl_orange_sat:       0.0,
+            hsl_orange_lum:       0.0,
+            hsl_yellow_hue:       0.0,
+            hsl_yellow_sat:       0.0,
+            hsl_yellow_lum:       0.0,
+            hsl_green_hue:        0.0,
+            hsl_green_sat:        0.0,
+            hsl_green_lum:        0.0,
+            hsl_aqua_hue:         0.0,
+            hsl_aqua_sat:         0.0,
+            hsl_aqua_lum:         0.0,
+            hsl_blue_hue:         0.0,
+            hsl_blue_sat:         0.0,
+            hsl_blue_lum:         0.0,
+            hsl_purple_hue:       0.0,
+            hsl_purple_sat:       0.0,
+            hsl_purple_lum:       0.0,
+            hsl_magenta_hue:      0.0,
+            hsl_magenta_sat:      0.0,
+            hsl_magenta_lum:      0.0,
             tone_map:             ToneMapPayload::default(),
         }
     }
@@ -231,24 +279,41 @@ pub enum RolloffMode {
     PerChannel,
 }
 
-/// The highlight roll-off preference. Strength 0 leaves the chain untouched.
+/// Colour model the per-colour HSL bands are measured and adjusted in.
+#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum HslModel {
+    #[default]
+    Oklch,
+    Hsv,
+}
+
+/// App-wide rendering preferences tuned from the debug panel. Roll-off strength
+/// 0 leaves the chain untouched.
 #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToneMapPayload {
     /// 0–100.
     pub rolloff: f32,
     pub rolloff_mode: RolloffMode,
+    #[serde(default)]
+    pub hsl_model: HslModel,
 }
 
-/// Pack the roll-off into the uniform buffer matching the WGSL `ToneMap` struct.
+/// Pack the preferences into the uniform buffer matching the WGSL `ToneMap` struct.
 pub fn tone_map_to_bytes(t: &ToneMapPayload) -> [u8; TONE_MAP_BYTES] {
     let mode: f32 = match t.rolloff_mode {
         RolloffMode::Luminance => 0.0,
         RolloffMode::PerChannel => 1.0,
     };
+    let hsl_model: f32 = match t.hsl_model {
+        HslModel::Oklch => 0.0,
+        HslModel::Hsv => 1.0,
+    };
     let mut bytes = [0u8; TONE_MAP_BYTES];
     bytes[0..4].copy_from_slice(&t.rolloff.to_le_bytes());
     bytes[4..8].copy_from_slice(&mode.to_le_bytes());
+    bytes[8..12].copy_from_slice(&hsl_model.to_le_bytes());
     bytes
 }
 
@@ -289,6 +354,30 @@ pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
         s.usm_radius,
         s.usm_luma_threshold,
         s.usm_detail_threshold,
+        s.hsl_red_hue,
+        s.hsl_red_sat,
+        s.hsl_red_lum,
+        s.hsl_orange_hue,
+        s.hsl_orange_sat,
+        s.hsl_orange_lum,
+        s.hsl_yellow_hue,
+        s.hsl_yellow_sat,
+        s.hsl_yellow_lum,
+        s.hsl_green_hue,
+        s.hsl_green_sat,
+        s.hsl_green_lum,
+        s.hsl_aqua_hue,
+        s.hsl_aqua_sat,
+        s.hsl_aqua_lum,
+        s.hsl_blue_hue,
+        s.hsl_blue_sat,
+        s.hsl_blue_lum,
+        s.hsl_purple_hue,
+        s.hsl_purple_sat,
+        s.hsl_purple_lum,
+        s.hsl_magenta_hue,
+        s.hsl_magenta_sat,
+        s.hsl_magenta_lum,
     ];
     let mut bytes = [0u8; SLIDERS_BYTES];
     for (i, v) in values.iter().enumerate() {

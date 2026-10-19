@@ -27,7 +27,7 @@ function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
     };
 }
 
-// Steps 1-11, from the source image into the perceptual working space.
+// Steps 1-12, from the source image into the perceptual working space.
 export function createDevelopStage(gpu: GPUSession): RenderStage {
     return createRenderStage(gpu, {
         label: "Develop",
