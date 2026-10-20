@@ -17,7 +17,9 @@
 		{active}
 		onclick={() => ontoggle?.()}
 	>
-		<svg width="40" height="40" viewBox="0 0 24 24">
+		<!-- The view box is padded out past the 24-unit drawing, so the icon
+		     sits small and centred inside the larger chip. -->
+		<svg width="40" height="40" viewBox="-6 -6 36 36">
 			<path
 				d="M8 4.5V16H19.5M4.5 8H16V19.5"
 				fill="none"
