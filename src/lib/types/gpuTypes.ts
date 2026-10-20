@@ -69,6 +69,7 @@ export interface RenderStage {
 import type { Sliders } from "./imgParameters";
 import type { ToneMap } from "./toneMap";
 import type { CurveChannel } from "./curves";
+import type { Crop, CropView } from "./crop";
 
 export interface Renderer {
     // `srcToWorking` is passed alongside the texture rather than set separately
@@ -83,6 +84,9 @@ export interface Renderer {
     setToneMap: (toneMap: ToneMap) => void;
     // The baked point curves, or null while every curve is the identity.
     setCurves: (lut: Float32Array | null) => void;
+    // Which part of the image reaches the canvas, in preview pixels. The canvas
+    // has to be sized to match.
+    setCrop: (view: CropView) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
     requestRender: () => void;
@@ -102,6 +106,8 @@ export interface HistogramPipeline {
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
     setToneMap: (toneMap: ToneMap) => void;
     setCurves: (lut: Float32Array | null) => void;
+    // Only what the crop keeps is binned.
+    setCrop: (crop: Crop) => void;
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
     // in one submit. Omitting the target bins without drawing. The backdrop
     // gets one curve channel's bins in that curve's colour, for the curves editor.

@@ -13,6 +13,7 @@ use std::time::Instant;
 use wgpu::util::DeviceExt;
 
 use crate::color::{linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL};
+use crate::crop::{crop_view, crop_view_to_bytes, CropPayload};
 use crate::icc::{Matrix3, SourceSpace};
 use crate::output_space::OutputSpace;
 
@@ -513,12 +514,43 @@ pub async fn render_image(
     bit_depth: u8,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<Vec<u8>, String> {
-    render_image_with_chunk_rows(
+    render_cropped_image(
         pixels_u16,
         width,
         height,
         channels,
         sliders,
+        &CropPayload::FULL_FRAME,
+        space,
+        output,
+        bit_depth,
+        on_progress,
+    )
+    .await
+}
+
+/// Run the GPU pipeline over the cropped region and return raw RGB bytes at
+/// the dimensions `crop_view` gives for it.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_cropped_image(
+    pixels_u16: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    sliders: &SlidersPayload,
+    crop: &CropPayload,
+    space: &SourceSpace,
+    output: OutputSpace,
+    bit_depth: u8,
+    on_progress: impl Fn(f32) + Send + Sync,
+) -> Result<Vec<u8>, String> {
+    render_cropped_with_chunk_rows(
+        pixels_u16,
+        width,
+        height,
+        channels,
+        sliders,
+        crop,
         space,
         output,
         bit_depth,
@@ -549,6 +581,39 @@ pub async fn render_image_with_chunk_rows(
     height: u32,
     channels: usize,
     sliders: &SlidersPayload,
+    space: &SourceSpace,
+    output: OutputSpace,
+    bit_depth: u8,
+    chunk_rows: u32,
+    on_progress: impl Fn(f32) + Send + Sync,
+) -> Result<Vec<u8>, String> {
+    render_cropped_with_chunk_rows(
+        pixels_u16,
+        width,
+        height,
+        channels,
+        sliders,
+        &CropPayload::FULL_FRAME,
+        space,
+        output,
+        bit_depth,
+        chunk_rows,
+        on_progress,
+    )
+    .await
+}
+
+/// [`render_image_with_chunk_rows`] over a crop. `chunk_rows` counts output
+/// rows, and each chunk renders only the source region its rows sample from,
+/// padded by the blur margin on every side.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_cropped_with_chunk_rows(
+    pixels_u16: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    sliders: &SlidersPayload,
+    crop: &CropPayload,
     space: &SourceSpace,
     output: OutputSpace,
     bit_depth: u8,
@@ -941,7 +1006,10 @@ pub async fn render_image_with_chunk_rows(
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
-    let encode_bgl = bgl("encode_bgl", &[intermediate_entry(0), uniform_entry(1)]);
+    let encode_bgl = bgl(
+        "encode_bgl",
+        &[intermediate_entry(0), uniform_entry(1), uniform_entry(2)],
+    );
 
     let full_screen_pipeline = |label: &str,
                                 source: &str,
@@ -1026,60 +1094,83 @@ pub async fn render_image_with_chunk_rows(
 
     // ── 5. Process image chunk by chunk ───────────────────────────────────────
 
+    let view = crop_view(crop, width, height);
+    let (out_width, out_height) = (view.width, view.height);
+
     // Rgba8Unorm = 4 bytes/pixel, Rgba32Float = 16 bytes/pixel
     let bytes_per_texel = if bit_depth >= 16 { 16u32 } else { 4u32 };
-    let bytes_per_row_unpadded = width * bytes_per_texel;
+    let bytes_per_row_unpadded = out_width * bytes_per_texel;
     let padded_bytes_per_row = (bytes_per_row_unpadded + 255) & !255;
 
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
     let luts = space.luts(|v| v);
-    let total_pixels = (width * height) as usize;
+    let total_pixels = (out_width * out_height) as usize;
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
     let mut row_start = 0u32;
     let mut out_rgb_offset = 0usize;
 
-    // Rows rendered either side of the chunk purely to feed the blur, then
-    // discarded. At the top and bottom of the image there is nothing to fetch and
-    // the margin is naturally short — which is correct, since a single-pass
+    // Pixels rendered on every side of what a chunk samples, purely to feed the
+    // blur, then discarded. At the edges of the image there is nothing to fetch
+    // and the margin is naturally short — which is correct, since a single-pass
     // render clamps at those edges too.
-    let margin = sharp_margin_rows(sliders, width, height);
+    let margin = sharp_margin_rows(sliders, width, height) as i64;
 
-    // Intermediates the chain hands between its stages. Chunks share a height
-    // except at the ends of the image, so these are built once and reused rather
+    // Intermediates the chain hands between its stages. Chunks share a size
+    // except at the ends of the crop, so these are built once and reused rather
     // than reallocated per chunk — at up to 16 bytes per texel they are the
     // largest allocations in the loop.
     #[allow(clippy::type_complexity)]
     let mut intermediates: Option<(
-        u32,
+        (u32, u32),
         wgpu::TextureView,
         wgpu::TextureView,
         wgpu::TextureView,
         wgpu::TextureView,
     )> = None;
 
-    while row_start < height {
-        let row_end = (row_start + chunk_rows).min(height);
+    while row_start < out_height {
+        let row_end = (row_start + chunk_rows).min(out_height);
         let chunk_height = row_end - row_start;
 
-        // The padded region actually rendered, and where the kept rows sit
-        // inside it.
-        let pad_start = row_start.saturating_sub(margin);
-        let pad_end = (row_end + margin).min(height);
-        let pad_height = pad_end - pad_start;
-        let top_margin = row_start - pad_start;
+        // The source region actually rendered: what these output rows sample,
+        // grown by the margin and clamped to the image.
+        let [sx0, sy0, sx1, sy1] = view.source_texels(row_start..row_end);
+        let region_x0 = (sx0 - margin).clamp(0, width as i64 - 1) as u32;
+        let region_y0 = (sy0 - margin).clamp(0, height as i64 - 1) as u32;
+        let region_x1 = (sx1 + margin).clamp(region_x0 as i64 + 1, width as i64) as u32;
+        let region_y1 = (sy1 + margin).clamp(region_y0 as i64 + 1, height as i64) as u32;
+        let region_width = region_x1 - region_x0;
+        let region_height = region_y1 - region_y0;
 
-        let pixel_start = (pad_start * width) as usize;
-        let pixel_count = (pad_height * width) as usize;
+        let chunk_bytes = if region_width == width {
+            let pixel_start = (region_y0 * width) as usize;
+            let pixel_count = (region_height * width) as usize;
+            linearize_u16_f32(
+                &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels],
+                channels,
+                &luts,
+            )
+        } else {
+            let row_len = region_width as usize * channels;
+            let mut region = Vec::with_capacity(row_len * region_height as usize);
+            for y in region_y0..region_y1 {
+                let at = (y as usize * width as usize + region_x0 as usize) * channels;
+                region.extend_from_slice(&pixels_u16[at..at + row_len]);
+            }
+            linearize_u16_f32(&region, channels, &luts)
+        };
 
-        let src_u16 =
-            &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels];
-        let chunk_bytes = linearize_u16_f32(src_u16, channels, &luts);
+        let region_size = wgpu::Extent3d {
+            width: region_width,
+            height: region_height,
+            depth_or_array_layers: 1,
+        };
 
         let input_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("input_tex"),
-            size: wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
+            size: region_size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1098,24 +1189,21 @@ pub async fn render_image_with_chunk_rows(
             &chunk_bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width * LINEAR_F32_BYTES_PER_PIXEL as u32),
+                bytes_per_row: Some(region_width * LINEAR_F32_BYTES_PER_PIXEL as u32),
                 rows_per_image: None,
             },
-            wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
+            region_size,
         );
 
         let input_view = input_tex.create_view(&Default::default());
 
-        if intermediates.as_ref().map(|(h, _, _, _, _)| *h) != Some(pad_height) {
+        let region_dims = (region_width, region_height);
+        if intermediates.as_ref().map(|(dims, _, _, _, _)| *dims) != Some(region_dims) {
             let intermediate = |label, format| {
                 device
                     .create_texture(&wgpu::TextureDescriptor {
                         label: Some(label),
-                        size: wgpu::Extent3d {
-                            width,
-                            height: pad_height,
-                            depth_or_array_layers: 1,
-                        },
+                        size: region_size,
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
@@ -1127,7 +1215,7 @@ pub async fn render_image_with_chunk_rows(
                     .create_view(&Default::default())
             };
             intermediates = Some((
-                pad_height,
+                region_dims,
                 intermediate("develop_tex", WORKING_FORMAT),
                 intermediate("sharp_h_tex", SHARP_FORMAT),
                 intermediate("detail_tex", SHARP_FORMAT),
@@ -1139,7 +1227,7 @@ pub async fn render_image_with_chunk_rows(
 
         let output_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("output_tex"),
-            size: wgpu::Extent3d { width, height: pad_height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: out_width, height: chunk_height, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1220,6 +1308,15 @@ pub async fn render_image_with_chunk_rows(
             ],
         });
 
+        // The crop as this chunk sees it: from its own first row, and from the
+        // corner of the region rather than of the image.
+        let chunk_view = view.shifted([region_x0 as f64, region_y0 as f64], row_start);
+        let crop_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("crop_buf"),
+            contents: &crop_view_to_bytes(&chunk_view),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
         let encode_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("encode_bg"),
             layout: &encode_bgl,
@@ -1231,6 +1328,10 @@ pub async fn render_image_with_chunk_rows(
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: output_space_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: crop_buf.as_entire_binding(),
                 },
             ],
         });
@@ -1272,12 +1373,11 @@ pub async fn render_image_with_chunk_rows(
             pass.draw(0..6, 0..1);
         }
 
-        // Copy back only the rows this chunk owns, leaving the margins behind.
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &output_tex,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: 0, y: top_margin, z: 0 },
+                origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {
@@ -1288,7 +1388,7 @@ pub async fn render_image_with_chunk_rows(
                     rows_per_image: None,
                 },
             },
-            wgpu::Extent3d { width, height: chunk_height, depth_or_array_layers: 1 },
+            wgpu::Extent3d { width: out_width, height: chunk_height, depth_or_array_layers: 1 },
         );
         queue.submit(std::iter::once(enc.finish()));
 
@@ -1308,10 +1408,10 @@ pub async fn render_image_with_chunk_rows(
             for row in 0..chunk_height as usize {
                 let row_src = &mapped[row * padded_bytes_per_row as usize
                     ..row * padded_bytes_per_row as usize + bytes_per_row_unpadded as usize];
-                let dst_base = out_rgb_offset + row * width as usize * bytes_per_output_pixel;
+                let dst_base = out_rgb_offset + row * out_width as usize * bytes_per_output_pixel;
                 if bit_depth >= 16 {
                     // Each channel is an f32 (4 bytes LE); convert to u16 and store LE.
-                    for px in 0..width as usize {
+                    for px in 0..out_width as usize {
                         let s = px * 16; // 16 bytes per Rgba32Float texel
                         let d = dst_base + px * 6;
                         for c in 0..3 {
@@ -1328,7 +1428,7 @@ pub async fn render_image_with_chunk_rows(
                         }
                     }
                 } else {
-                    for px in 0..width as usize {
+                    for px in 0..out_width as usize {
                         output_rgb[dst_base + px * 3]     = row_src[px * 4];
                         output_rgb[dst_base + px * 3 + 1] = row_src[px * 4 + 1];
                         output_rgb[dst_base + px * 3 + 2] = row_src[px * 4 + 2];
@@ -1338,17 +1438,17 @@ pub async fn render_image_with_chunk_rows(
         }
         staging_buf.unmap();
 
-        out_rgb_offset += chunk_height as usize * width as usize * bytes_per_output_pixel;
+        out_rgb_offset += chunk_height as usize * out_width as usize * bytes_per_output_pixel;
         row_start = row_end;
 
-        let progress = row_end as f32 / height as f32;
+        let progress = row_end as f32 / out_height as f32;
         on_progress(progress);
 
         println!(
             "export: rendered rows {}-{} / {} ({:.0}%) in {} ms total",
             row_start - chunk_height,
             row_end,
-            height,
+            out_height,
             progress * 100.0,
             t.elapsed().as_millis(),
         );

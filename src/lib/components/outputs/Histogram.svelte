@@ -12,6 +12,7 @@
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { type ImagePayload } from "$lib/types/imagePayload";
     import type { CurveChannel } from "$lib/types/curves";
+    import type { Crop } from "$lib/types/crop";
 
     let {
         sliders,
@@ -19,6 +20,7 @@
         imagePayload,
         curveCanvas = null,
         curveChannel = "master",
+        crop,
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
@@ -28,6 +30,7 @@
         curveCanvas?: HTMLCanvasElement | null;
         // Whose bins the backdrop shows.
         curveChannel?: CurveChannel;
+        crop: Crop;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -215,6 +218,12 @@
     $effect(() => {
         if (!histPipeline) return;
         histPipeline.setCurves(curveLut);
+        requestRender();
+    });
+
+    $effect(() => {
+        if (!histPipeline) return;
+        histPipeline.setCrop({ ...crop });
         requestRender();
     });
 

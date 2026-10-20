@@ -2,6 +2,7 @@
 
 import type { Sliders } from "$lib/types/imgParameters";
 import type { Curves } from "$lib/types/curves";
+import type { Crop } from "$lib/types/crop";
 
 export type Action =
   | {
@@ -25,7 +26,11 @@ export type Action =
       oldCurves: Curves;
       newCurves: Curves;
     }
+  | {
+      type: "crop";
+      oldValue: Crop;
+      newValue: Crop;
+    }
   // future-proof:
   // | { type: 'mask-draw'; maskId: string; strokeData: ... }
-  // | { type: 'crop'; oldRect: Rect; newRect: Rect }
   ;

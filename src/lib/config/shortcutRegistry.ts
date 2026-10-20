@@ -206,6 +206,13 @@ export const shortcutActions = [
         defaults: ["ctrl+v"],
     },
     {
+        id: "toggleCrop",
+        group: "edit",
+        label: "Crop",
+        description: "Enters the crop tool, and applies the crop on the way out.",
+        defaults: ["r"],
+    },
+    {
         id: "resetAdjustments",
         group: "edit",
         label: "Reset adjustments",

@@ -3,6 +3,7 @@
 // Modules are public so the integration tests in `tests/` can drive the
 // pipeline directly, without a running Tauri app.
 pub mod color;
+pub mod crop;
 pub mod icc;
 pub mod raw;
 pub mod output_space;
@@ -26,6 +27,7 @@ pub fn run() {
             wrap_cursor,
             grab_cursor,
             image_opening::open_image_file,
+            image_opening::crop_histograms,
             export::export_image,
         ])
         .run(tauri::generate_context!())

@@ -1,5 +1,6 @@
 <!-- src/lib/components/PreviewImageCanvas.svelte -->
 <script lang="ts">
+    import type { Snippet } from "svelte";
     import type {
         GPUCanvasLink,
         GPUImage,
@@ -13,17 +14,23 @@
     import { type Sliders } from "$lib/types/imgParameters";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
+    import { cropView, type Crop } from "$lib/types/crop";
 
     // Props
     let {
         sliders,
         curveLut,
         imagePayload,
+        crop,
+        overlay,
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
         curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
+        crop: Crop;
+        // Drawn over the canvas, sized to it.
+        overlay?: Snippet;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -33,6 +40,11 @@
     let renderer: Renderer | null = $state(null);
     let canvasLink: GPUCanvasLink | null = $state(null);
     let image: GPUImage | null = $state(null);
+
+    // The part of the preview that reaches the canvas, which is sized to it.
+    let view = $derived(
+        imagePayload ? cropView(crop, imagePayload.width, imagePayload.height) : null,
+    );
 
     let slotWidth = $state(0);
     let slotHeight = $state(0);
@@ -71,10 +83,10 @@
     // most one device pixel, so the preview is downscaled or shown at native
     // size and never magnified to fill the slot.
     let displaySize = $derived.by(() => {
-        if (!imagePayload) return null;
+        if (!view) return null;
 
-        const nativeWidth = imagePayload.width / dpr;
-        const nativeHeight = imagePayload.height / dpr;
+        const nativeWidth = view.width / dpr;
+        const nativeHeight = view.height / dpr;
         if (!slotWidth || !slotHeight) return { w: nativeWidth, h: nativeHeight };
 
         const scale = Math.min(
@@ -113,11 +125,6 @@
 
         const localRenderer = renderer;
 
-        // Resize canvas to match image
-        canvas.width = imagePayload.width;
-        canvas.height = imagePayload.height;
-
-        // Re-link canvas after resize
         linkCanvas2GPU(canvas, gpu).then((link) => {
             canvasLink = link;
 
@@ -142,6 +149,19 @@
             );
             localRenderer.requestRender();
         });
+    });
+
+    // The crop is applied by the last stage, so a change resizes the canvas
+    // without touching the image already on the GPU.
+    $effect(() => {
+        if (!renderer || !image || !view) return;
+        if (canvas.width !== view.width || canvas.height !== view.height) {
+            canvas.width = view.width;
+            canvas.height = view.height;
+            void linkCanvas2GPU(canvas, gpu);
+        }
+        renderer.setCrop(view);
+        renderer.requestRender();
     });
 
     // The destination the chain encodes for: the display, unless the export
@@ -174,17 +194,27 @@
     });
 </script>
 
-<canvas
-    bind:this={canvas}
+<div
+    class="preview-frame relative"
     style={displaySize
         ? `width: ${displaySize.w}px; height: ${displaySize.h}px;`
         : "width: 0; height: 0;"}
-></canvas>
+>
+    <canvas bind:this={canvas}></canvas>
+    {#if displaySize}
+        {@render overlay?.()}
+    {/if}
+</div>
 
 <style>
-    canvas {
-        display: block;
+    .preview-frame {
         max-width: 100%;
         max-height: 100%;
+    }
+
+    canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
     }
 </style>

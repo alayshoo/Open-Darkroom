@@ -37,6 +37,18 @@ const VOTE: u32 = 256u;
 // warnings follow whatever the preview is currently being rendered for.
 @group(0) @binding(3) var<uniform> outputSpace: OutputSpace;
 
+//!include "chunks/cropView.wgsl"
+
+// The crop, mapped onto this texture, so only what will be kept is binned.
+@group(0) @binding(4) var<uniform> crop: CropView;
+
+fn in_crop(p: vec2f) -> bool {
+  let d = p - crop.origin;
+  let u = dot(d, crop.axis_x) / dot(crop.axis_x, crop.axis_x);
+  let v = dot(d, crop.axis_y) / dot(crop.axis_y, crop.axis_y);
+  return u >= 0.0 && u < crop.size.x && v >= 0.0 && v < crop.size.y;
+}
+
 // One pixel through the same chain develop.wgsl runs, ending in the destination
 // the bins measure — whichever space the preview is currently rendered for.
 fn developed_destination(coord: vec2u) -> vec3f {
@@ -86,7 +98,7 @@ fn main(
   // Both barriers have to be reached by every invocation in the workgroup, so
   // the edge of the image gates the work rather than returning out of it.
   let dimensions = textureDimensions(inputTexture);
-  if (gid.x < dimensions.x && gid.y < dimensions.y) {
+  if (gid.x < dimensions.x && gid.y < dimensions.y && in_crop(vec2f(gid.xy) + 0.5)) {
     accumulate(developed_destination(gid.xy));
   }
 

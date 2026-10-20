@@ -9,6 +9,7 @@
 
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
+    import CropOverlay from "$lib/components/outputs/CropOverlay.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
     import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
@@ -17,6 +18,7 @@
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
+    import CropButton from "$lib/components/inputs/cropButton.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -47,6 +49,8 @@
     } from "$lib/types/curves";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import { type Crop, FULL_FRAME, cropsEqual, isFullFrame } from "$lib/types/crop";
+    import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
     import { exportImage } from "$lib/utils/exportImage";
@@ -283,12 +287,71 @@
     async function handleOpenImage() {
         try {
             const payload = await openImage();
-            if (payload) imagePayload = payload;
+            if (payload) {
+                imagePayload = payload;
+                // A crop describes one frame, so it does not carry over the way
+                // the adjustments do.
+                crop = { ...FULL_FRAME };
+                isCropping = false;
+            }
         } catch (e) {
             imagePayload = null;
             console.error("Failed to open image:", e);
         }
     }
+
+    // ===== Crop =====
+
+    // What is applied, and what the overlay is editing while the tool is open.
+    // The preview shows the whole frame for as long as the tool is.
+    let crop: Crop = $state({ ...FULL_FRAME });
+    let draftCrop: Crop = $state({ ...FULL_FRAME });
+    let isCropping = $state(false);
+
+    function enterCrop() {
+        draftCrop = { ...crop };
+        isCropping = true;
+    }
+
+    function applyCrop() {
+        isCropping = false;
+        if (cropsEqual(draftCrop, crop)) return;
+        commit({ type: "crop", oldValue: { ...crop }, newValue: { ...draftCrop } });
+        crop = { ...draftCrop };
+    }
+
+    function cancelCrop() {
+        isCropping = false;
+    }
+
+    function toggleCrop() {
+        if (!imagePayload) return;
+        if (isCropping) applyCrop();
+        else enterCrop();
+    }
+
+    // The darkroom's per-channel histograms follow the crop, so a film border
+    // left outside it stops weighing on the black and white points.
+    let inputHistograms: ChannelHistograms | null = $state(null);
+    let histogramRequest = 0;
+
+    $effect(() => {
+        const payload = imagePayload;
+        const kept = { ...crop };
+        const request = ++histogramRequest;
+
+        if (!payload) {
+            inputHistograms = null;
+        } else if (isFullFrame(kept)) {
+            inputHistograms = { r: payload.histR, g: payload.histG, b: payload.histB };
+        } else {
+            cropHistograms(kept)
+                .then((h) => {
+                    if (request === histogramRequest) inputHistograms = h;
+                })
+                .catch((e) => console.error("Failed to bin the crop:", e));
+        }
+    });
 
     let isExportPending = $state(false);
     let showExportModal = $state(false);
@@ -318,8 +381,9 @@
         const unlisten = await listen("export:started", () => {
             showExportModal = true;
         });
+        if (isCropping) applyCrop();
         try {
-            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, exportSettings);
+            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, crop, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
@@ -349,16 +413,32 @@
         setCurves: (next) => {
             curves = cloneCurves(next);
         },
+        setCrop: (value) => {
+            crop = { ...value };
+            isCropping = false;
+        },
     };
 
     function commit(action: Action) {
         history.push(action);
     }
+
+    // Undo inside the crop tool first throws away an unapplied drag; only with
+    // nothing to throw away does it reach the history.
+    function leaveCropForHistory(): boolean {
+        if (!isCropping) return false;
+        const discarded = !cropsEqual(draftCrop, crop);
+        cancelCrop();
+        return discarded;
+    }
+
     function undo() {
+        if (leaveCropForHistory()) return;
         const a = history.undo();
         if (a) undoAction(a, stateAccessors);
     }
     function redo() {
+        leaveCropForHistory();
         const a = history.redo();
         if (a) applyAction(a, stateAccessors);
     }
@@ -478,6 +558,7 @@
             copyAdjustments: handleCopyAdjustments,
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
+            toggleCrop: toggleCrop,
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
@@ -502,9 +583,21 @@
         closeSettings: () => settings.close(),
         isSettingsOpen: () => settings.open,
     });
+
+    // Enter and Escape belong to the crop tool while it is open.
+    function handleWindowKeydown(e: KeyboardEvent) {
+        if (isCropping && !settings.open && (e.key === "Enter" || e.key === "Escape")) {
+            if (e.key === "Enter") applyCrop();
+            else cancelCrop();
+            e.preventDefault();
+            (document.activeElement as HTMLElement)?.blur();
+            return;
+        }
+        handleKeydown(e);
+    }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <TitleBar
     {undo}
@@ -520,7 +613,11 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="toolbar shrink-0"></div>
+    <div class="toolbar shrink-0">
+        <div class="toolbar-tools relative flex flex-col items-center">
+            <CropButton active={isCropping} ontoggle={toggleCrop} />
+        </div>
+    </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
         <div class="colour-space-bar shrink-0">
@@ -529,7 +626,18 @@
     {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
-            <PreviewImageCanvas {sliders} {curveLut} {imagePayload} />
+            <PreviewImageCanvas
+                {sliders}
+                {curveLut}
+                {imagePayload}
+                crop={isCropping ? FULL_FRAME : crop}
+            >
+                {#snippet overlay()}
+                    {#if isCropping}
+                        <CropOverlay bind:crop={draftCrop} />
+                    {/if}
+                {/snippet}
+            </PreviewImageCanvas>
         </div>
         {#if settings.debugTools && debugStats.enabled}
             <DebugStatsOverlay />
@@ -545,6 +653,7 @@
                     {sliders}
                     {curveLut}
                     {imagePayload}
+                    {crop}
                     curveCanvas={curveHistogramCanvas}
                     curveChannel={isRgb ? curveChannel : "master"}
                 />
@@ -1106,7 +1215,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histR ?? null}
+                                        histogramData={inputHistograms?.r ?? null}
                                         histogramChannel="r"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
@@ -1123,7 +1232,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histG ?? null}
+                                        histogramData={inputHistograms?.g ?? null}
                                         histogramChannel="g"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
@@ -1140,7 +1249,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histB ?? null}
+                                        histogramData={inputHistograms?.b ?? null}
                                         histogramChannel="b"
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
@@ -1295,6 +1404,13 @@
         min-width: 54px;
         z-index: 10;
         pointer-events: auto;
+    }
+
+    /* Clears the title bar the toolbar bleeds up behind, and sits above the
+       falloff painted by ::before. */
+    .toolbar-tools {
+        padding-top: 56px;
+        z-index: 1;
     }
 
     .toolbar::before {

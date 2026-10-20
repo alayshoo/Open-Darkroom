@@ -10,24 +10,29 @@
 	let {
 		label,
 		size = 28,
+		active = false,
 		onclick,
 		children,
 	}: {
 		label: string;
 		size?: number;
+		// Holds the face up, for a button standing in for a mode that is on.
+		active?: boolean;
 		onclick?: () => void;
 		children?: Snippet;
 	} = $props();
 </script>
 
 <button
-	class="bg relative flex border-0 rounded-[10px] p-0"
+	class="bg relative flex border-0 p-0"
+	class:active
 	style="--size: {size}px;"
 	{onclick}
 	aria-label={label}
+	aria-pressed={active ? true : undefined}
 	title={label}
 >
-	<div class="face glass absolute rounded-[7px]"></div>
+	<div class="face glass absolute"></div>
 	{@render children?.()}
 </button>
 
@@ -35,6 +40,7 @@
 	.bg {
 		width: var(--size);
 		height: var(--size);
+		border-radius: calc(var(--size) * 0.357);
 		background: transparent;
 		transition: transform 0.12s ease;
 	}
@@ -56,8 +62,10 @@
 
 		/* 24×22 inside the 28px box — the toggle thumb's exact dimensions, so
 		   the chip reads as one of the toggles sitting at the end of the row.
-		   The box itself stays square and keeps the hit area. */
-		inset: 3px 2px;
+		   The box itself stays square and keeps the hit area. Larger sizes
+		   scale the same proportions. */
+		inset: calc(var(--size) * 3 / 28) calc(var(--size) * 2 / 28);
+		border-radius: calc(var(--size) * 0.25);
 		box-sizing: border-box;
 		backdrop-filter: none;
 		-webkit-backdrop-filter: none;
@@ -70,7 +78,8 @@
 	}
 
 	.bg:hover .face,
-	.bg:active .face {
+	.bg:active .face,
+	.bg.active .face {
 		opacity: 1;
 	}
 

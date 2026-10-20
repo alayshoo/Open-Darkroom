@@ -30,6 +30,7 @@ import { createFrameTimer } from "./pipelines/frameTimer";
 import { debugStats } from "./debugStats.svelte";
 import { createOutputSpaceBuffer } from "./outputSpaceBuffer";
 import type { OutputSpaceId } from "./outputSpace";
+import { CROP_VIEW_BUFFER_SIZE, cropViewToFloats, type CropView } from "$lib/types/crop";
 
 
 // The backdrop the preview sits on, and the encode stage's options as an
@@ -53,6 +54,12 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // Where the chain is rendering to. The buffer outlives every image, so the
     // destination can be set before one is open and survives a reload.
     const outputSpace = createOutputSpaceBuffer(gpu);
+
+    const cropBuffer = gpu.device.createBuffer({
+        label: "Crop View Uniform Buffer",
+        size: CROP_VIEW_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
 
     // The sliders and the view are forwarded straight to calcParams, but they are
     // also kept here: whether the blur passes are worth recording is a decision
@@ -159,6 +166,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         encodeBindGroup = createStageBindGroup(gpu, colorSpaceEncode, [
             { binding: 0, resource: compositeView },
             { binding: 1, resource: { buffer: outputSpace.buffer } },
+            { binding: 2, resource: { buffer: cropBuffer } },
         ]);
     }
 
@@ -175,6 +183,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
     function setCurves(lut: Float32Array | null) {
         calcParams.updateCurves(lut);
+    }
+
+    function setCrop(view: CropView) {
+        gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view));
     }
 
     function setSliders(sliders: Sliders) {
@@ -349,6 +361,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
         calcParams.destroy();
         outputSpace.destroy();
+        cropBuffer.destroy();
         frameTimer.destroy();
         developTexture?.destroy();
         sharpHTexture?.destroy();
@@ -360,6 +373,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // — which is what an unproofed preview renders for.
     setSliders( defaultSlidersRGB );
     setOutputSpace(gpu.displaySpace, null);
+    setCrop({ width: 1, height: 1, origin: [0, 0], axisX: [1, 0], axisY: [0, 1] });
 
-    return { loadImage, setSliders, setOutputSpace, setView, setToneMap, setCurves, requestRender, destroy };
+    return {
+        loadImage, setSliders, setOutputSpace, setView, setToneMap, setCurves, setCrop,
+        requestRender, destroy,
+    };
 }

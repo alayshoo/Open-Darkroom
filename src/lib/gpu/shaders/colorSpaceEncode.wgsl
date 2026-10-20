@@ -24,9 +24,13 @@
 //!include "chunks/tone.wgsl"
 //!include "chunks/luma.wgsl"
 //!include "chunks/outputTransform.wgsl"
+//!include "chunks/cropView.wgsl"
 
 @group(0) @binding(0) var compositeTexture: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> outputSpace: OutputSpace;
+// The crop is applied here, after sharpening, so the blurs near its edges still
+// see the pixels beyond it.
+@group(0) @binding(2) var<uniform> crop: CropView;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
@@ -42,9 +46,30 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f 
   return vec4f(pos[vertexIndex], 0.0, 1.0);
 }
 
+// Bilinear by hand, since the working format cannot be filtered. A point on a
+// texel centre returns that texel untouched, which keeps an unrotated crop
+// bit-exact.
+fn sample_composite(src: vec2f) -> vec4f {
+  let p = src - 0.5;
+  let base = floor(p);
+  let f = p - base;
+  let i = vec2i(base);
+  let last = vec2i(textureDimensions(compositeTexture)) - 1;
+
+  let c00 = textureLoad(compositeTexture, clamp(i, vec2i(0), last), 0);
+  if (all(f == vec2f(0.0))) {
+    return c00;
+  }
+  let c10 = textureLoad(compositeTexture, clamp(i + vec2i(1, 0), vec2i(0), last), 0);
+  let c01 = textureLoad(compositeTexture, clamp(i + vec2i(0, 1), vec2i(0), last), 0);
+  let c11 = textureLoad(compositeTexture, clamp(i + vec2i(1, 1), vec2i(0), last), 0);
+  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
-  let c = textureLoad(compositeTexture, vec2i(position.xy), 0);
+  let src = crop.origin + position.x * crop.axis_x + position.y * crop.axis_y;
+  let c = sample_composite(src);
 
   // The working curve is undone exactly: encode_srgb and decode_srgb both pass
   // values outside 0..1 through their linear segment, so the headroom and the
