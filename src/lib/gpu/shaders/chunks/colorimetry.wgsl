@@ -1,5 +1,5 @@
-// Working space ↔ CIE XYZ and Oklab, for the colour-space tools. Checked against
-// src/lib/gpu/outputSpace.ts by src-tauri/tests/shader_contracts.rs.
+// Working space ↔ CIE XYZ and Oklab, for the colour-space tools and the HSL bands.
+// Checked against src/lib/gpu/outputSpace.ts by src-tauri/tests/shader_contracts.rs.
 
 // Linear Rec.2020 → CIE XYZ (D65), column-major. The middle row is LUMA.
 const M_WORKING_TO_XYZ = mat3x3<f32>(

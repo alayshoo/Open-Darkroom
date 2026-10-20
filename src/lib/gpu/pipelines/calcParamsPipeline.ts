@@ -1,14 +1,14 @@
 // src/lib/gpu/pipelines/calcParamsPipeline.ts
 
-import type { Sliders } from "$lib/types/imgParameters";
+import { HSL_KEYS, type Sliders } from "$lib/types/imgParameters";
 import type { GPUSession } from "$lib/types/gpuTypes";
 import { defaultToneMap, type ToneMap } from "$lib/types/toneMap";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
 
-// 30 f32 fields = 120 bytes, rounded up to the 16-byte alignment a uniform
+// 54 f32 fields = 216 bytes, rounded up to the 16-byte alignment a uniform
 // struct is bound at.
-export const SLIDERS_BUFFER_SIZE = 128;
-export const PARAMS_BUFFER_SIZE  = 256;  // Params struct (must match shader)
+export const SLIDERS_BUFFER_SIZE = 224;
+export const PARAMS_BUFFER_SIZE  = 384;  // Params struct (must match shader)
 export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 // SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
@@ -245,5 +245,6 @@ function slidersToArray(s: Sliders): Float32Array {
         s.usmRadius,
         s.usmLumaThreshold,
         s.usmDetailThreshold,
+        ...HSL_KEYS.map((key) => s[key]),
     ]);
 }

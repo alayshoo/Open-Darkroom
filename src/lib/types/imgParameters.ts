@@ -1,7 +1,7 @@
 // $lib/types/imgParameters.ts
 
 // Sliders is the type used in the UI
-export interface Sliders {
+export interface Sliders extends Record<HslKey, number> {
     invert: boolean;
     redBlackPoint: number;
     greenBlackPoint: number;
@@ -33,6 +33,25 @@ export interface Sliders {
     usmLumaThreshold: number;
     usmDetailThreshold: number;
 }
+
+/** The per-colour HSL bands, in hue order. */
+export const HSL_BANDS = ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"] as const;
+export type HslBand = (typeof HSL_BANDS)[number];
+export type HslChannel = "Hue" | "Sat" | "Lum";
+export type HslKey = `hsl${Capitalize<HslBand>}${HslChannel}`;
+
+export function hslKey(band: HslBand, channel: HslChannel): HslKey {
+    return `hsl${band[0].toUpperCase()}${band.slice(1)}${channel}` as HslKey;
+}
+
+export const HSL_KEYS: HslKey[] = HSL_BANDS.flatMap((band) =>
+    (["Hue", "Sat", "Lum"] as const).map((channel) => hslKey(band, channel)),
+);
+
+const HSL_NEUTRAL = Object.fromEntries(HSL_KEYS.map((key) => [key, 0])) as Record<HslKey, number>;
+
+/** Below this a numeric slider counts as sitting on its target value. */
+export const SLIDER_TOLERANCE = 1e-6;
 
 // These are the default values of the slider values in RGB mode
 export const defaultSlidersRGB: Sliders = {
@@ -68,6 +87,7 @@ export const defaultSlidersRGB: Sliders = {
     usmRadius: 1.0,
     usmLumaThreshold: 0,
     usmDetailThreshold: 0,
+    ...HSL_NEUTRAL,
 };
 
 // These are the default values of the slider values in BW mode
@@ -102,6 +122,7 @@ export const defaultSlidersBW: Sliders = {
     usmRadius: 1.0,
     usmLumaThreshold: 0,
     usmDetailThreshold: 0,
+    ...HSL_NEUTRAL,
 };
 
 /* The two control modes own disjoint halves of the slider set — the darkroom

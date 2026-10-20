@@ -29,6 +29,7 @@ const VOTE: u32 = 256u;
 
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
+//!include "chunks/colorimetry.wgsl"
 //!include "chunks/developChain.wgsl"
 //!include "chunks/outputTransform.wgsl"
 

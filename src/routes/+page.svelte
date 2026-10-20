@@ -21,6 +21,7 @@
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
+    import HslBandGroup from "$lib/components/inputs/values/HslBandGroup.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
@@ -32,6 +33,8 @@
         defaultSlidersBW,
         overridesBW,
         modeKeys,
+        HSL_KEYS,
+        SLIDER_TOLERANCE,
     } from "$lib/types/imgParameters";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -395,30 +398,36 @@
 
     // Always the colour defaults: in B&W the overridden keys are diverted to
     // the saved colour values, leaving the mode itself untouched.
-    function handleResetAdjustments() {
+    function resetKeys(keys: readonly (keyof Sliders)[]) {
         const next: Partial<Sliders> = {};
-        for (const key of activeKeys) {
+        for (const key of keys) {
             (next as any)[key] = defaultSlidersRGB[key];
         }
         applySliderSet(next);
     }
 
-    /* Whether a reset would change anything, judged on the same keys a reset
-       would write. The tolerance is there because animated values land on
-       their target through a lerp, which need not be bit-exact. */
-    let isIdentity = $derived.by(() => {
-        for (const key of activeKeys) {
-            if ((!isRgb || isColorAnimating) && key in overridesBW) continue;
-            const def = defaultSlidersRGB[key];
-            const val = sliders[key];
-            if (typeof def === "number" && typeof val === "number") {
-                if (Math.abs(val - def) > 1e-6) return false;
-            } else if (val !== def) {
-                return false;
-            }
+    const handleResetAdjustments = () => resetKeys(activeKeys);
+    const handleResetColourMixer = () => resetKeys(HSL_KEYS);
+
+    /* The tolerance is there because animated values land on their target
+       through a lerp, which need not be bit-exact. */
+    function isAtDefault(key: keyof Sliders) {
+        const def = defaultSlidersRGB[key];
+        const val = sliders[key];
+        if (typeof def === "number" && typeof val === "number") {
+            return Math.abs(val - def) <= SLIDER_TOLERANCE;
         }
-        return true;
-    });
+        return val === def;
+    }
+
+    let isColourMixerIdentity = $derived(HSL_KEYS.every(isAtDefault));
+
+    // Whether a reset would change anything, judged on the same keys it writes.
+    let isIdentity = $derived(
+        activeKeys.every(
+            (key) => ((!isRgb || isColorAnimating) && key in overridesBW) || isAtDefault(key),
+        ),
+    );
 
     // Frame stats start visible in a dev run and hidden in a release build, so
     // the numbers are there while working without shipping to a user. A release
@@ -1077,6 +1086,25 @@
                                                     newValue: newVal,
                                                 })}
                                         ></SingleValSliderGroup>
+                                        <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
+                                        <div class="flex flex-row items-center justify-between pb-1.5 pr-1.5">
+                                            <span class="section-title">Colour Mixer</span>
+                                            <RevertButton
+                                                visible={!isColourMixerIdentity}
+                                                label="Reset Colour Mixer"
+                                                onrevert={handleResetColourMixer}
+                                            />
+                                        </div>
+                                        <HslBandGroup
+                                            bind:sliders
+                                            onCommit={(key, oldVal, newVal) =>
+                                                commit({
+                                                    type: "slider",
+                                                    key,
+                                                    oldValue: oldVal,
+                                                    newValue: newVal,
+                                                })}
+                                        ></HslBandGroup>
                                         <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     </div>
                                 </div>

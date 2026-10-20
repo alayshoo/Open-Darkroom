@@ -46,8 +46,33 @@ struct Sliders {
     usm_radius:           f32,   // 108
     usm_luma_threshold:   f32,   // 112
     usm_detail_threshold: f32,   // 116
-}                                // 120 bytes of fields; a uniform struct is
-                                 // 16-aligned, so the binding is 128.
+    // Per-colour HSL, hue / saturation / luminance for each band in hue order.
+    hsl_red_hue:          f32,   // 120   (-100–100)
+    hsl_red_sat:          f32,   // 124
+    hsl_red_lum:          f32,   // 128
+    hsl_orange_hue:       f32,   // 132
+    hsl_orange_sat:       f32,   // 136
+    hsl_orange_lum:       f32,   // 140
+    hsl_yellow_hue:       f32,   // 144
+    hsl_yellow_sat:       f32,   // 148
+    hsl_yellow_lum:       f32,   // 152
+    hsl_green_hue:        f32,   // 156
+    hsl_green_sat:        f32,   // 160
+    hsl_green_lum:        f32,   // 164
+    hsl_aqua_hue:         f32,   // 168
+    hsl_aqua_sat:         f32,   // 172
+    hsl_aqua_lum:         f32,   // 176
+    hsl_blue_hue:         f32,   // 180
+    hsl_blue_sat:         f32,   // 184
+    hsl_blue_lum:         f32,   // 188
+    hsl_purple_hue:       f32,   // 192
+    hsl_purple_sat:       f32,   // 196
+    hsl_purple_lum:       f32,   // 200
+    hsl_magenta_hue:      f32,   // 204
+    hsl_magenta_sat:      f32,   // 208
+    hsl_magenta_lum:      f32,   // 212
+}                                // 216 bytes of fields; a uniform struct is
+                                 // 16-aligned, so the binding is 224.
 
 // Where this render sits relative to the full-resolution image. Sharpness radii
 // are specified in full-resolution pixels, so anything working in texture space
@@ -234,6 +259,25 @@ const MAX_CLARITY_AMOUNT: f32 = 1.0;
 // drastic move, and the slider needed rescaling regardless: as a linear-light
 // offset on a -1..1 range, +0.2 took sRGB 32 to 128.
 const MAX_BRIGHTNESS: f32 = 0.25;
+
+// OKLCh hue of each HSL band's centre, in degrees: the sRGB primaries,
+// secondaries and their midpoints.
+const HSL_CENTRES = array<f32, 8>(29.2, 52.8, 109.8, 142.5, 194.8, 264.1, 293.8, 328.4);
+
+// A band's hue slider at its rail moves that band halfway to its neighbour, so a
+// band on its own can never overtake the next one.
+const HSL_HUE_REACH: f32 = 0.5;
+
+// Combined shift of two neighbours moving towards each other, as a fraction of
+// the gap between them. The smoothstep crossfade between band centres has a
+// peak slope of 1.5, so this has to stay below 2/3 for hues to keep their order.
+const HSL_PAIR_REACH: f32 = 0.6;
+
+// Slider values closer to zero than this leave the bands switched off.
+const HSL_EPSILON: f32 = 1e-6;
+
+// Lightness scale at the luminance rail, in log2 units.
+const MAX_HSL_LIGHTNESS: f32 = 0.5;
 
 
 // A band whose kernel has shrunk below a pixel fades out rather than aliasing.
@@ -434,6 +478,59 @@ fn calc_hue_sat_matrix() -> mat4x4<f32> {
 }
 
 
+// ── Per-colour HSL bands ─────────────────────────────────────────────────────
+
+// Returns whether any band is away from neutral.
+fn calc_hsl_bands() -> bool {
+    var s = array<vec3f, 8>(
+        vec3f(sliders.hsl_red_hue, sliders.hsl_red_sat, sliders.hsl_red_lum),
+        vec3f(sliders.hsl_orange_hue, sliders.hsl_orange_sat, sliders.hsl_orange_lum),
+        vec3f(sliders.hsl_yellow_hue, sliders.hsl_yellow_sat, sliders.hsl_yellow_lum),
+        vec3f(sliders.hsl_green_hue, sliders.hsl_green_sat, sliders.hsl_green_lum),
+        vec3f(sliders.hsl_aqua_hue, sliders.hsl_aqua_sat, sliders.hsl_aqua_lum),
+        vec3f(sliders.hsl_blue_hue, sliders.hsl_blue_sat, sliders.hsl_blue_lum),
+        vec3f(sliders.hsl_purple_hue, sliders.hsl_purple_sat, sliders.hsl_purple_lum),
+        vec3f(sliders.hsl_magenta_hue, sliders.hsl_magenta_sat, sliders.hsl_magenta_lum),
+    );
+    var centres = HSL_CENTRES;
+
+    var spans: array<f32, 8>;
+    var shifts: array<f32, 8>;
+    for (var i = 0u; i < 8u; i++) {
+        spans[i] = (centres[(i + 1u) % 8u] - centres[i] + 360.0) % 360.0;
+    }
+    for (var i = 0u; i < 8u; i++) {
+        let hue = s[i].x / 100.0;
+        shifts[i] = hue * select(spans[(i + 7u) % 8u], spans[i], hue > 0.0) * HSL_HUE_REACH;
+    }
+    // Two neighbours shifted towards each other share one gap, so their
+    // combined shift is capped to keep the hue mapping between them monotonic.
+    // Only a band shifting up meets one shifting down, so no band is in two
+    // capped pairs.
+    for (var i = 0u; i < 8u; i++) {
+        let j = (i + 1u) % 8u;
+        let closing = shifts[i] - shifts[j];
+        let limit = spans[i] * HSL_PAIR_REACH;
+        if (closing > limit) {
+            shifts[i] *= limit / closing;
+            shifts[j] *= limit / closing;
+        }
+    }
+
+    var any_set = false;
+    for (var i = 0u; i < 8u; i++) {
+        params.hsl_bands[i] = vec4f(
+            shifts[i],
+            1.0 + s[i].y / 100.0,
+            exp2(s[i].z / 100.0 * MAX_HSL_LIGHTNESS),
+            centres[i],
+        );
+        any_set = any_set || any(abs(s[i]) > vec3f(HSL_EPSILON));
+    }
+    return any_set;
+}
+
+
 // ── Main entry point (single invocation) ─────────────────────────────────────
 
 @compute @workgroup_size(1)
@@ -480,7 +577,7 @@ fn main() {
     params.vibrance      = sliders.vibrance / 100.0;
     params.rolloff_start = 1.0 - clamp(tone_map.rolloff / 100.0, 0.0, 1.0) * MAX_ROLLOFF_SPAN;
     params.rolloff_mode  = tone_map.rolloff_mode;
-    params._pad7         = 0.0;
+    params.hsl_active    = select(0.0, 1.0, calc_hsl_bands());
 
     // Sharpness. Every radius is a full-resolution measurement, so each has to be
     // brought into the texture space this render actually works in before its

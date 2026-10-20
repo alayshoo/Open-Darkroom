@@ -1,6 +1,64 @@
-// Steps 1-11 of the adjustment chain: source channels in, unclamped linear
+// Steps 1-12 of the adjustment chain: source channels in, unclamped linear
 // working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
-// Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
+// Requires a `params` binding, chunks/luma.wgsl, chunks/tone.wgsl and
+// chunks/colorimetry.wgsl.
+
+// Linear Rec.2020 to and from OKLab's LMS, normalised so that white maps to
+// exactly (1, 1, 1), which keeps neutrals at zero chroma.
+const M_WORKING_TO_LMS = mat3x3<f32>(
+  vec3f(0.6167558, 0.2651330, 0.1001026),
+  vec3f(0.3601984, 0.6358394, 0.2039065),
+  vec3f(0.0230458, 0.0990276, 0.6959909),
+);
+const M_LMS_TO_WORKING = mat3x3<f32>(
+  vec3f( 2.1399068, -0.8847358, -0.0485737),
+  vec3f(-1.2463895,  2.1632308, -0.4545031),
+  vec3f( 0.1064827, -0.2784950,  1.5030769),
+);
+
+// Saturation (chroma over lightness) below which a pixel's hue is too unstable
+// to assign to a band. The colour adjustments fade in across it, so grain in the
+// neutrals is left alone. Lightness is floored so near-black noise stays out.
+const HSL_NEUTRAL_SAT: f32 = 0.06;
+const HSL_SAT_MIN_L: f32 = 0.2;
+
+// Hue shift, chroma scale, lightness scale.
+const HSL_NEUTRAL = vec3f(0.0, 1.0, 1.0);
+
+// The bands' adjustments at hue `h` (degrees). Each band crossfades into its
+// neighbours between their centres, so the weights always sum to one.
+fn hsl_band_adjust(h: f32) -> vec3f {
+  var lo = 7u;
+  for (var i = 0u; i < 8u; i++) {
+    if (h >= params.hsl_bands[i].w) {
+      lo = i;
+    }
+  }
+  let band_lo = params.hsl_bands[lo];
+  let band_hi = params.hsl_bands[(lo + 1u) % 8u];
+  let span = (band_hi.w - band_lo.w + 360.0) % 360.0;
+  let t = smoothstep(0.0, 1.0, ((h - band_lo.w + 360.0) % 360.0) / span);
+  return mix(band_lo.xyz, band_hi.xyz, t);
+}
+
+// Per-colour adjustment in OKLCh: hue rotates h, saturation scales C and
+// luminance scales L, each independently of the others.
+fn hsl_oklch(rgb: vec3f) -> vec3f {
+  let lab = M_LMS_TO_LAB * cbrt_signed(M_WORKING_TO_LMS * rgb);
+  let chroma = length(lab.yz);
+  let fade = smoothstep(0.0, HSL_NEUTRAL_SAT, chroma / max(lab.x, HSL_SAT_MIN_L));
+  if (fade <= 0.0) {
+    return rgb;
+  }
+  let hue = (degrees(atan2(lab.z, lab.y)) + 360.0) % 360.0;
+  let adj = mix(HSL_NEUTRAL, hsl_band_adjust(hue), fade);
+
+  let h = radians(hue + adj.x);
+  let c = chroma * adj.y;
+  let lms = M_LAB_TO_LMS * vec3f(lab.x * adj.z, c * cos(h), c * sin(h));
+  return M_LMS_TO_WORKING * (lms * lms * lms);
+}
+
 fn develop(source: vec3f) -> vec3f {
   var rgb = source;
 
@@ -80,7 +138,12 @@ fn develop(source: vec3f) -> vec3f {
   // 9. Hue + Saturation (pre-composed matrix from CPU)
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
-  // 10. Vibrance — boost under-saturated pixels more
+  // 10. Per-colour hue / saturation / luminance, skipped while every band is neutral
+  if (params.hsl_active > 0.5) {
+    rgb = hsl_oklch(rgb);
+  }
+
+  // 11. Vibrance — boost under-saturated pixels more
   //
   // The whole step runs on the colour floored at black, because the saturation
   // it measures — the HSV one, (max - min) / max — has no meaning below zero.
@@ -115,7 +178,7 @@ fn develop(source: vec3f) -> vec3f {
   let vibranceAmount = params.vibrance * (1.0 - pixelSat);
   rgb = mix(vec3f(luma_vib), vib_rgb, 1.0 + vibranceAmount);
 
-  // 11. Highlight roll-off — compresses everything above the shoulder into 0..1.
+  // 12. Highlight roll-off — compresses everything above the shoulder into 0..1.
   // Luminance mode scales the pixel and keeps its hue; per-channel mode
   // shoulders each channel, which desaturates bright colour but shifts hue.
   if (params.rolloff_mode < 0.5) {

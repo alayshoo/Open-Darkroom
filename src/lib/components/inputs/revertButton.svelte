@@ -3,16 +3,18 @@
 
 	let {
 		visible = true,
+		label = "Reset all adjustments",
 		onrevert,
 	}: {
 		visible?: boolean;
+		label?: string;
 		onrevert?: () => void;
 	} = $props();
 </script>
 
 <!-- Stays mounted and fades, so the row's layout never moves under it. -->
 <div class="revert-slot" class:shown={visible} aria-hidden={!visible}>
-	<GlassButton label="Reset all adjustments" onclick={() => onrevert?.()}>
+	<GlassButton {label} onclick={() => onrevert?.()}>
 		<svg width="28" height="28" viewBox="0 0 24 24">
 			<!-- The arc starts a few degrees past the top so its cap tucks in
 			     behind the head rather than poking out of it. -->

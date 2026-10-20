@@ -129,7 +129,7 @@ fn the_uniform_is_padded_out_to_its_bound_size() {
 /// side turns into a failed export, not a wrong pixel.
 #[test]
 fn the_export_payload_carries_the_sharpness_keys() {
-    let json = serde_json::json!({
+    let mut json = serde_json::json!({
         "invert": false,
         "redBlackPoint": 0.0,
         "greenBlackPoint": 0.0,
@@ -161,6 +161,11 @@ fn the_export_payload_carries_the_sharpness_keys() {
         "usmLumaThreshold": 100.0,
         "usmDetailThreshold": 100.0,
     });
+    for band in ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"] {
+        for channel in ["Hue", "Sat", "Lum"] {
+            json[format!("hsl{band}{channel}")] = 0.0.into();
+        }
+    }
 
     let parsed: SlidersPayload =
         serde_json::from_value(json).expect("the frontend payload must deserialise");

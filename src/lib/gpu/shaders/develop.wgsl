@@ -14,6 +14,7 @@
 
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
+//!include "chunks/colorimetry.wgsl"
 //!include "chunks/developChain.wgsl"
 
 // ---------- Vertex Shader ----------
