@@ -1,6 +1,6 @@
 // src/lib/gpu/pipelines/calcParamsPipeline.ts
 
-import type { Sliders } from "$lib/types/imgParameters";
+import { HSL_KEYS, type Sliders } from "$lib/types/imgParameters";
 import type { GPUSession } from "$lib/types/gpuTypes";
 import { defaultToneMap, type ToneMap } from "$lib/types/toneMap";
 import shaderSource from "../shaders/calcParams.wgsl?raw";
@@ -245,29 +245,6 @@ function slidersToArray(s: Sliders): Float32Array {
         s.usmRadius,
         s.usmLumaThreshold,
         s.usmDetailThreshold,
-        s.hslRedHue,
-        s.hslRedSat,
-        s.hslRedLum,
-        s.hslOrangeHue,
-        s.hslOrangeSat,
-        s.hslOrangeLum,
-        s.hslYellowHue,
-        s.hslYellowSat,
-        s.hslYellowLum,
-        s.hslGreenHue,
-        s.hslGreenSat,
-        s.hslGreenLum,
-        s.hslAquaHue,
-        s.hslAquaSat,
-        s.hslAquaLum,
-        s.hslBlueHue,
-        s.hslBlueSat,
-        s.hslBlueLum,
-        s.hslPurpleHue,
-        s.hslPurpleSat,
-        s.hslPurpleLum,
-        s.hslMagentaHue,
-        s.hslMagentaSat,
-        s.hslMagentaLum,
+        ...HSL_KEYS.map((key) => s[key]),
     ]);
 }

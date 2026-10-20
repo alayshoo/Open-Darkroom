@@ -1,8 +1,9 @@
 // Steps 1-12 of the adjustment chain: source channels in, unclamped linear
 // working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
-// Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
+// Requires a `params` binding, chunks/luma.wgsl, chunks/tone.wgsl and
+// chunks/colorimetry.wgsl.
 
-// OKLab from linear Rec.2020. The LMS rows are normalised so that white maps to
+// Linear Rec.2020 to and from OKLab's LMS, normalised so that white maps to
 // exactly (1, 1, 1), which keeps neutrals at zero chroma.
 const M_WORKING_TO_LMS = mat3x3<f32>(
   vec3f(0.6167558, 0.2651330, 0.1001026),
@@ -14,20 +15,12 @@ const M_LMS_TO_WORKING = mat3x3<f32>(
   vec3f(-1.2463895,  2.1632308, -0.4545031),
   vec3f( 0.1064827, -0.2784950,  1.5030769),
 );
-const M_LMS_TO_OKLAB = mat3x3<f32>(
-  vec3f(0.2104543,  1.9779985,  0.0259040),
-  vec3f(0.7936178, -2.4285922,  0.7827718),
-  vec3f(-0.0040720, 0.4505937, -0.8086758),
-);
-const M_OKLAB_TO_LMS = mat3x3<f32>(
-  vec3f(1.0,        1.0,        1.0),
-  vec3f(0.3963378, -0.1055613, -0.0894842),
-  vec3f(0.2158038, -0.0638542, -1.2914855),
-);
 
-// Chroma below which a pixel's hue is too unstable to assign to a band. The
-// colour adjustments fade in across it, so grain in the neutrals is left alone.
-const HSL_NEUTRAL_CHROMA: f32 = 0.03;
+// Saturation (chroma over lightness) below which a pixel's hue is too unstable
+// to assign to a band. The colour adjustments fade in across it, so grain in the
+// neutrals is left alone. Lightness is floored so near-black noise stays out.
+const HSL_NEUTRAL_SAT: f32 = 0.06;
+const HSL_SAT_MIN_L: f32 = 0.2;
 
 // Hue shift, chroma scale, lightness scale.
 const HSL_NEUTRAL = vec3f(0.0, 1.0, 1.0);
@@ -48,16 +41,12 @@ fn hsl_band_adjust(h: f32) -> vec3f {
   return mix(band_lo.xyz, band_hi.xyz, t);
 }
 
-fn signed_cbrt(v: vec3f) -> vec3f {
-  return sign(v) * pow(abs(v), vec3f(1.0 / 3.0));
-}
-
 // Per-colour adjustment in OKLCh: hue rotates h, saturation scales C and
 // luminance scales L, each independently of the others.
 fn hsl_oklch(rgb: vec3f) -> vec3f {
-  let lab = M_LMS_TO_OKLAB * signed_cbrt(M_WORKING_TO_LMS * rgb);
+  let lab = M_LMS_TO_LAB * cbrt_signed(M_WORKING_TO_LMS * rgb);
   let chroma = length(lab.yz);
-  let fade = smoothstep(0.0, HSL_NEUTRAL_CHROMA, chroma);
+  let fade = smoothstep(0.0, HSL_NEUTRAL_SAT, chroma / max(lab.x, HSL_SAT_MIN_L));
   if (fade <= 0.0) {
     return rgb;
   }
@@ -66,7 +55,7 @@ fn hsl_oklch(rgb: vec3f) -> vec3f {
 
   let h = radians(hue + adj.x);
   let c = chroma * adj.y;
-  let lms = M_OKLAB_TO_LMS * vec3f(lab.x * adj.z, c * cos(h), c * sin(h));
+  let lms = M_LAB_TO_LMS * vec3f(lab.x * adj.z, c * cos(h), c * sin(h));
   return M_LMS_TO_WORKING * (lms * lms * lms);
 }
 

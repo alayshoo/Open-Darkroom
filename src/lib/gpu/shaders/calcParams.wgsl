@@ -268,6 +268,14 @@ const HSL_CENTRES = array<f32, 8>(29.2, 52.8, 109.8, 142.5, 194.8, 264.1, 293.8,
 // band on its own can never overtake the next one.
 const HSL_HUE_REACH: f32 = 0.5;
 
+// Combined shift of two neighbours moving towards each other, as a fraction of
+// the gap between them. The smoothstep crossfade between band centres has a
+// peak slope of 1.5, so this has to stay below 2/3 for hues to keep their order.
+const HSL_PAIR_REACH: f32 = 0.6;
+
+// Slider values closer to zero than this leave the bands switched off.
+const HSL_EPSILON: f32 = 1e-6;
+
 // Lightness scale at the luminance rail, in log2 units.
 const MAX_HSL_LIGHTNESS: f32 = 0.5;
 
@@ -486,21 +494,38 @@ fn calc_hsl_bands() -> bool {
     );
     var centres = HSL_CENTRES;
 
+    var spans: array<f32, 8>;
+    var shifts: array<f32, 8>;
+    for (var i = 0u; i < 8u; i++) {
+        spans[i] = (centres[(i + 1u) % 8u] - centres[i] + 360.0) % 360.0;
+    }
+    for (var i = 0u; i < 8u; i++) {
+        let hue = s[i].x / 100.0;
+        shifts[i] = hue * select(spans[(i + 7u) % 8u], spans[i], hue > 0.0) * HSL_HUE_REACH;
+    }
+    // Two neighbours shifted towards each other share one gap, so their
+    // combined shift is capped to keep the hue mapping between them monotonic.
+    // Only a band shifting up meets one shifting down, so no band is in two
+    // capped pairs.
+    for (var i = 0u; i < 8u; i++) {
+        let j = (i + 1u) % 8u;
+        let closing = shifts[i] - shifts[j];
+        let limit = spans[i] * HSL_PAIR_REACH;
+        if (closing > limit) {
+            shifts[i] *= limit / closing;
+            shifts[j] *= limit / closing;
+        }
+    }
+
     var any_set = false;
     for (var i = 0u; i < 8u; i++) {
-        let c    = centres[i];
-        let up   = (centres[(i + 1u) % 8u] - c + 360.0) % 360.0;
-        let down = (c - centres[(i + 7u) % 8u] + 360.0) % 360.0;
-        let hue  = s[i].x / 100.0;
-        let shift = hue * select(down, up, hue > 0.0) * HSL_HUE_REACH;
-
         params.hsl_bands[i] = vec4f(
-            shift,
+            shifts[i],
             1.0 + s[i].y / 100.0,
             exp2(s[i].z / 100.0 * MAX_HSL_LIGHTNESS),
-            c,
+            centres[i],
         );
-        any_set = any_set || any(s[i] != vec3f(0.0));
+        any_set = any_set || any(abs(s[i]) > vec3f(HSL_EPSILON));
     }
     return any_set;
 }

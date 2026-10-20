@@ -214,6 +214,35 @@ fn camel_to_snake(name: &str) -> String {
 
 // ── Sliders: WGSL ↔ Rust ↔ TypeScript ─────────────────────────────────────────
 
+/// Snake-case names of the per-colour HSL sliders, in the order `HSL_KEYS`
+/// lists them in imgParameters.ts. The TypeScript packer and defaults expand
+/// that list rather than naming each field.
+fn ts_hsl_fields() -> Vec<String> {
+    let quoted = |anchor: &str| -> Vec<String> {
+        let at = common::IMG_PARAMETERS_TS
+            .find(anchor)
+            .unwrap_or_else(|| panic!("{anchor:?} not found in imgParameters.ts"))
+            + anchor.len();
+        let end = common::IMG_PARAMETERS_TS[at..].find(']').expect("unterminated list");
+        common::IMG_PARAMETERS_TS[at..at + end]
+            .split(',')
+            .map(|t| t.trim().trim_matches('"').to_string())
+            .filter(|t| !t.is_empty())
+            .collect()
+    };
+    let bands = quoted("HSL_BANDS = [");
+    let channels = quoted("(band) =>\n    ([");
+    assert_eq!((bands.len(), channels.len()), (8, 3), "{bands:?} {channels:?}");
+    bands
+        .iter()
+        .flat_map(|band| {
+            channels
+                .iter()
+                .map(move |channel| format!("hsl_{band}_{}", channel.to_lowercase()))
+        })
+        .collect()
+}
+
 #[test]
 fn sliders_struct_is_all_f32_and_matches_the_declared_size() {
     let fields = wgsl_struct(CALC_PARAMS_WGSL, "Sliders");
@@ -260,10 +289,15 @@ fn typescript_slider_packing_matches_the_wgsl_struct() {
         .map(|f| f.name)
         .collect();
 
-    let ts: Vec<String> = accessed_fields(CALC_PARAMS_PIPELINE_TS, "function slidersToArray", '[', ']')
+    let mut ts: Vec<String> = accessed_fields(CALC_PARAMS_PIPELINE_TS, "function slidersToArray", '[', ']')
         .iter()
         .map(|n| camel_to_snake(n))
         .collect();
+    assert!(
+        CALC_PARAMS_PIPELINE_TS.contains("...HSL_KEYS.map((key) => s[key]),\n    ]);"),
+        "slidersToArray must end by packing HSL_KEYS"
+    );
+    ts.extend(ts_hsl_fields());
 
     assert_eq!(
         ts, wgsl,
@@ -381,6 +415,14 @@ fn rust_default_sliders_match_the_frontend_defaults() {
             },
         };
         from_ts.insert(camel_to_snake(name.trim()), value);
+    }
+    assert!(block.contains("...HSL_NEUTRAL,"), "defaultSlidersRGB must spread HSL_NEUTRAL");
+    assert!(
+        common::IMG_PARAMETERS_TS.contains("HSL_KEYS.map((key) => [key, 0])"),
+        "HSL_NEUTRAL must set every HSL slider to 0"
+    );
+    for name in ts_hsl_fields() {
+        from_ts.insert(name, 0.0);
     }
     assert_eq!(
         from_ts.len(),

@@ -3,6 +3,7 @@
     import SingleValSliderGroup from "./SingleValSliderGroup.svelte";
     import {
         HSL_BANDS,
+        SLIDER_TOLERANCE,
         hslKey,
         type HslBand,
         type HslChannel,
@@ -37,8 +38,8 @@
     let selected = $state<HslBand>("red");
 
     const index = $derived(HSL_BANDS.indexOf(selected));
-    const prevColour = $derived(SWATCHES[HSL_BANDS[(index + 7) % 8]]);
-    const nextColour = $derived(SWATCHES[HSL_BANDS[(index + 1) % 8]]);
+    const prevColour = $derived(SWATCHES[HSL_BANDS[(index + HSL_BANDS.length - 1) % HSL_BANDS.length]]);
+    const nextColour = $derived(SWATCHES[HSL_BANDS[(index + 1) % HSL_BANDS.length]]);
     const colour = $derived(SWATCHES[selected]);
 
     // Track ends for each channel: hue runs between the neighbouring bands,
@@ -57,7 +58,7 @@
     }
 
     function isAdjusted(band: HslBand) {
-        return CHANNELS.some(({ id }) => sliders[hslKey(band, id)] !== 0);
+        return CHANNELS.some(({ id }) => Math.abs(sliders[hslKey(band, id)]) > SLIDER_TOLERANCE);
     }
 </script>
 

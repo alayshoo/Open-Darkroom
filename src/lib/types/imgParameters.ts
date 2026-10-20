@@ -1,7 +1,7 @@
 // $lib/types/imgParameters.ts
 
 // Sliders is the type used in the UI
-export interface Sliders {
+export interface Sliders extends Record<HslKey, number> {
     invert: boolean;
     redBlackPoint: number;
     greenBlackPoint: number;
@@ -32,30 +32,6 @@ export interface Sliders {
     usmRadius: number;
     usmLumaThreshold: number;
     usmDetailThreshold: number;
-    hslRedHue: number;
-    hslRedSat: number;
-    hslRedLum: number;
-    hslOrangeHue: number;
-    hslOrangeSat: number;
-    hslOrangeLum: number;
-    hslYellowHue: number;
-    hslYellowSat: number;
-    hslYellowLum: number;
-    hslGreenHue: number;
-    hslGreenSat: number;
-    hslGreenLum: number;
-    hslAquaHue: number;
-    hslAquaSat: number;
-    hslAquaLum: number;
-    hslBlueHue: number;
-    hslBlueSat: number;
-    hslBlueLum: number;
-    hslPurpleHue: number;
-    hslPurpleSat: number;
-    hslPurpleLum: number;
-    hslMagentaHue: number;
-    hslMagentaSat: number;
-    hslMagentaLum: number;
 }
 
 /** The per-colour HSL bands, in hue order. */
@@ -71,6 +47,11 @@ export function hslKey(band: HslBand, channel: HslChannel): HslKey {
 export const HSL_KEYS: HslKey[] = HSL_BANDS.flatMap((band) =>
     (["Hue", "Sat", "Lum"] as const).map((channel) => hslKey(band, channel)),
 );
+
+const HSL_NEUTRAL = Object.fromEntries(HSL_KEYS.map((key) => [key, 0])) as Record<HslKey, number>;
+
+/** Below this a numeric slider counts as sitting on its target value. */
+export const SLIDER_TOLERANCE = 1e-6;
 
 // These are the default values of the slider values in RGB mode
 export const defaultSlidersRGB: Sliders = {
@@ -106,30 +87,7 @@ export const defaultSlidersRGB: Sliders = {
     usmRadius: 1.0,
     usmLumaThreshold: 0,
     usmDetailThreshold: 0,
-    hslRedHue: 0,
-    hslRedSat: 0,
-    hslRedLum: 0,
-    hslOrangeHue: 0,
-    hslOrangeSat: 0,
-    hslOrangeLum: 0,
-    hslYellowHue: 0,
-    hslYellowSat: 0,
-    hslYellowLum: 0,
-    hslGreenHue: 0,
-    hslGreenSat: 0,
-    hslGreenLum: 0,
-    hslAquaHue: 0,
-    hslAquaSat: 0,
-    hslAquaLum: 0,
-    hslBlueHue: 0,
-    hslBlueSat: 0,
-    hslBlueLum: 0,
-    hslPurpleHue: 0,
-    hslPurpleSat: 0,
-    hslPurpleLum: 0,
-    hslMagentaHue: 0,
-    hslMagentaSat: 0,
-    hslMagentaLum: 0,
+    ...HSL_NEUTRAL,
 };
 
 // These are the default values of the slider values in BW mode
@@ -164,30 +122,7 @@ export const defaultSlidersBW: Sliders = {
     usmRadius: 1.0,
     usmLumaThreshold: 0,
     usmDetailThreshold: 0,
-    hslRedHue: 0,
-    hslRedSat: 0,
-    hslRedLum: 0,
-    hslOrangeHue: 0,
-    hslOrangeSat: 0,
-    hslOrangeLum: 0,
-    hslYellowHue: 0,
-    hslYellowSat: 0,
-    hslYellowLum: 0,
-    hslGreenHue: 0,
-    hslGreenSat: 0,
-    hslGreenLum: 0,
-    hslAquaHue: 0,
-    hslAquaSat: 0,
-    hslAquaLum: 0,
-    hslBlueHue: 0,
-    hslBlueSat: 0,
-    hslBlueLum: 0,
-    hslPurpleHue: 0,
-    hslPurpleSat: 0,
-    hslPurpleLum: 0,
-    hslMagentaHue: 0,
-    hslMagentaSat: 0,
-    hslMagentaLum: 0,
+    ...HSL_NEUTRAL,
 };
 
 /* The two control modes own disjoint halves of the slider set — the darkroom
