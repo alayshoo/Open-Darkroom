@@ -37,6 +37,7 @@
     const gpu = getGPU()!;
 
     let canvas: HTMLCanvasElement;
+    let frame: HTMLDivElement;
     let renderer: Renderer | null = $state(null);
     let canvasLink: GPUCanvasLink | null = $state(null);
     let image: GPUImage | null = $state(null);
@@ -53,7 +54,9 @@
     // Track the slot the canvas is centred in, and the device pixel ratio: the
     // fit below is expressed in CSS pixels but has to hold in device pixels.
     $effect(() => {
-        const slot = canvas?.parentElement;
+        // The frame's parent, not the frame: the frame is sized from this
+        // measurement, so observing it would feed each fit back into the next.
+        const slot = frame?.parentElement;
         if (!slot) return;
 
         const observer = new ResizeObserver(([entry]) => {
@@ -195,6 +198,7 @@
 </script>
 
 <div
+    bind:this={frame}
     class="preview-frame relative"
     style={displaySize
         ? `width: ${displaySize.w}px; height: ${displaySize.h}px;`
