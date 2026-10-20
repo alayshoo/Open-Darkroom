@@ -19,6 +19,7 @@
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
     import CropButton from "$lib/components/inputs/cropButton.svelte";
+    import CropTools from "$lib/components/inputs/cropTools.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -49,7 +50,14 @@
     } from "$lib/types/curves";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
-    import { type Crop, FULL_FRAME, cropsEqual, isFullFrame } from "$lib/types/crop";
+    import {
+        type Crop,
+        FULL_FRAME,
+        cropsEqual,
+        isFullFrame,
+        turnCrop,
+        wholeFrame,
+    } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
@@ -307,6 +315,7 @@
     let crop: Crop = $state({ ...FULL_FRAME });
     let draftCrop: Crop = $state({ ...FULL_FRAME });
     let isCropping = $state(false);
+    let isStraightening = $state(false);
 
     function enterCrop() {
         draftCrop = { ...crop };
@@ -315,6 +324,7 @@
 
     function applyCrop() {
         isCropping = false;
+        isStraightening = false;
         if (cropsEqual(draftCrop, crop)) return;
         commit({ type: "crop", oldValue: { ...crop }, newValue: { ...draftCrop } });
         crop = { ...draftCrop };
@@ -322,6 +332,11 @@
 
     function cancelCrop() {
         isCropping = false;
+        isStraightening = false;
+    }
+
+    function turnDraft(clockwise: boolean) {
+        draftCrop = turnCrop(draftCrop, clockwise);
     }
 
     function toggleCrop() {
@@ -588,6 +603,7 @@
     function handleWindowKeydown(e: KeyboardEvent) {
         if (isCropping && !settings.open && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") applyCrop();
+            else if (isStraightening) isStraightening = false;
             else cancelCrop();
             e.preventDefault();
             (document.activeElement as HTMLElement)?.blur();
@@ -616,6 +632,7 @@
     <div class="toolbar shrink-0">
         <div class="toolbar-tools relative flex flex-col items-center">
             <CropButton active={isCropping} ontoggle={toggleCrop} />
+            <CropTools visible={isCropping} bind:straightening={isStraightening} onturn={turnDraft} />
         </div>
     </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
@@ -630,11 +647,16 @@
                 {sliders}
                 {curveLut}
                 {imagePayload}
-                crop={isCropping ? FULL_FRAME : crop}
+                crop={isCropping ? wholeFrame(draftCrop) : crop}
             >
                 {#snippet overlay()}
-                    {#if isCropping}
-                        <CropOverlay bind:crop={draftCrop} />
+                    {#if isCropping && imagePayload}
+                        <CropOverlay
+                            bind:crop={draftCrop}
+                            bind:straightening={isStraightening}
+                            imageWidth={imagePayload.fullWidth}
+                            imageHeight={imagePayload.fullHeight}
+                        />
                     {/if}
                 {/snippet}
             </PreviewImageCanvas>
@@ -1410,6 +1432,7 @@
        falloff painted by ::before. */
     .toolbar-tools {
         padding-top: 56px;
+        gap: 10px;
         z-index: 1;
     }
 

@@ -773,7 +773,7 @@ describe("histogram draw", () => {
 
 describe("the crop", () => {
   // Columns 16–47 and rows 1–2 of the 64 × 4 chart.
-  const CROP: Crop = { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0 };
+  const CROP: Crop = { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0, quarterTurns: 0 };
 
   it("keeps exactly the pixels it covers, untouched", async () => {
     const source = rampChart();
@@ -798,7 +798,7 @@ describe("the crop", () => {
     for (let y = 0; y < HEIGHT; y++) {
       source.fill(190, (y * WIDTH + WIDTH / 2) * 3, (y + 1) * WIDTH * 3);
     }
-    const rightHalf: Crop = { cx: 0.75, cy: 0.5, w: 0.5, h: 1, angle: 0 };
+    const rightHalf: Crop = { cx: 0.75, cy: 0.5, w: 0.5, h: 1, angle: 0, quarterTurns: 0 };
     const sliders = { ...defaultSlidersRGB, usmAmount: 200, usmRadius: 3 };
 
     const plain = await develop(source, defaultSlidersRGB);

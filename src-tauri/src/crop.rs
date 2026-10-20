@@ -1,8 +1,7 @@
 // src-tauri/src/crop.rs
 //
 // The crop as the frontend stores it, and the map from output pixels back into
-// the source that colorSpaceEncode.wgsl samples through. Mirrors
-// src/lib/types/crop.ts.
+// the source that colorSpaceEncode.wgsl samples through.
 
 /// Size of the `CropView` uniform declared in chunks/cropView.wgsl.
 pub const CROP_VIEW_BYTES: usize = 32;
@@ -10,18 +9,22 @@ pub const CROP_VIEW_BYTES: usize = 32;
 #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CropPayload {
-    /// Centre, as fractions of the full image's width and height.
+    /// Centre, as fractions of the turned image's width and height.
     pub cx: f64,
     pub cy: f64,
-    /// Extent, as fractions of the full image's width and height.
+    /// Extent, as fractions of the turned image's width and height.
     pub w: f64,
     pub h: f64,
-    /// Radians, clockwise on screen.
+    /// Radians the image is rotated clockwise on screen, about its centre.
     pub angle: f64,
+    /// Clockwise quarter turns, applied before `angle`.
+    #[serde(default)]
+    pub quarter_turns: u32,
 }
 
 impl CropPayload {
-    pub const FULL_FRAME: Self = Self { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0, angle: 0.0 };
+    pub const FULL_FRAME: Self =
+        Self { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0, angle: 0.0, quarter_turns: 0 };
 
     /// The whole frame is what anything malformed falls back to.
     fn is_valid(&self) -> bool {
@@ -48,43 +51,55 @@ pub struct CropView {
     pub axis_y: [f64; 2],
 }
 
-/// An unrotated crop is snapped to whole source pixels, so every output pixel
-/// lands on a texel centre and the encode stage reads it back untouched.
+/// The image is turned, then rotated about its centre, and the crop box is
+/// upright in that rotated frame. An unrotated crop is snapped to whole source
+/// pixels, so every output pixel lands on a texel centre and the encode stage
+/// reads it back untouched. Mirrors `cropView()` in src/lib/types/crop.ts.
 pub fn crop_view(crop: &CropPayload, src_width: u32, src_height: u32) -> CropView {
     let crop = if crop.is_valid() { *crop } else { CropPayload::FULL_FRAME };
+    let turns = crop.quarter_turns % 4;
+    let (src_w, src_h) = (src_width as f64, src_height as f64);
+    let size = if turns % 2 == 0 { [src_w, src_h] } else { [src_h, src_w] };
 
+    let (x0, y0, width, height);
     if crop.angle == 0.0 {
-        let snap = |centre: f64, extent: f64, size: u32| {
-            let size_f = size as f64;
-            let lo = ((centre - extent / 2.0) * size_f).round().clamp(0.0, size_f - 1.0);
-            let hi = ((centre + extent / 2.0) * size_f).round().clamp(lo + 1.0, size_f);
-            (lo, (hi - lo) as u32)
+        let snap = |centre: f64, extent: f64, size: f64| {
+            let lo = ((centre - extent / 2.0) * size).round().clamp(0.0, size - 1.0);
+            let hi = ((centre + extent / 2.0) * size).round().clamp(lo + 1.0, size);
+            (lo, hi - lo)
         };
-        let (x0, width) = snap(crop.cx, crop.w, src_width);
-        let (y0, height) = snap(crop.cy, crop.h, src_height);
-        return CropView {
-            width,
-            height,
-            origin: [x0, y0],
-            axis_x: [1.0, 0.0],
-            axis_y: [0.0, 1.0],
-        };
+        (x0, width) = snap(crop.cx, crop.w, size[0]);
+        (y0, height) = snap(crop.cy, crop.h, size[1]);
+    } else {
+        width = (crop.w * size[0]).round().max(1.0);
+        height = (crop.h * size[1]).round().max(1.0);
+        x0 = crop.cx * size[0] - width / 2.0;
+        y0 = crop.cy * size[1] - height / 2.0;
     }
 
-    let width = (crop.w * src_width as f64).round().max(1.0);
-    let height = (crop.h * src_height as f64).round().max(1.0);
+    // Rotated frame → turned image → source.
     let (sin, cos) = crop.angle.sin_cos();
-    let centre_x = crop.cx * src_width as f64;
-    let centre_y = crop.cy * src_height as f64;
+    let to_source = |x: f64, y: f64| -> [f64; 2] {
+        let (dx, dy) = (x - size[0] / 2.0, y - size[1] / 2.0);
+        let ox = cos * dx + sin * dy + size[0] / 2.0;
+        let oy = -sin * dx + cos * dy + size[1] / 2.0;
+        match turns {
+            1 => [oy, src_h - ox],
+            2 => [src_w - ox, src_h - oy],
+            3 => [src_w - oy, ox],
+            _ => [ox, oy],
+        }
+    };
+
+    let origin = to_source(x0, y0);
+    let right = to_source(x0 + 1.0, y0);
+    let down = to_source(x0, y0 + 1.0);
     CropView {
         width: width as u32,
         height: height as u32,
-        origin: [
-            centre_x - width / 2.0 * cos + height / 2.0 * sin,
-            centre_y - width / 2.0 * sin - height / 2.0 * cos,
-        ],
-        axis_x: [cos, sin],
-        axis_y: [-sin, cos],
+        origin,
+        axis_x: [right[0] - origin[0], right[1] - origin[1]],
+        axis_y: [down[0] - origin[0], down[1] - origin[1]],
     }
 }
 

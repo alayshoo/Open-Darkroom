@@ -66,9 +66,17 @@ fn sample_composite(src: vec2f) -> vec4f {
   return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
 }
 
+// What a rotated frame shows where it reaches past the image: the preview's
+// backdrop. A crop is kept on the image, so an export never lands here.
+const OFF_IMAGE = vec4f(0.1, 0.1, 0.1, 1.0);
+
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let src = crop.origin + position.x * crop.axis_x + position.y * crop.axis_y;
+  let extent = vec2f(textureDimensions(compositeTexture));
+  if (any(src < vec2f(-0.5)) || any(src > extent + 0.5)) {
+    return OFF_IMAGE;
+  }
   let c = sample_composite(src);
 
   // The working curve is undone exactly: encode_srgb and decode_srgb both pass
