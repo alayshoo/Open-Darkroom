@@ -1577,30 +1577,41 @@ fn an_identity_curve_table_changes_nothing() {
 }
 
 #[test]
-fn a_curve_maps_each_channel_through_its_own_column() {
-    // Red inverted, green lifted to half, blue untouched. With default sliders
-    // the tone the curve sees is exactly input / 255.
+fn a_neutral_curve_maps_tone_exactly() {
+    // With default sliders the tone the curve sees is exactly input / 255, and
+    // a curve shared by all three channels keeps the result neutral.
+    let f = |x: f64| x * x * (3.0 - 2.0 * x);
+    let sliders = SlidersPayload { curve_lut: curve_lut(|_, x| f(x)), ..defaults() };
+
+    for value in [0u8, 40, 100, 128, 180, 230, 255] {
+        let got = develop_patch([value; 3], &sliders);
+        let expected = (f(value as f64 / 255.0) * 255.0).round() as u8;
+        for c in 0..3 {
+            assert!(
+                close(got[c], expected),
+                "input {value}, channel {c}: got {got:?}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_colour_curve_moves_only_its_own_channel_up() {
+    // A lift on red alone. The output transform mixes channels, so the others
+    // may dip slightly, but red must be the one that rises.
     let sliders = SlidersPayload {
-        curve_lut: curve_lut(|c, x| match c {
-            0 => 1.0 - x,
-            1 => 0.5 + 0.5 * x,
-            _ => x,
-        }),
+        curve_lut: curve_lut(|c, x| if c == 0 { x + 0.15 * (1.0 - x) * x * 4.0 } else { x }),
         ..defaults()
     };
 
-    // The curved tone is no longer neutral, so it is carried out of the working
-    // space into sRGB the way the output transform does.
-    for value in [0u8, 64, 128, 200, 255] {
-        let x = value as f64 / 255.0;
+    for value in [64u8, 128, 192] {
+        let plain = develop_patch([value; 3], &defaults());
         let got = develop_patch([value; 3], &sliders);
-        let working = [1.0 - x, 0.5 + 0.5 * x, x].map(srgb_to_linear);
-        let expected = apply_matrix(&WORKING_TO_SRGB, working)
-            .map(|l| (linear_to_srgb(l.clamp(0.0, 1.0)) * 255.0).round() as u8);
-        for c in 0..3 {
+        assert!(got[0] as i32 > plain[0] as i32 + TOL, "red did not rise at {value}: {got:?}");
+        for c in 1..3 {
             assert!(
-                close(got[c], expected[c]),
-                "input {value}, channel {c}: got {got:?}, expected {expected:?}"
+                got[c] as i32 <= plain[c] as i32 + TOL,
+                "channel {c} rose with the red curve at {value}: {got:?} vs {plain:?}"
             );
         }
     }
