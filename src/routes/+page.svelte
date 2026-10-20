@@ -33,6 +33,7 @@
         defaultSlidersBW,
         overridesBW,
         modeKeys,
+        HSL_KEYS,
     } from "$lib/types/imgParameters";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -403,6 +404,18 @@
         }
         applySliderSet(next);
     }
+
+    function handleResetColourMixer() {
+        const next: Partial<Sliders> = {};
+        for (const key of HSL_KEYS) {
+            next[key] = defaultSlidersRGB[key];
+        }
+        applySliderSet(next);
+    }
+
+    let isColourMixerIdentity = $derived(
+        HSL_KEYS.every((key) => sliders[key] === defaultSlidersRGB[key]),
+    );
 
     /* Whether a reset would change anything, judged on the same keys a reset
        would write. The tolerance is there because animated values land on
@@ -1079,7 +1092,14 @@
                                                 })}
                                         ></SingleValSliderGroup>
                                         <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
-                                        <span class="section-title pb-1.5">Colour Mixer</span>
+                                        <div class="flex flex-row items-center justify-between pb-1.5 pr-1.5">
+                                            <span class="section-title">Colour Mixer</span>
+                                            <RevertButton
+                                                visible={!isColourMixerIdentity}
+                                                label="Reset Colour Mixer"
+                                                onrevert={handleResetColourMixer}
+                                            />
+                                        </div>
                                         <HslBandGroup
                                             bind:sliders
                                             onCommit={(key, oldVal, newVal) =>

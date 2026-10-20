@@ -68,6 +68,10 @@ export function hslKey(band: HslBand, channel: HslChannel): HslKey {
     return `hsl${band[0].toUpperCase()}${band.slice(1)}${channel}` as HslKey;
 }
 
+export const HSL_KEYS: HslKey[] = HSL_BANDS.flatMap((band) =>
+    (["Hue", "Sat", "Lum"] as const).map((channel) => hslKey(band, channel)),
+);
+
 // These are the default values of the slider values in RGB mode
 export const defaultSlidersRGB: Sliders = {
     invert: false,
