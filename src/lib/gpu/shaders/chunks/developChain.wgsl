@@ -2,13 +2,6 @@
 // working space out. Shared by develop.wgsl, histogram.wgsl and colorSpace.wgsl.
 // Requires a `params` binding, chunks/luma.wgsl and chunks/tone.wgsl.
 
-// Linear sRGB → linear Rec.2020, the inverse of M_WORKING_TO_SRGB in luma.wgsl.
-const M_SRGB_TO_WORKING = mat3x3<f32>(
-  vec3f(0.6274039, 0.0690973, 0.0163915),
-  vec3f(0.3292830, 0.9195404, 0.0880133),
-  vec3f(0.0433131, 0.0113623, 0.8955952),
-);
-
 // OKLab from linear Rec.2020. The LMS rows are normalised so that white maps to
 // exactly (1, 1, 1), which keeps neutrals at zero chroma.
 const M_WORKING_TO_LMS = mat3x3<f32>(
@@ -34,8 +27,7 @@ const M_OKLAB_TO_LMS = mat3x3<f32>(
 
 // Chroma below which a pixel's hue is too unstable to assign to a band. The
 // colour adjustments fade in across it, so grain in the neutrals is left alone.
-const HSL_OKLCH_NEUTRAL_CHROMA: f32 = 0.03;
-const HSL_HSV_NEUTRAL_CHROMA:   f32 = 0.08;
+const HSL_NEUTRAL_CHROMA: f32 = 0.03;
 
 // Hue shift, chroma scale, lightness scale.
 const HSL_NEUTRAL = vec3f(0.0, 1.0, 1.0);
@@ -65,7 +57,7 @@ fn signed_cbrt(v: vec3f) -> vec3f {
 fn hsl_oklch(rgb: vec3f) -> vec3f {
   let lab = M_LMS_TO_OKLAB * signed_cbrt(M_WORKING_TO_LMS * rgb);
   let chroma = length(lab.yz);
-  let fade = smoothstep(0.0, HSL_OKLCH_NEUTRAL_CHROMA, chroma);
+  let fade = smoothstep(0.0, HSL_NEUTRAL_CHROMA, chroma);
   if (fade <= 0.0) {
     return rgb;
   }
@@ -76,36 +68,6 @@ fn hsl_oklch(rgb: vec3f) -> vec3f {
   let c = chroma * adj.y;
   let lms = M_OKLAB_TO_LMS * vec3f(lab.x * adj.z, c * cos(h), c * sin(h));
   return M_LMS_TO_WORKING * (lms * lms * lms);
-}
-
-// Per-colour adjustment in HSV on sRGB-encoded values, the classic hexcone
-// model: hue rotates H, saturation scales S and luminance scales V.
-fn hsl_hsv(rgb: vec3f) -> vec3f {
-  let e = encode_srgb(M_WORKING_TO_SRGB * rgb);
-  let v = max(e.r, max(e.g, e.b));
-  let c = v - min(e.r, min(e.g, e.b));
-  let fade = smoothstep(0.0, HSL_HSV_NEUTRAL_CHROMA, c);
-  if (v <= 0.0 || fade <= 0.0) {
-    return rgb;
-  }
-
-  var hue: f32;
-  if (v == e.r) {
-    hue = 60.0 * (e.g - e.b) / c;
-  } else if (v == e.g) {
-    hue = 60.0 * ((e.b - e.r) / c + 2.0);
-  } else {
-    hue = 60.0 * ((e.r - e.g) / c + 4.0);
-  }
-  hue = (hue + 360.0) % 360.0;
-  let adj = mix(HSL_NEUTRAL, hsl_band_adjust(hue), fade);
-
-  let out_v = v * adj.z;
-  let out_c = c * adj.y * adj.z;
-  let out_h = (hue + adj.x + 360.0) % 360.0;
-  let k = (vec3f(5.0, 3.0, 1.0) + out_h / 60.0) % 6.0;
-  let out = out_v - out_c * clamp(min(k, 4.0 - k), vec3f(0.0), vec3f(1.0));
-  return M_SRGB_TO_WORKING * decode_srgb(out);
 }
 
 fn develop(source: vec3f) -> vec3f {
@@ -188,9 +150,7 @@ fn develop(source: vec3f) -> vec3f {
   rgb = (params.hueSat_matrix * vec4f(rgb, 1.0)).xyz;
 
   // 10. Per-colour hue / saturation / luminance, skipped while every band is neutral
-  if (params.hsl_mode > 1.5) {
-    rgb = hsl_hsv(rgb);
-  } else if (params.hsl_mode > 0.5) {
+  if (params.hsl_active > 0.5) {
     rgb = hsl_oklch(rgb);
   }
 

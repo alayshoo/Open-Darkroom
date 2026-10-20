@@ -710,7 +710,7 @@ fn colour_brighter_than_white_resolves_to_white() {
 }
 
 fn rolloff(rolloff: f32, rolloff_mode: RolloffMode) -> ToneMapPayload {
-    ToneMapPayload { rolloff, rolloff_mode, ..Default::default() }
+    ToneMapPayload { rolloff, rolloff_mode }
 }
 
 /// With the roll-off on, successive stops above white stay distinct instead of

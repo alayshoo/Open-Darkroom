@@ -62,7 +62,7 @@
 </script>
 
 <div class="flex flex-col">
-    <div class="swatches flex flex-row justify-center gap-2 pr-1.5 mb-2.5" role="radiogroup">
+    <div class="swatches flex flex-row justify-center gap-2 pr-1.5 pt-2 mb-2.5" role="radiogroup">
         {#each HSL_BANDS as band (band)}
             <button
                 class="swatch"
@@ -98,8 +98,8 @@
 <style>
     .swatch {
         position: relative;
-        width: 16px;
-        height: 16px;
+        width: 12px;
+        height: 12px;
         border-radius: 50%;
         background: var(--swatch);
         outline: 1.5px solid transparent;

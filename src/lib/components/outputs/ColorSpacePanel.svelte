@@ -16,7 +16,7 @@
     import { GAMUT_ORDER, GAMUT_TINTS } from "$lib/gpu/gamutOverlay";
     import { OUTPUT_SPACE_LABELS, WORKING_SPACE } from "$lib/gpu/outputSpace";
     import { type ImagePayload } from "$lib/types/imagePayload";
-    import type { HslModel, RolloffMode } from "$lib/types/toneMap";
+    import type { RolloffMode } from "$lib/types/toneMap";
 
     let {
         sliders,
@@ -277,11 +277,6 @@
         { id: "perChannel", label: "Per channel" },
     ];
 
-    const HSL_MODELS: { id: HslModel; label: string }[] = [
-        { id: "oklch", label: "OKLCh" },
-        { id: "hsv", label: "HSV" },
-    ];
-
     function formatPercentage(value: number) {
         if (value === 0) return "0%";
         if (value < 0.1) return "<0.1%";
@@ -354,31 +349,6 @@
             {/if}
             Applied to the preview, histogram and export, and kept when this
             panel is closed.
-        </p>
-    </div>
-
-    <div class="panel glass rounded-[12px] p-2.5">
-        <h2>Per-colour HSL model</h2>
-        {#each HSL_MODELS as model (model.id)}
-            <label>
-                <input
-                    type="radio"
-                    name="hsl-model"
-                    checked={colorSpaceDebug.hslModel === model.id}
-                    onchange={() => (colorSpaceDebug.hslModel = model.id)}
-                />
-                <span class="name">{model.label}</span>
-            </label>
-        {/each}
-
-        <p class="note">
-            {#if colorSpaceDebug.hslModel === "oklch"}
-                Perceptual: bands are evenly spread to the eye, and hue,
-                saturation and luminance each move only themselves.
-            {:else}
-                Classic hexcone on sRGB values: bands sit at fixed 30° steps,
-                and luminance and saturation move perceived brightness together.
-            {/if}
         </p>
     </div>
 

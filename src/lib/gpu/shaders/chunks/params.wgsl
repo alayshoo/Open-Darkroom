@@ -23,7 +23,7 @@ struct Params {
   vibrance:       f32,          // 240
   rolloff_start:  f32,          // 244  (1 = off)
   rolloff_mode:   f32,          // 248  (0 luminance, 1 per channel)
-  hsl_mode:       f32,          // 252  (0 off, 1 OKLCh, 2 HSV)
+  hsl_active:     f32,          // 252  (0 off, 1 on)
   // Per colour band: x hue shift (degrees), y chroma scale, z lightness scale,
   // w band centre hue (degrees, ascending across the eight bands)
   hsl_bands:      array<vec4f, 8>, // 256 — 128 bytes

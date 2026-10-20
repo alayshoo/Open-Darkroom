@@ -13,7 +13,7 @@ export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 // SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
 export const SOURCE_BUFFER_SIZE  = 48;
-export const TONE_MAP_BUFFER_SIZE = 16;  // ToneMap struct (three f32, 16-aligned)
+export const TONE_MAP_BUFFER_SIZE = 16;  // ToneMap struct (two f32, 16-aligned)
 
 export interface CalcParamsPipeline {
     paramsBuffer: GPUBuffer;
@@ -166,8 +166,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
 
     function updateToneMap(toneMap: ToneMap) {
         const mode = toneMap.rolloffMode === "perChannel" ? 1 : 0;
-        const hslModel = toneMap.hslModel === "hsv" ? 1 : 0;
-        const data = new Float32Array([toneMap.rolloff, mode, hslModel, 0]);
+        const data = new Float32Array([toneMap.rolloff, mode, 0, 0]);
         device.queue.writeBuffer(toneMapBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 

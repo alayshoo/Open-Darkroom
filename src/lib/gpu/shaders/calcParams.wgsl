@@ -92,12 +92,12 @@ struct SourceSpace {
     to_working: mat3x3<f32>,   //  0 — 48 bytes (3 cols × 16)
 }                              // total: 48 bytes
 
-// App-wide rendering preferences tuned from the debug panel. Neither an edit nor
-// part of the view, so they live in a uniform of their own.
+// App-wide highlight roll-off preference. Neither an edit nor part of the view,
+// so it lives in a uniform of its own.
 struct ToneMap {
     rolloff:      f32,   //  0   (0–100)
     rolloff_mode: f32,   //  4   (0 luminance, 1 per channel)
-    hsl_model:    f32,   //  8   (0 OKLCh, 1 HSV)
+    _pad0:        f32,   //  8
     _pad1:        f32,   // 12
 }                        // total: 16 bytes
 
@@ -260,10 +260,9 @@ const MAX_CLARITY_AMOUNT: f32 = 1.0;
 // offset on a -1..1 range, +0.2 took sRGB 32 to 128.
 const MAX_BRIGHTNESS: f32 = 0.25;
 
-// Hue of each HSL band's centre, in degrees, per colour model. The OKLCh ones are
-// the hues of the sRGB primaries, secondaries and their midpoints in OKLCh.
-const HSL_CENTRES_OKLCH = array<f32, 8>(29.2, 52.8, 109.8, 142.5, 194.8, 264.1, 293.8, 328.4);
-const HSL_CENTRES_HSV   = array<f32, 8>(0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0);
+// OKLCh hue of each HSL band's centre, in degrees: the sRGB primaries,
+// secondaries and their midpoints.
+const HSL_CENTRES = array<f32, 8>(29.2, 52.8, 109.8, 142.5, 194.8, 264.1, 293.8, 328.4);
 
 // A band's hue slider at its rail moves that band halfway to its neighbour, so a
 // band on its own can never overtake the next one.
@@ -485,10 +484,7 @@ fn calc_hsl_bands() -> bool {
         vec3f(sliders.hsl_purple_hue, sliders.hsl_purple_sat, sliders.hsl_purple_lum),
         vec3f(sliders.hsl_magenta_hue, sliders.hsl_magenta_sat, sliders.hsl_magenta_lum),
     );
-    var centres = HSL_CENTRES_OKLCH;
-    if (tone_map.hsl_model > 0.5) {
-        centres = HSL_CENTRES_HSV;
-    }
+    var centres = HSL_CENTRES;
 
     var any_set = false;
     for (var i = 0u; i < 8u; i++) {
@@ -556,7 +552,7 @@ fn main() {
     params.vibrance      = sliders.vibrance / 100.0;
     params.rolloff_start = 1.0 - clamp(tone_map.rolloff / 100.0, 0.0, 1.0) * MAX_ROLLOFF_SPAN;
     params.rolloff_mode  = tone_map.rolloff_mode;
-    params.hsl_mode      = select(0.0, 1.0 + tone_map.hsl_model, calc_hsl_bands());
+    params.hsl_active    = select(0.0, 1.0, calc_hsl_bands());
 
     // Sharpness. Every radius is a full-resolution measurement, so each has to be
     // brought into the texture space this render actually works in before its

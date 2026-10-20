@@ -47,7 +47,7 @@ pub const SHARP_PARAMS_BYTES: u64 = 48;
 /// `mat3x3<f32>`, three 16-byte columns.
 pub const SOURCE_SPACE_BYTES: u64 = 48;
 
-/// Size of the `ToneMap` uniform read by calcParams.wgsl: three f32 of payload,
+/// Size of the `ToneMap` uniform read by calcParams.wgsl: two f32 of payload,
 /// padded to the 16 bytes a uniform struct binds at.
 pub const TONE_MAP_BYTES: usize = 16;
 
@@ -279,41 +279,24 @@ pub enum RolloffMode {
     PerChannel,
 }
 
-/// Colour model the per-colour HSL bands are measured and adjusted in.
-#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(rename_all = "camelCase")]
-pub enum HslModel {
-    #[default]
-    Oklch,
-    Hsv,
-}
-
-/// App-wide rendering preferences tuned from the debug panel. Roll-off strength
-/// 0 leaves the chain untouched.
+/// The highlight roll-off preference. Strength 0 leaves the chain untouched.
 #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToneMapPayload {
     /// 0–100.
     pub rolloff: f32,
     pub rolloff_mode: RolloffMode,
-    #[serde(default)]
-    pub hsl_model: HslModel,
 }
 
-/// Pack the preferences into the uniform buffer matching the WGSL `ToneMap` struct.
+/// Pack the roll-off into the uniform buffer matching the WGSL `ToneMap` struct.
 pub fn tone_map_to_bytes(t: &ToneMapPayload) -> [u8; TONE_MAP_BYTES] {
     let mode: f32 = match t.rolloff_mode {
         RolloffMode::Luminance => 0.0,
         RolloffMode::PerChannel => 1.0,
     };
-    let hsl_model: f32 = match t.hsl_model {
-        HslModel::Oklch => 0.0,
-        HslModel::Hsv => 1.0,
-    };
     let mut bytes = [0u8; TONE_MAP_BYTES];
     bytes[0..4].copy_from_slice(&t.rolloff.to_le_bytes());
     bytes[4..8].copy_from_slice(&mode.to_le_bytes());
-    bytes[8..12].copy_from_slice(&hsl_model.to_le_bytes());
     bytes
 }
 
