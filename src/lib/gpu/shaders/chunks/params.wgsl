@@ -1,5 +1,6 @@
 // Written by calcParams.wgsl, read by develop.wgsl and histogram.wgsl. The
-// binding that exposes it differs per shader and stays with the shader.
+// binding that exposes it differs per shader and stays with the shader. The
+// curve fields at the end are written from the CPU, not by calcParams.
 struct Params {
   dr_matrix:      mat4x4<f32>,  //   0 — 64 bytes
   red_gamma:      f32,          //  64
@@ -27,4 +28,11 @@ struct Params {
   // Per colour band: x hue shift (degrees), y chroma scale, z lightness scale,
   // w band centre hue (degrees, ascending across the eight bands)
   hsl_bands:      array<vec4f, 8>, // 256 — 128 bytes
-}                               // total: 384 bytes
+  curves_active:  f32,          // 384  (0 off, 1 on)
+  _pad5:          f32,          // 388
+  _pad6:          f32,          // 392
+  _pad7:          f32,          // 396  (align curve_lut to 16)
+  // Per input level, evenly spaced over 0..1: the output for x red, y green,
+  // z blue. w is unused.
+  curve_lut:      array<vec4f, 256>, // 400 — 4096 bytes
+}                               // total: 4496 bytes

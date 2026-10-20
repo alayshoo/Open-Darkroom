@@ -59,6 +59,8 @@ export interface ColorSpacePipeline {
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
     /** The highlight roll-off preference the preview renders with. */
     setToneMap: (toneMap: ToneMap) => void;
+    /** The baked point curves, or null while every curve is the identity. */
+    setCurves: (lut: Float32Array | null) => void;
     /** Where the colour volume is being looked at from. */
     setVolumeView: (view: VolumeView) => void;
     /** Bins the image and draws both plots. A target left out is not drawn. */
@@ -290,6 +292,10 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         calcParams.updateToneMap(toneMap);
     }
 
+    function setCurves(lut: Float32Array | null) {
+        calcParams.updateCurves(lut);
+    }
+
     const cameraStaging = new Float32Array(CAMERA_BUFFER_SIZE / 4);
 
     function setVolumeView(view: VolumeView) {
@@ -429,6 +435,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         setOverlays,
         setOutputSpace,
         setToneMap,
+        setCurves,
         setVolumeView,
         render,
         redraw,

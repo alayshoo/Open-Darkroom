@@ -1,6 +1,7 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
 import type { Sliders } from "$lib/types/imgParameters";
+import { CURVE_CHANNELS, CURVE_COLOURS, type CurveChannel } from "$lib/types/curves";
 import type { ToneMap } from "$lib/types/toneMap";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
@@ -144,16 +145,40 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         code: drawSource,
     });
 
-    const drawPipeline = device.createRenderPipeline({
-        label: "Histogram Draw Pipeline",
-        layout: device.createPipelineLayout({ bindGroupLayouts: [drawLayout] }),
-        vertex: { module: drawModule, entryPoint: "vs_main" },
-        fragment: {
-            module: drawModule,
-            entryPoint: "fs_main",
-            targets: [{ format: gpu.format }],
-        },
-    });
+    const drawPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [drawLayout] });
+
+    function createDrawPipeline(
+        label: string,
+        constants: Record<string, number>,
+    ): GPURenderPipeline {
+        return device.createRenderPipeline({
+            label,
+            layout: drawPipelineLayout,
+            vertex: { module: drawModule, entryPoint: "vs_main" },
+            fragment: {
+                module: drawModule,
+                entryPoint: "fs_main",
+                targets: [{ format: gpu.format }],
+                constants,
+            },
+        });
+    }
+
+    // The canvas is sRGB and unorm, so the tint is written as its code values.
+    function backdropConstants(channel: CurveChannel): Record<string, number> {
+        const hex = CURVE_COLOURS[channel];
+        const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+        const index = channel === "master" ? 3 : CURVE_CHANNELS.indexOf(channel) - 1;
+        return { CHANNEL: index, TINT_R: r, TINT_G: g, TINT_B: b };
+    }
+
+    const drawPipeline = createDrawPipeline("Histogram Draw Pipeline", {});
+    const backdropPipelines = Object.fromEntries(
+        CURVE_CHANNELS.map((channel) => [
+            channel,
+            createDrawPipeline(`Histogram ${channel} Backdrop Pipeline`, backdropConstants(channel)),
+        ]),
+    ) as Record<CurveChannel, GPURenderPipeline>;
 
     // Both read the same two buffers for the life of the pipeline, so neither
     // group ever needs rebuilding.
@@ -213,10 +238,39 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         calcParams.updateToneMap(toneMap);
     }
 
+    function setCurves(lut: Float32Array | null) {
+        calcParams.updateCurves(lut);
+    }
+
+    function recordDraw(
+        encoder: GPUCommandEncoder,
+        target: GPUTextureView,
+        pipeline: GPURenderPipeline,
+        timestampWrites?: GPURenderPassTimestampWrites,
+    ) {
+        const drawPass = encoder.beginRenderPass({
+            label: "Histogram Draw Pass",
+            colorAttachments: [
+                {
+                    view: target,
+                    clearValue: TRANSPARENT,
+                    loadOp: "clear",
+                    storeOp: "store",
+                },
+            ],
+            timestampWrites,
+        });
+        drawPass.setPipeline(pipeline);
+        drawPass.setBindGroup(0, drawBindGroup);
+        drawPass.draw(6);
+        drawPass.end();
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
         target?: GPUTextureView,
+        backdrop?: { view: GPUTextureView; channel: CurveChannel },
     ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
@@ -261,22 +315,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         scalePass.end();
 
         if (target) {
-            const drawPass = encoder.beginRenderPass({
-                label: "Histogram Draw Pass",
-                colorAttachments: [
-                    {
-                        view: target,
-                        clearValue: TRANSPARENT,
-                        loadOp: "clear",
-                        storeOp: "store",
-                    },
-                ],
-                timestampWrites: measure ? timer.passWrites("draw") : undefined,
-            });
-            drawPass.setPipeline(drawPipeline);
-            drawPass.setBindGroup(0, drawBindGroup);
-            drawPass.draw(6);
-            drawPass.end();
+            recordDraw(encoder, target, drawPipeline, measure ? timer.passWrites("draw") : undefined);
+        }
+        if (backdrop) {
+            recordDraw(encoder, backdrop.view, backdropPipelines[backdrop.channel]);
         }
 
         if (measure) timer.resolve(encoder);
@@ -350,5 +392,5 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // black image.
     setOutputSpace(gpu.displaySpace, null);
 
-    return { setSourceSpace, setOutputSpace, setToneMap, render, readBins, destroy };
+    return { setSourceSpace, setOutputSpace, setToneMap, setCurves, render, readBins, destroy };
 }

@@ -12,6 +12,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { SHARP_FORMAT, WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB, type Sliders } from "$lib/types/imgParameters";
+import { CURVE_CHANNELS } from "$lib/types/curves";
 import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
 import { parseImagePayload } from "$lib/utils/openImage";
 import {
@@ -396,7 +397,7 @@ describe("pipeline construction", () => {
     expect(SLIDERS_BUFFER_SIZE).toBe(224);
     expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
     expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(54 * 4);
-    expect(PARAMS_BUFFER_SIZE).toBe(384);
+    expect(PARAMS_BUFFER_SIZE).toBe(4496);
     // One f32, rounded up to the 16-byte alignment of a uniform struct.
     expect(VIEW_BUFFER_SIZE).toBe(16);
     // Twelve f32 — three bands' amounts and sigmas, two thresholds, padding.
@@ -718,6 +719,33 @@ describe("histogram compute", () => {
         ).toBeCloseTo(value, 0);
       }
     }
+  });
+});
+
+describe("histogram draw", () => {
+  // A pipeline that fails validation does not throw: the error surfaces on the
+  // device, and the submit carrying it drops the whole frame, bins included.
+  it("draws the main histogram and every curve backdrop without a validation error", async () => {
+    gpu.device.pushErrorScope("validation");
+    const pipeline = createHistogramPipeline(gpu);
+    const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rampChart()), WIDTH, HEIGHT);
+    const target = gpu.device.createTexture({
+      size: { width: 32, height: 16 },
+      format: gpu.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    pipeline.setSourceSpace(SRGB_TO_WORKING);
+    for (const channel of CURVE_CHANNELS) {
+      pipeline.render(image.texture, defaultSlidersRGB, target.createView(), {
+        view: target.createView(),
+        channel,
+      });
+    }
+    const error = await gpu.device.popErrorScope();
+    target.destroy();
+    image.texture.destroy();
+    pipeline.destroy();
+    expect(error?.message ?? null).toBeNull();
   });
 });
 

@@ -173,6 +173,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         calcParams.updateToneMap(toneMap);
     }
 
+    function setCurves(lut: Float32Array | null) {
+        calcParams.updateCurves(lut);
+    }
+
     function setSliders(sliders: Sliders) {
         currentSliders = sliders;
         calcParams.updateSliders(sliders);
@@ -357,5 +361,5 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     setSliders( defaultSlidersRGB );
     setOutputSpace(gpu.displaySpace, null);
 
-    return { loadImage, setSliders, setOutputSpace, setView, setToneMap, requestRender, destroy };
+    return { loadImage, setSliders, setOutputSpace, setView, setToneMap, setCurves, requestRender, destroy };
 }

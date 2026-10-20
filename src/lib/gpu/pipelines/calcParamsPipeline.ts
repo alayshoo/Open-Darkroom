@@ -8,7 +8,9 @@ import shaderSource from "../shaders/calcParams.wgsl?raw";
 // 54 f32 fields = 216 bytes, rounded up to the 16-byte alignment a uniform
 // struct is bound at.
 export const SLIDERS_BUFFER_SIZE = 224;
-export const PARAMS_BUFFER_SIZE  = 384;  // Params struct (must match shader)
+export const PARAMS_BUFFER_SIZE  = 4496; // Params struct (must match shader)
+// Where the CPU-written curve fields start inside Params.
+export const CURVES_OFFSET       = 384;
 export const VIEW_BUFFER_SIZE    = 16;   // View struct (one f32, 16-aligned)
 export const SHARP_BUFFER_SIZE   = 48;   // SharpParams struct (must match shader)
 // SourceSpace struct: one mat3x3<f32>, which is three 16-byte columns.
@@ -22,6 +24,8 @@ export interface CalcParamsPipeline {
     updateView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     updateSourceSpace: (srcToWorking: Float32Array) => void;
     updateToneMap: (toneMap: ToneMap) => void;
+    // The baked point curves, or null while every curve is the identity.
+    updateCurves: (lut: Float32Array | null) => void;
     recordCalcParams: (
         encoder: GPUCommandEncoder,
         timestampWrites?: GPUComputePassTimestampWrites,
@@ -45,11 +49,12 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
     });
 
     // Params storage buffer — computed matrices written by the shader,
-    // read by develop.wgsl / histogram.wgsl
+    // read by develop.wgsl / histogram.wgsl. The curve table at its tail is
+    // written from here instead.
     const paramsBuffer = device.createBuffer({
         label: "Computed Params Storage Buffer",
         size: PARAMS_BUFFER_SIZE,
-        usage: GPUBufferUsage.STORAGE,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
     // View uniform buffer — where this render sits relative to the full image
@@ -170,6 +175,16 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         device.queue.writeBuffer(toneMapBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
     }
 
+    // A null table only clears the flag; the stale entries behind it are never read.
+    function updateCurves(lut: Float32Array | null) {
+        const data = new Float32Array(4 + (lut?.length ?? 0));
+        if (lut) {
+            data[0] = 1;
+            data.set(lut, 4);
+        }
+        device.queue.writeBuffer(paramsBuffer, CURVES_OFFSET, data.buffer, data.byteOffset, data.byteLength);
+    }
+
     function recordCalcParams(
         encoder: GPUCommandEncoder,
         timestampWrites?: GPUComputePassTimestampWrites,
@@ -199,6 +214,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
     updateView(1, 0, 0);
     updateSourceSpace(new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]));
     updateToneMap(defaultToneMap);
+    updateCurves(null);
 
     return {
         paramsBuffer,
@@ -207,6 +223,7 @@ export function createCalcParamsPipeline(gpu: GPUSession): CalcParamsPipeline {
         updateView,
         updateSourceSpace,
         updateToneMap,
+        updateCurves,
         recordCalcParams,
         destroy,
     };

@@ -1550,6 +1550,73 @@ fn every_slider_changes_the_rendered_image() {
     );
 }
 
+/// A baked curve table, the way the frontend sends one.
+fn curve_lut(f: impl Fn(usize, f64) -> f64) -> Vec<f32> {
+    let mut lut = Vec::with_capacity(256 * 4);
+    for i in 0..256 {
+        let x = i as f64 / 255.0;
+        for c in 0..3 {
+            lut.push(f(c, x) as f32);
+        }
+        lut.push(0.0);
+    }
+    lut
+}
+
+#[test]
+fn an_identity_curve_table_changes_nothing() {
+    let values: Vec<u8> = (0..=255).step_by(15).collect();
+    let plain = develop_patches(&values, &defaults());
+    let curved = develop_patches(
+        &values,
+        &SlidersPayload { curve_lut: curve_lut(|_, x| x), ..defaults() },
+    );
+    for (a, b) in plain.iter().zip(&curved) {
+        assert!(!differs(*a, *b), "identity curve moved {a:?} to {b:?}");
+    }
+}
+
+#[test]
+fn a_neutral_curve_maps_tone_exactly() {
+    // With default sliders the tone the curve sees is exactly input / 255, and
+    // a curve shared by all three channels keeps the result neutral.
+    let f = |x: f64| x * x * (3.0 - 2.0 * x);
+    let sliders = SlidersPayload { curve_lut: curve_lut(|_, x| f(x)), ..defaults() };
+
+    for value in [0u8, 40, 100, 128, 180, 230, 255] {
+        let got = develop_patch([value; 3], &sliders);
+        let expected = (f(value as f64 / 255.0) * 255.0).round() as u8;
+        for c in 0..3 {
+            assert!(
+                close(got[c], expected),
+                "input {value}, channel {c}: got {got:?}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_colour_curve_moves_only_its_own_channel_up() {
+    // A lift on red alone. The output transform mixes channels, so the others
+    // may dip slightly, but red must be the one that rises.
+    let sliders = SlidersPayload {
+        curve_lut: curve_lut(|c, x| if c == 0 { x + 0.15 * (1.0 - x) * x * 4.0 } else { x }),
+        ..defaults()
+    };
+
+    for value in [64u8, 128, 192] {
+        let plain = develop_patch([value; 3], &defaults());
+        let got = develop_patch([value; 3], &sliders);
+        assert!(got[0] as i32 > plain[0] as i32 + TOL, "red did not rise at {value}: {got:?}");
+        for c in 1..3 {
+            assert!(
+                got[c] as i32 <= plain[c] as i32 + TOL,
+                "channel {c} rose with the red curve at {value}: {got:?} vs {plain:?}"
+            );
+        }
+    }
+}
+
 /// No slider outside the per-channel and white-balance groups may introduce a
 /// colour cast. A transposed matrix or a channel typo shows up here as a tint on
 /// an image the user only meant to brighten.

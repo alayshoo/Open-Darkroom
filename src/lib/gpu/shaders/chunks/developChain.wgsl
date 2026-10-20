@@ -59,6 +59,25 @@ fn hsl_oklch(rgb: vec3f) -> vec3f {
   return M_LMS_TO_WORKING * (lms * lms * lms);
 }
 
+const CURVE_LUT_LAST: f32 = 255.0;
+
+// One channel of the baked point curves, linear between table entries. Past
+// either end the curve carries on along its end slope, so values outside 0..1
+// are reshaped rather than clipped.
+fn curve_channel(x: f32, ch: u32) -> f32 {
+  let t = x * CURVE_LUT_LAST;
+  if (t <= 0.0) {
+    let y0 = params.curve_lut[0][ch];
+    return y0 + t * (params.curve_lut[1][ch] - y0);
+  }
+  if (t >= CURVE_LUT_LAST) {
+    let y1 = params.curve_lut[255][ch];
+    return y1 + (t - CURVE_LUT_LAST) * (y1 - params.curve_lut[254][ch]);
+  }
+  let i = u32(t);
+  return mix(params.curve_lut[i][ch], params.curve_lut[i + 1u][ch], t - f32(i));
+}
+
 fn develop(source: vec3f) -> vec3f {
   var rgb = source;
 
@@ -132,6 +151,16 @@ fn develop(source: vec3f) -> vec3f {
   tone += params.shadows    * shadowMask;
   tone += params.whites     * whiteMask;
   tone += params.blacks     * blackMask;
+
+  // 8b. Point curves — each colour curve, then the master, baked into one table
+  //     per channel on the CPU. Skipped while every curve is the identity.
+  if (params.curves_active > 0.5) {
+    tone = vec3f(
+      curve_channel(tone.r, 0u),
+      curve_channel(tone.g, 1u),
+      curve_channel(tone.b, 2u),
+    );
+  }
 
   rgb = decode_srgb(tone);
 

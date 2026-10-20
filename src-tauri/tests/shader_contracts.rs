@@ -18,7 +18,7 @@ use common::{
 
 use open_darkroom_lib::export_rendering::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
-    DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
+    CURVES_OFFSET, CURVE_LUT_ENTRIES, DEVELOP_WGSL, PARAMS_BYTES, SHARP_PARAMS_BYTES, SLIDERS_BYTES, SLIDER_COUNT,
     SOURCE_SPACE_BYTES, TONE_MAP_BYTES, VIEW_BYTES,
 };
 use open_darkroom_lib::export_rendering::OUTPUT_SPACE_BYTES;
@@ -455,6 +455,26 @@ fn params_struct_matches_the_declared_size() {
         struct_size(&fields),
         PARAMS_BYTES as usize,
         "PARAMS_BYTES disagrees with the WGSL Params struct: {fields:#?}"
+    );
+}
+
+/// The curve fields are written from the CPU at a fixed offset, so that offset
+/// has to land on `curves_active` in every language.
+#[test]
+fn curve_fields_sit_where_the_cpu_writes_them() {
+    let fields = wgsl_struct(CALC_PARAMS_WGSL, "Params");
+    let at = fields
+        .iter()
+        .position(|f| f.name == "curves_active")
+        .expect("curves_active missing from Params");
+    assert_eq!(struct_size(&fields[..at]), CURVES_OFFSET as usize);
+
+    let lut = fields.iter().find(|f| f.name == "curve_lut").expect("curve_lut missing");
+    assert_eq!(lut.ty, format!("array<vec4f, {CURVE_LUT_ENTRIES}>"));
+
+    assert!(
+        CALC_PARAMS_PIPELINE_TS.contains(&format!("CURVES_OFFSET       = {CURVES_OFFSET};")),
+        "CURVES_OFFSET in TypeScript disagrees with Rust"
     );
 }
 

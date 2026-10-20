@@ -6,12 +6,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { defaultSlidersRGB, modeKeys, type Sliders } from "$lib/types/imgParameters";
+import { defaultCurves } from "$lib/types/curves";
 
 const writeText = vi.hoisted(() => vi.fn());
 const readText = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText, readText }));
 
-const { copyAdjustments, parseAdjustments } = await import(
+const { copyAdjustments, parseAdjustments, parseAdjustmentSet } = await import(
   "$lib/utils/adjustmentsClipboard"
 );
 
@@ -141,5 +142,53 @@ describe("reading an edited document", () => {
 
   it("rejects a document written for the other mode", () => {
     expect(() => parseAdjustments("redGamma: 0.85", normalKeys)).toThrow();
+  });
+});
+
+describe("curves", () => {
+  it("round trip with the sliders", async () => {
+    const curves = defaultCurves();
+    curves.master = [
+      { x: 0, y: 0.05 },
+      { x: 0.4, y: 0.35 },
+      { x: 1, y: 0.95 },
+    ];
+    curves.blue = [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.6 },
+      { x: 1, y: 1 },
+    ];
+
+    writeText.mockClear();
+    await copyAdjustments(defaultSlidersRGB, normalKeys, curves);
+    const text = writeText.mock.calls[0][0] as string;
+
+    const parsed = parseAdjustmentSet(text, normalKeys, true);
+    expect(parsed.curves).toEqual(curves);
+    expect(Object.keys(parsed.sliders)).toHaveLength(normalKeys.length);
+  });
+
+  it("are left out when the mode does not take them", () => {
+    const text = "redGamma: 0.85\ncurveMaster: 0,0 1,0.5";
+    expect(parseAdjustmentSet(text, darkroomKeys, false).curves).toEqual({});
+    expect(() => parseAdjustmentSet("curveMaster: 0,0 1,0.5", darkroomKeys, false)).toThrow();
+  });
+
+  it("make a document on their own", () => {
+    const parsed = parseAdjustmentSet("curveRed: 0,0.1 1,1", normalKeys, true);
+    expect(parsed.curves).toEqual({ red: [{ x: 0, y: 0.1 }, { x: 1, y: 1 }] });
+    expect(parsed.sliders).toEqual({});
+  });
+
+  it("skip a malformed curve whole", () => {
+    const text = [
+      "curveMaster: 0,0 0.6,0.5 0.4,0.6 1,1",
+      "curveRed: 0.1,0 1,1",
+      "curveGreen: 0,0 1,1.5",
+      "curveBlue: 0,0 0.5,0.4 1,1",
+    ].join("\n");
+    expect(parseAdjustmentSet(text, normalKeys, true).curves).toEqual({
+      blue: [{ x: 0, y: 0 }, { x: 0.5, y: 0.4 }, { x: 1, y: 1 }],
+    });
   });
 });

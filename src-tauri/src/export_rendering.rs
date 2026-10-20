@@ -116,7 +116,14 @@ pub fn chunk_rows_for_margin(margin: u32) -> u32 {
 
 /// Size of the `Params` struct written by calcParams.wgsl and read by
 /// develop.wgsl / histogram.wgsl.
-pub const PARAMS_BYTES: u64 = 384;
+pub const PARAMS_BYTES: u64 = 4496;
+
+/// Byte offset of `curves_active` in `Params`. The flag and the table after it
+/// are written from the CPU rather than by calcParams.
+pub const CURVES_OFFSET: u64 = 384;
+
+/// Entries in `Params.curve_lut`, each four f32 wide.
+pub const CURVE_LUT_ENTRIES: usize = 256;
 
 /// Size of the `OutputSpace` uniform read by colorSpaceEncode.wgsl and
 /// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, then two
@@ -201,6 +208,11 @@ pub struct SlidersPayload {
     /// path receives it. Packed into its own uniform, not the `Sliders` one.
     #[serde(default)]
     pub tone_map: ToneMapPayload,
+    /// The point curves, baked by the frontend: `CURVE_LUT_ENTRIES` entries of
+    /// red, green, blue and an unused lane. Empty while every curve is the
+    /// identity.
+    #[serde(default)]
+    pub curve_lut: Vec<f32>,
 }
 
 impl Default for SlidersPayload {
@@ -264,6 +276,7 @@ impl Default for SlidersPayload {
             hsl_magenta_sat:      0.0,
             hsl_magenta_lum:      0.0,
             tone_map:             ToneMapPayload::default(),
+            curve_lut:            Vec::new(),
         }
     }
 }
@@ -298,6 +311,28 @@ pub fn tone_map_to_bytes(t: &ToneMapPayload) -> [u8; TONE_MAP_BYTES] {
     bytes[0..4].copy_from_slice(&t.rolloff.to_le_bytes());
     bytes[4..8].copy_from_slice(&mode.to_le_bytes());
     bytes
+}
+
+/// Pack the curve fields at the tail of `Params`: the active flag, padding, then
+/// the table. An empty table packs only the cleared flag.
+pub fn curves_to_bytes(lut: &[f32]) -> Result<Vec<u8>, String> {
+    if lut.is_empty() {
+        return Ok(vec![0u8; 16]);
+    }
+    if lut.len() != CURVE_LUT_ENTRIES * 4 {
+        return Err(format!(
+            "Curve table holds {} values, expected {}",
+            lut.len(),
+            CURVE_LUT_ENTRIES * 4
+        ));
+    }
+    let mut bytes = Vec::with_capacity(16 + lut.len() * 4);
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 12]);
+    for v in lut {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    Ok(bytes)
 }
 
 /// Pack sliders into the uniform buffer matching the WGSL Sliders struct.
@@ -542,6 +577,8 @@ pub async fn render_image_with_chunk_rows(
         ));
     }
 
+    let curve_bytes = curves_to_bytes(&sliders.curve_lut)?;
+
     // A profile the GPU cannot be handed as a matrix is applied here instead,
     // over the whole buffer rather than per chunk: the conversion is per pixel,
     // so splitting it would only multiply the lcms2 transforms. It runs after
@@ -587,9 +624,10 @@ pub async fn render_image_with_chunk_rows(
     let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("params_buf"),
         size: PARAMS_BYTES,
-        usage: wgpu::BufferUsages::STORAGE,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    queue.write_buffer(&params_buf, CURVES_OFFSET, &curve_bytes);
 
     let sharp_buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("sharp_buf"),
