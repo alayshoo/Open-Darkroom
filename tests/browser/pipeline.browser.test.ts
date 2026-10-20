@@ -392,11 +392,11 @@ describe("pipeline construction", () => {
   });
 
   it("declares buffer sizes matching the WGSL structs", () => {
-    // 30 f32 fields, rounded up to the 16-byte alignment of a uniform struct.
-    expect(SLIDERS_BUFFER_SIZE).toBe(128);
+    // 54 f32 fields, rounded up to the 16-byte alignment of a uniform struct.
+    expect(SLIDERS_BUFFER_SIZE).toBe(224);
     expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
-    expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(30 * 4);
-    expect(PARAMS_BUFFER_SIZE).toBe(256);
+    expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(54 * 4);
+    expect(PARAMS_BUFFER_SIZE).toBe(384);
     // One f32, rounded up to the 16-byte alignment of a uniform struct.
     expect(VIEW_BUFFER_SIZE).toBe(16);
     // Twelve f32 — three bands' amounts and sigmas, two thresholds, padding.
