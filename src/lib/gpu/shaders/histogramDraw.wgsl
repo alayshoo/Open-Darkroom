@@ -13,6 +13,10 @@
 
 //!include "chunks/histogramBins.wgsl"
 
+// Draws the union of the three channels in white instead, for the backdrop
+// behind the curves editor.
+override MONO: bool = false;
+
 @group(0) @binding(0) var<storage, read> bins:  array<u32, BIN_TOTAL>;
 @group(0) @binding(1) var<storage, read> scale: array<u32, 1>;
 
@@ -75,5 +79,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
   // Already premultiplied: no channel can exceed the alpha, since the alpha is
   // the largest of them.
-  return vec4f(colour, max(colour.r, max(colour.g, colour.b)));
+  let alpha = max(colour.r, max(colour.g, colour.b));
+  if (MONO) {
+    return vec4f(vec3f(alpha), alpha);
+  }
+  return vec4f(colour, alpha);
 }

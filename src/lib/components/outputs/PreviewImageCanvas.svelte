@@ -17,9 +17,12 @@
     // Props
     let {
         sliders,
+        curveLut,
         imagePayload,
     }: {
         sliders: Sliders;
+        // The baked point curves, or null while every curve is the identity.
+        curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
     } = $props();
 
@@ -152,6 +155,12 @@
     $effect(() => {
         if (!renderer) return;
         renderer.setToneMap(colorSpaceDebug.toneMap);
+        renderer.requestRender();
+    });
+
+    $effect(() => {
+        if (!renderer) return;
+        renderer.setCurves(curveLut);
         renderer.requestRender();
     });
 

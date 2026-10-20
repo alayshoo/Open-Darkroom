@@ -144,16 +144,24 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         code: drawSource,
     });
 
-    const drawPipeline = device.createRenderPipeline({
-        label: "Histogram Draw Pipeline",
-        layout: device.createPipelineLayout({ bindGroupLayouts: [drawLayout] }),
-        vertex: { module: drawModule, entryPoint: "vs_main" },
-        fragment: {
-            module: drawModule,
-            entryPoint: "fs_main",
-            targets: [{ format: gpu.format }],
-        },
-    });
+    const drawPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [drawLayout] });
+
+    function createDrawPipeline(mono: boolean): GPURenderPipeline {
+        return device.createRenderPipeline({
+            label: mono ? "Histogram Mono Draw Pipeline" : "Histogram Draw Pipeline",
+            layout: drawPipelineLayout,
+            vertex: { module: drawModule, entryPoint: "vs_main" },
+            fragment: {
+                module: drawModule,
+                entryPoint: "fs_main",
+                targets: [{ format: gpu.format }],
+                constants: { MONO: mono ? 1 : 0 },
+            },
+        });
+    }
+
+    const drawPipeline = createDrawPipeline(false);
+    const monoDrawPipeline = createDrawPipeline(true);
 
     // Both read the same two buffers for the life of the pipeline, so neither
     // group ever needs rebuilding.
@@ -213,10 +221,39 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         calcParams.updateToneMap(toneMap);
     }
 
+    function setCurves(lut: Float32Array | null) {
+        calcParams.updateCurves(lut);
+    }
+
+    function recordDraw(
+        encoder: GPUCommandEncoder,
+        target: GPUTextureView,
+        mono: boolean,
+        timestampWrites?: GPURenderPassTimestampWrites,
+    ) {
+        const drawPass = encoder.beginRenderPass({
+            label: mono ? "Histogram Mono Draw Pass" : "Histogram Draw Pass",
+            colorAttachments: [
+                {
+                    view: target,
+                    clearValue: TRANSPARENT,
+                    loadOp: "clear",
+                    storeOp: "store",
+                },
+            ],
+            timestampWrites,
+        });
+        drawPass.setPipeline(mono ? monoDrawPipeline : drawPipeline);
+        drawPass.setBindGroup(0, drawBindGroup);
+        drawPass.draw(6);
+        drawPass.end();
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
         target?: GPUTextureView,
+        monoTarget?: GPUTextureView,
     ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
@@ -261,22 +298,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         scalePass.end();
 
         if (target) {
-            const drawPass = encoder.beginRenderPass({
-                label: "Histogram Draw Pass",
-                colorAttachments: [
-                    {
-                        view: target,
-                        clearValue: TRANSPARENT,
-                        loadOp: "clear",
-                        storeOp: "store",
-                    },
-                ],
-                timestampWrites: measure ? timer.passWrites("draw") : undefined,
-            });
-            drawPass.setPipeline(drawPipeline);
-            drawPass.setBindGroup(0, drawBindGroup);
-            drawPass.draw(6);
-            drawPass.end();
+            recordDraw(encoder, target, false, measure ? timer.passWrites("draw") : undefined);
+        }
+        if (monoTarget) {
+            recordDraw(encoder, monoTarget, true);
         }
 
         if (measure) timer.resolve(encoder);
@@ -350,5 +375,5 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // black image.
     setOutputSpace(gpu.displaySpace, null);
 
-    return { setSourceSpace, setOutputSpace, setToneMap, render, readBins, destroy };
+    return { setSourceSpace, setOutputSpace, setToneMap, setCurves, render, readBins, destroy };
 }

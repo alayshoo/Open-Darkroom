@@ -22,6 +22,7 @@
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
     import HslBandGroup from "$lib/components/inputs/values/HslBandGroup.svelte";
+    import CurveEditor from "$lib/components/inputs/CurveEditor.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
     import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
@@ -36,6 +37,14 @@
         HSL_KEYS,
         SLIDER_TOLERANCE,
     } from "$lib/types/imgParameters";
+
+    import {
+        type Curves,
+        bakeCurveLut,
+        cloneCurves,
+        curvesEqual,
+        defaultCurves,
+    } from "$lib/types/curves";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
     import { openImage } from "$lib/utils/openImage";
@@ -193,6 +202,9 @@
     // exported default directly would write every slider drag back into it.
     let sliders: Sliders = $state({ ...defaultSlidersRGB });
 
+    let curves: Curves = $state(defaultCurves());
+    let curveHistogramCanvas: HTMLCanvasElement | null = $state(null);
+
     // ===== B&W toggle logic =====
     let isRgb = $state(true);
     let savedColorValues: Partial<typeof sliders> | null = null;
@@ -218,6 +230,9 @@
         isDarkroom ? activePageDarkroom : activePageNormal,
     );
     let pageCount = $derived(isDarkroom ? 1 : isRgb ? 4 : 3);
+
+    // B&W leaves the colour curves out, the way it pins the colour sliders.
+    let curveLut = $derived(bakeCurveLut(curves, isRgb));
     let pagerEl = $derived<HTMLDivElement | null>(
         isDarkroom ? pagerElDarkroom : pagerElNormal,
     );
@@ -307,7 +322,7 @@
             showExportModal = true;
         });
         try {
-            await exportImage(sliders, colorSpaceDebug.toneMap, exportSettings);
+            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
@@ -334,6 +349,9 @@
                 numeric,
             );
         },
+        setCurves: (next) => {
+            curves = cloneCurves(next);
+        },
     };
 
     function commit(action: Action) {
@@ -352,8 +370,9 @@
 
     /* In B&W the colour keys are pinned to their overrides, so an incoming set
        puts its colour values aside for the toggle back to colour instead of
-       applying them. The whole set lands as one history step. */
-    function applySliderSet(values: Partial<Sliders>) {
+       applying them. The whole set lands as one history step, with any curves
+       it carries. */
+    function applySliderSet(values: Partial<Sliders>, curveValues: Partial<Curves> = {}) {
         const next: Partial<Sliders> = { ...values };
 
         if (!isRgb) {
@@ -372,8 +391,15 @@
             (oldValues as any)[key] = sliders[key];
         }
 
-        commit({ type: "sliders", oldValues, newValues: next });
+        const oldCurves = cloneCurves($state.snapshot(curves) as Curves);
+        const newCurves = cloneCurves({ ...oldCurves, ...curveValues });
+        const curvesChange = curvesEqual(oldCurves, newCurves)
+            ? {}
+            : { oldCurves, newCurves };
+
+        commit({ type: "sliders", oldValues, newValues: next, ...curvesChange });
         stateAccessors.setSliders(next);
+        if (curvesChange.newCurves) stateAccessors.setCurves(curvesChange.newCurves);
     }
 
     // All three act on the mode the user is looking at, and never reach across
@@ -382,7 +408,11 @@
 
     async function handleCopyAdjustments() {
         try {
-            await copyAdjustments(sliders, activeKeys);
+            await copyAdjustments(
+                sliders,
+                activeKeys,
+                isDarkroom ? undefined : ($state.snapshot(curves) as Curves),
+            );
         } catch (e) {
             console.error("Failed to copy adjustments:", e);
         }
@@ -390,7 +420,8 @@
 
     async function handlePasteAdjustments() {
         try {
-            applySliderSet(await readAdjustments(activeKeys));
+            const pasted = await readAdjustments(activeKeys, !isDarkroom);
+            applySliderSet(pasted.sliders, pasted.curves);
         } catch (e) {
             console.error("Failed to paste adjustments:", e);
         }
@@ -398,15 +429,16 @@
 
     // Always the colour defaults: in B&W the overridden keys are diverted to
     // the saved colour values, leaving the mode itself untouched.
-    function resetKeys(keys: readonly (keyof Sliders)[]) {
+    function resetKeys(keys: readonly (keyof Sliders)[], curveValues: Partial<Curves> = {}) {
         const next: Partial<Sliders> = {};
         for (const key of keys) {
             (next as any)[key] = defaultSlidersRGB[key];
         }
-        applySliderSet(next);
+        applySliderSet(next, curveValues);
     }
 
-    const handleResetAdjustments = () => resetKeys(activeKeys);
+    const handleResetAdjustments = () =>
+        resetKeys(activeKeys, isDarkroom ? {} : defaultCurves());
     const handleResetColourMixer = () => resetKeys(HSL_KEYS);
 
     /* The tolerance is there because animated values land on their target
@@ -422,8 +454,11 @@
 
     let isColourMixerIdentity = $derived(HSL_KEYS.every(isAtDefault));
 
+    let isCurvesIdentity = $derived(curvesEqual(curves, defaultCurves()));
+
     // Whether a reset would change anything, judged on the same keys it writes.
     let isIdentity = $derived(
+        (isDarkroom || isCurvesIdentity) &&
         activeKeys.every(
             (key) => ((!isRgb || isColorAnimating) && key in overridesBW) || isAtDefault(key),
         ),
@@ -492,12 +527,12 @@
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
         <div class="colour-space-bar shrink-0">
-            <ColorSpacePanel {sliders} {imagePayload} />
+            <ColorSpacePanel {sliders} {curveLut} {imagePayload} />
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
-            <PreviewImageCanvas {sliders} {imagePayload} />
+            <PreviewImageCanvas {sliders} {curveLut} {imagePayload} />
         </div>
         {#if settings.debugTools && debugStats.enabled}
             <DebugStatsOverlay />
@@ -509,7 +544,12 @@
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
         >
             <div class="histogram-container m-1.25">
-                <Histogram {sliders} {imagePayload} />
+                <Histogram
+                    {sliders}
+                    {curveLut}
+                    {imagePayload}
+                    curveCanvas={curveHistogramCanvas}
+                />
             </div>
         </div>
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
@@ -935,11 +975,17 @@
                             <!-- Curves Panel -->
                             <div class="controls-page">
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
-                                    <span class="section-title pb-1.5">Curves</span>
-                                    <div
-                                        class="flex w-full aspect-square rounded-[6px]"
-                                        style="background: black;"
-                                    ></div>
+                                    <CurveEditor
+                                        bind:curves
+                                        bind:histogramCanvas={curveHistogramCanvas}
+                                        {isRgb}
+                                        onCommit={(oldCurves, newCurves) =>
+                                            commit({ type: "curves", oldCurves, newCurves })}
+                                    >
+                                        {#snippet title()}
+                                            <span class="section-title">Curves</span>
+                                        {/snippet}
+                                    </CurveEditor>
                                     <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.highlights}

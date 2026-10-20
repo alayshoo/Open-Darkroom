@@ -396,7 +396,7 @@ describe("pipeline construction", () => {
     expect(SLIDERS_BUFFER_SIZE).toBe(224);
     expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
     expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(54 * 4);
-    expect(PARAMS_BUFFER_SIZE).toBe(384);
+    expect(PARAMS_BUFFER_SIZE).toBe(4496);
     // One f32, rounded up to the 16-byte alignment of a uniform struct.
     expect(VIEW_BUFFER_SIZE).toBe(16);
     // Twelve f32 — three bands' amounts and sigmas, two thresholds, padding.

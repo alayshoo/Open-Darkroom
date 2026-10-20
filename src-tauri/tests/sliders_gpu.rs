@@ -1550,6 +1550,62 @@ fn every_slider_changes_the_rendered_image() {
     );
 }
 
+/// A baked curve table, the way the frontend sends one.
+fn curve_lut(f: impl Fn(usize, f64) -> f64) -> Vec<f32> {
+    let mut lut = Vec::with_capacity(256 * 4);
+    for i in 0..256 {
+        let x = i as f64 / 255.0;
+        for c in 0..3 {
+            lut.push(f(c, x) as f32);
+        }
+        lut.push(0.0);
+    }
+    lut
+}
+
+#[test]
+fn an_identity_curve_table_changes_nothing() {
+    let values: Vec<u8> = (0..=255).step_by(15).collect();
+    let plain = develop_patches(&values, &defaults());
+    let curved = develop_patches(
+        &values,
+        &SlidersPayload { curve_lut: curve_lut(|_, x| x), ..defaults() },
+    );
+    for (a, b) in plain.iter().zip(&curved) {
+        assert!(!differs(*a, *b), "identity curve moved {a:?} to {b:?}");
+    }
+}
+
+#[test]
+fn a_curve_maps_each_channel_through_its_own_column() {
+    // Red inverted, green lifted to half, blue untouched. With default sliders
+    // the tone the curve sees is exactly input / 255.
+    let sliders = SlidersPayload {
+        curve_lut: curve_lut(|c, x| match c {
+            0 => 1.0 - x,
+            1 => 0.5 + 0.5 * x,
+            _ => x,
+        }),
+        ..defaults()
+    };
+
+    // The curved tone is no longer neutral, so it is carried out of the working
+    // space into sRGB the way the output transform does.
+    for value in [0u8, 64, 128, 200, 255] {
+        let x = value as f64 / 255.0;
+        let got = develop_patch([value; 3], &sliders);
+        let working = [1.0 - x, 0.5 + 0.5 * x, x].map(srgb_to_linear);
+        let expected = apply_matrix(&WORKING_TO_SRGB, working)
+            .map(|l| (linear_to_srgb(l.clamp(0.0, 1.0)) * 255.0).round() as u8);
+        for c in 0..3 {
+            assert!(
+                close(got[c], expected[c]),
+                "input {value}, channel {c}: got {got:?}, expected {expected:?}"
+            );
+        }
+    }
+}
+
 /// No slider outside the per-channel and white-balance groups may introduce a
 /// colour cast. A transposed matrix or a channel typo shows up here as a tint on
 /// an image the user only meant to brighten.

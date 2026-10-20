@@ -14,10 +14,16 @@
 
     let {
         sliders,
+        curveLut,
         imagePayload,
+        curveCanvas = null,
     }: {
         sliders: Sliders;
+        // The baked point curves, or null while every curve is the identity.
+        curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
+        // The curves editor's backdrop, drawn from the same bins in one tone.
+        curveCanvas?: HTMLCanvasElement | null;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -25,6 +31,7 @@
 
     let canvas: HTMLCanvasElement;
     let canvasLink: GPUCanvasLink | null = $state(null);
+    let curveLink: GPUCanvasLink | null = $state(null);
     let histPipeline: HistogramPipeline | null = $state(null);
     let image: GPUImage | null = $state(null);
 
@@ -53,18 +60,22 @@
         // Nothing to render into until the observer has sized the backing store.
         if (canvas.width === 0 || canvas.height === 0) return false;
 
+        const curveTarget =
+            curveLink && curveCanvas && curveCanvas.width > 0 && curveCanvas.height > 0
+                ? curveLink.canvasConfig.getCurrentTexture().createView()
+                : undefined;
+
         histPipeline.render(
             image.texture,
             sliders,
             canvasLink.canvasConfig.getCurrentTexture().createView(),
+            curveTarget,
         );
         return true;
     }
 
-    // ── ResizeObserver: keep canvas backing-store at native device pixels ──
-    $effect(() => {
-        if (!canvas) return;
-
+    // Keeps a canvas's backing store at native device pixels.
+    function observeBackingStore(target: HTMLCanvasElement): () => void {
         const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 // Prefer devicePixelContentBoxSize (exact physical pixels).
@@ -80,9 +91,9 @@
                 }
 
                 // Only touch the canvas if the size actually changed
-                if (canvas.width !== w || canvas.height !== h) {
-                    canvas.width = w;
-                    canvas.height = h;
+                if (target.width !== w || target.height !== h) {
+                    target.width = w;
+                    target.height = h;
                     // Resizing drops the swapchain contents, so the curves have
                     // to be drawn again — but only drawn, not recomputed.
                     requestRender();
@@ -92,12 +103,38 @@
 
         // Request device-pixel-level reporting when supported
         try {
-            ro.observe(canvas, { box: "device-pixel-content-box" });
+            ro.observe(target, { box: "device-pixel-content-box" });
         } catch {
-            ro.observe(canvas, { box: "content-box" });
+            ro.observe(target, { box: "content-box" });
         }
 
         return () => ro.disconnect();
+    }
+
+    $effect(() => {
+        if (!canvas) return;
+        return observeBackingStore(canvas);
+    });
+
+    // The curves editor's canvas comes and goes with its page, so it is linked
+    // and observed for as long as it is mounted.
+    $effect(() => {
+        const target = curveCanvas;
+        if (!target) return;
+
+        let destroyed = false;
+        const disconnect = observeBackingStore(target);
+        linkCanvas2GPU(target, gpu, "premultiplied", "srgb").then((link) => {
+            if (destroyed) return;
+            curveLink = link;
+            requestRender();
+        });
+
+        return () => {
+            destroyed = true;
+            disconnect();
+            curveLink = null;
+        };
     });
 
     // Link the canvas and create the pipeline once on mount
@@ -165,6 +202,12 @@
     $effect(() => {
         if (!histPipeline) return;
         histPipeline.setToneMap(colorSpaceDebug.toneMap);
+        requestRender();
+    });
+
+    $effect(() => {
+        if (!histPipeline) return;
+        histPipeline.setCurves(curveLut);
         requestRender();
     });
 
