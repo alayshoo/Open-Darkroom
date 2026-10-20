@@ -84,8 +84,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   // Already premultiplied: no channel can exceed the alpha, since the alpha is
   // the largest of them.
   let alpha = max(colour.r, max(colour.g, colour.b));
+  // Picked with a mask rather than an index: an override index that is out of
+  // range fails pipeline creation, even behind a branch that cannot run.
   if (CHANNEL < 3u) {
-    let c = colour[CHANNEL];
+    let pick = vec3f(f32(CHANNEL == 0u), f32(CHANNEL == 1u), f32(CHANNEL == 2u));
+    let c = dot(colour, pick);
     return vec4f(vec3f(TINT_R, TINT_G, TINT_B) * c, c);
   }
   if (CHANNEL == 3u) {
