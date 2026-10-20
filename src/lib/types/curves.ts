@@ -3,6 +3,14 @@
 export const CURVE_CHANNELS = ["master", "red", "green", "blue"] as const;
 export type CurveChannel = (typeof CURVE_CHANNELS)[number];
 
+/** Each curve's colour, in sRGB, shared by the editor and its histogram backdrop. */
+export const CURVE_COLOURS: Record<CurveChannel, string> = {
+    master: "#e6e6e6",
+    red: "#f0443a",
+    green: "#4cbf4f",
+    blue: "#3f6ff0",
+};
+
 /** A control point, both axes in encoded tone from 0 to 1. */
 export interface CurvePoint {
     x: number;

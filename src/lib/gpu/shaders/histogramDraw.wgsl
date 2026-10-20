@@ -13,9 +13,13 @@
 
 //!include "chunks/histogramBins.wgsl"
 
-// Draws the union of the three channels in white instead, for the backdrop
-// behind the curves editor.
-override MONO: bool = false;
+// What is drawn: 0-2 that channel alone and 3 the union of all three, each in
+// TINT, for the backdrop behind the curves editor. Anything else draws the
+// three channels summed.
+override CHANNEL: u32 = 4u;
+override TINT_R: f32 = 1.0;
+override TINT_G: f32 = 1.0;
+override TINT_B: f32 = 1.0;
 
 @group(0) @binding(0) var<storage, read> bins:  array<u32, BIN_TOTAL>;
 @group(0) @binding(1) var<storage, read> scale: array<u32, 1>;
@@ -80,8 +84,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   // Already premultiplied: no channel can exceed the alpha, since the alpha is
   // the largest of them.
   let alpha = max(colour.r, max(colour.g, colour.b));
-  if (MONO) {
-    return vec4f(vec3f(alpha), alpha);
+  if (CHANNEL < 3u) {
+    let c = colour[CHANNEL];
+    return vec4f(vec3f(TINT_R, TINT_G, TINT_B) * c, c);
+  }
+  if (CHANNEL == 3u) {
+    return vec4f(vec3f(TINT_R, TINT_G, TINT_B) * alpha, alpha);
   }
   return vec4f(colour, alpha);
 }

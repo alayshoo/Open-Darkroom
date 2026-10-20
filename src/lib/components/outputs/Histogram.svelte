@@ -11,12 +11,14 @@
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import type { CurveChannel } from "$lib/types/curves";
 
     let {
         sliders,
         curveLut,
         imagePayload,
         curveCanvas = null,
+        curveChannel = "master",
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
@@ -24,6 +26,8 @@
         imagePayload: ImagePayload | null;
         // The curves editor's backdrop, drawn from the same bins in one tone.
         curveCanvas?: HTMLCanvasElement | null;
+        // Whose bins the backdrop shows.
+        curveChannel?: CurveChannel;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -60,16 +64,19 @@
         // Nothing to render into until the observer has sized the backing store.
         if (canvas.width === 0 || canvas.height === 0) return false;
 
-        const curveTarget =
+        const backdrop =
             curveLink && curveCanvas && curveCanvas.width > 0 && curveCanvas.height > 0
-                ? curveLink.canvasConfig.getCurrentTexture().createView()
+                ? {
+                      view: curveLink.canvasConfig.getCurrentTexture().createView(),
+                      channel: curveChannel,
+                  }
                 : undefined;
 
         histPipeline.render(
             image.texture,
             sliders,
             canvasLink.canvasConfig.getCurrentTexture().createView(),
-            curveTarget,
+            backdrop,
         );
         return true;
     }
@@ -208,6 +215,11 @@
     $effect(() => {
         if (!histPipeline) return;
         histPipeline.setCurves(curveLut);
+        requestRender();
+    });
+
+    $effect(() => {
+        void curveChannel;
         requestRender();
     });
 

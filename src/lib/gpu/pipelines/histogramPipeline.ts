@@ -1,6 +1,7 @@
 // src/lib/gpu/pipelines/histogramPipeline.ts
 
 import type { Sliders } from "$lib/types/imgParameters";
+import { CURVE_CHANNELS, CURVE_COLOURS, type CurveChannel } from "$lib/types/curves";
 import type { ToneMap } from "$lib/types/toneMap";
 import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
@@ -146,22 +147,38 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
     const drawPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [drawLayout] });
 
-    function createDrawPipeline(mono: boolean): GPURenderPipeline {
+    function createDrawPipeline(
+        label: string,
+        constants: Record<string, number>,
+    ): GPURenderPipeline {
         return device.createRenderPipeline({
-            label: mono ? "Histogram Mono Draw Pipeline" : "Histogram Draw Pipeline",
+            label,
             layout: drawPipelineLayout,
             vertex: { module: drawModule, entryPoint: "vs_main" },
             fragment: {
                 module: drawModule,
                 entryPoint: "fs_main",
                 targets: [{ format: gpu.format }],
-                constants: { MONO: mono ? 1 : 0 },
+                constants,
             },
         });
     }
 
-    const drawPipeline = createDrawPipeline(false);
-    const monoDrawPipeline = createDrawPipeline(true);
+    // The canvas is sRGB and unorm, so the tint is written as its code values.
+    function backdropConstants(channel: CurveChannel): Record<string, number> {
+        const hex = CURVE_COLOURS[channel];
+        const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+        const index = channel === "master" ? 3 : CURVE_CHANNELS.indexOf(channel) - 1;
+        return { CHANNEL: index, TINT_R: r, TINT_G: g, TINT_B: b };
+    }
+
+    const drawPipeline = createDrawPipeline("Histogram Draw Pipeline", {});
+    const backdropPipelines = Object.fromEntries(
+        CURVE_CHANNELS.map((channel) => [
+            channel,
+            createDrawPipeline(`Histogram ${channel} Backdrop Pipeline`, backdropConstants(channel)),
+        ]),
+    ) as Record<CurveChannel, GPURenderPipeline>;
 
     // Both read the same two buffers for the life of the pipeline, so neither
     // group ever needs rebuilding.
@@ -228,11 +245,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     function recordDraw(
         encoder: GPUCommandEncoder,
         target: GPUTextureView,
-        mono: boolean,
+        pipeline: GPURenderPipeline,
         timestampWrites?: GPURenderPassTimestampWrites,
     ) {
         const drawPass = encoder.beginRenderPass({
-            label: mono ? "Histogram Mono Draw Pass" : "Histogram Draw Pass",
+            label: "Histogram Draw Pass",
             colorAttachments: [
                 {
                     view: target,
@@ -243,7 +260,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             ],
             timestampWrites,
         });
-        drawPass.setPipeline(mono ? monoDrawPipeline : drawPipeline);
+        drawPass.setPipeline(pipeline);
         drawPass.setBindGroup(0, drawBindGroup);
         drawPass.draw(6);
         drawPass.end();
@@ -253,7 +270,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         inputTexture: GPUTexture,
         sliders: Sliders,
         target?: GPUTextureView,
-        monoTarget?: GPUTextureView,
+        backdrop?: { view: GPUTextureView; channel: CurveChannel },
     ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
@@ -298,10 +315,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         scalePass.end();
 
         if (target) {
-            recordDraw(encoder, target, false, measure ? timer.passWrites("draw") : undefined);
+            recordDraw(encoder, target, drawPipeline, measure ? timer.passWrites("draw") : undefined);
         }
-        if (monoTarget) {
-            recordDraw(encoder, monoTarget, true);
+        if (backdrop) {
+            recordDraw(encoder, backdrop.view, backdropPipelines[backdrop.channel]);
         }
 
         if (measure) timer.resolve(encoder);

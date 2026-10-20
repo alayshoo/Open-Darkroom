@@ -3,6 +3,7 @@
     import type { Snippet } from "svelte";
     import {
         CURVE_CHANNELS,
+        CURVE_COLOURS,
         cloneCurves,
         curveEvaluator,
         curvesEqual,
@@ -14,12 +15,15 @@
 
     let {
         curves = $bindable(),
+        channel = $bindable("master"),
         isRgb,
         histogramCanvas = $bindable(null),
         title,
         onCommit = (_old: Curves, _new: Curves) => {},
     }: {
         curves: Curves;
+        // The curve picked for editing. B&W edits the master whatever this holds.
+        channel?: CurveChannel;
         // Off in B&W, where only the master curve applies.
         isRgb: boolean;
         // Drawn into by the histogram, behind the curves.
@@ -28,12 +32,6 @@
         onCommit?: (oldCurves: Curves, newCurves: Curves) => void;
     } = $props();
 
-    const COLOURS: Record<CurveChannel, string> = {
-        master: "#e6e6e6",
-        red: "#f0443a",
-        green: "#4cbf4f",
-        blue: "#3f6ff0",
-    };
 
     const LABELS: Record<CurveChannel, string> = {
         master: "RGB",
@@ -51,8 +49,7 @@
     // How far past the edge a dragged point has to go to be removed.
     const REMOVE_DISTANCE = 24;
 
-    let selected = $state<CurveChannel>("master");
-    const active = $derived<CurveChannel>(isRgb ? selected : "master");
+    const active = $derived<CurveChannel>(isRgb ? channel : "master");
     const visible = $derived<readonly CurveChannel[]>(isRgb ? CURVE_CHANNELS : ["master"]);
 
     let svg: SVGSVGElement | null = $state(null);
@@ -68,20 +65,20 @@
 
     const paths = $derived.by(() => {
         const out = {} as Record<CurveChannel, string>;
-        for (const channel of CURVE_CHANNELS) {
-            const f = curveEvaluator(curves[channel]);
+        for (const id of CURVE_CHANNELS) {
+            const f = curveEvaluator(curves[id]);
             let d = "";
             for (let i = 0; i <= SAMPLES; i++) {
                 const x = i / SAMPLES;
                 d += `${i === 0 ? "M" : "L"}${(x * size).toFixed(2)},${((1 - f(x)) * size).toFixed(2)}`;
             }
-            out[channel] = d;
+            out[id] = d;
         }
         return out;
     });
 
     // Inactive curves first, so the one being edited is drawn on top.
-    const drawOrder = $derived([...visible.filter((c) => c !== active), active]);
+    const drawOrder = $derived([...visible.filter((id) => id !== active), active]);
 
     function clamp(v: number, lo: number, hi: number) {
         return Math.min(Math.max(v, lo), hi);
@@ -179,18 +176,18 @@
     <div class="flex flex-row items-center justify-between pb-1.5 pr-1.5">
         {@render title?.()}
         <div class="channels flex flex-row items-center gap-2" role="radiogroup">
-            {#each CURVE_CHANNELS as channel (channel)}
+            {#each CURVE_CHANNELS as option (option)}
                 <button
                     class="channel"
-                    class:selected={channel === active}
-                    class:adjusted={!isIdentityCurve(curves[channel])}
-                    style="--swatch: {COLOURS[channel]}"
+                    class:selected={option === active}
+                    class:adjusted={!isIdentityCurve(curves[option])}
+                    style="--swatch: {CURVE_COLOURS[option]}"
                     role="radio"
-                    aria-checked={channel === active}
-                    aria-label={LABELS[channel]}
-                    title={LABELS[channel]}
-                    disabled={!isRgb && channel !== "master"}
-                    onclick={() => (selected = channel)}
+                    aria-checked={option === active}
+                    aria-label={LABELS[option]}
+                    title={LABELS[option]}
+                    disabled={!isRgb && option !== "master"}
+                    onclick={() => (channel = option)}
                 ></button>
             {/each}
         </div>
@@ -216,12 +213,12 @@
             {/each}
             <line class="diagonal" x1="0" y1={size} x2={size} y2="0" />
 
-            {#each drawOrder as channel (channel)}
+            {#each drawOrder as id (id)}
                 <path
                     class="curve"
-                    class:active={channel === active}
-                    d={paths[channel]}
-                    stroke={COLOURS[channel]}
+                    class:active={id === active}
+                    d={paths[id]}
+                    stroke={CURVE_COLOURS[id]}
                 />
             {/each}
 
@@ -231,7 +228,7 @@
                     cx={point.x * size}
                     cy={(1 - point.y) * size}
                     r="4"
-                    stroke={COLOURS[active]}
+                    stroke={CURVE_COLOURS[active]}
                 />
             {/each}
         </svg>
@@ -274,7 +271,7 @@
         background: black;
     }
     .histogram {
-        opacity: 0.16;
+        opacity: 0.22;
         border-radius: inherit;
     }
     svg {

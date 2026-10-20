@@ -4,7 +4,6 @@
     import { listen } from "@tauri-apps/api/event";
     import { slide } from "svelte/transition";
     import { cubicInOut } from "svelte/easing";
-    import { tick } from "svelte";
 
     import TitleBar from "$lib/components/window/TitleBar.svelte";
 
@@ -39,6 +38,7 @@
     } from "$lib/types/imgParameters";
 
     import {
+        type CurveChannel,
         type Curves,
         bakeCurveLut,
         cloneCurves,
@@ -204,6 +204,7 @@
 
     let curves: Curves = $state(defaultCurves());
     let curveHistogramCanvas: HTMLCanvasElement | null = $state(null);
+    let curveChannel: CurveChannel = $state("master");
 
     // ===== B&W toggle logic =====
     let isRgb = $state(true);
@@ -229,7 +230,7 @@
     let activePage = $derived(
         isDarkroom ? activePageDarkroom : activePageNormal,
     );
-    let pageCount = $derived(isDarkroom ? 1 : isRgb ? 4 : 3);
+    let pageCount = $derived(isDarkroom ? 1 : 3);
 
     // B&W leaves the colour curves out, the way it pins the colour sliders.
     let curveLut = $derived(bakeCurveLut(curves, isRgb));
@@ -237,7 +238,7 @@
         isDarkroom ? pagerElDarkroom : pagerElNormal,
     );
 
-    async function handleColorModeToggle(isBw: boolean) {
+    function handleColorModeToggle(isBw: boolean) {
         if (isBw) {
             savedColorValues = {};
             const colorKeys = Object.keys(overridesBW) as (keyof Sliders)[];
@@ -250,10 +251,6 @@
                 COLOR_ANIM_MS,
             );
             markColorAnimating();
-            if (activePageNormal > 2) {
-                await tick(); // wait for the {#if isRgb} block to unmount
-                scrollToPage(2);
-            }
         } else if (savedColorValues) {
             animateObject(
                 sliders as unknown as Record<string, number>,
@@ -549,6 +546,7 @@
                     {curveLut}
                     {imagePayload}
                     curveCanvas={curveHistogramCanvas}
+                    curveChannel={isRgb ? curveChannel : "master"}
                 />
             </div>
         </div>
@@ -972,11 +970,12 @@
                                 </div>
                                 <div class="flex h-7.5"></div>
                             </div>
-                            <!-- Curves Panel -->
+                            <!-- Curves, HSL & Colour Mixer Panel -->
                             <div class="controls-page">
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <CurveEditor
                                         bind:curves
+                                        bind:channel={curveChannel}
                                         bind:histogramCanvas={curveHistogramCanvas}
                                         {isRgb}
                                         onCommit={(oldCurves, newCurves) =>
@@ -986,94 +985,12 @@
                                             <span class="section-title">Curves</span>
                                         {/snippet}
                                     </CurveEditor>
-                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.highlights}
-                                        defaultValue={0}
-                                        name="Highlights"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientStartColor={"#606060"}
-                                        gradientEndColor={"#afafaf"}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "highlights",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.shadows}
-                                        defaultValue={0}
-                                        name="Shadows"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientStartColor={"#303030"}
-                                        gradientEndColor={"#3f3f3f"}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "shadows",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.whites}
-                                        defaultValue={0}
-                                        name="Whites"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientStartColor={"#b0b0b0"}
-                                        gradientEndColor={"#ffffff"}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "whites",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.blacks}
-                                        defaultValue={0}
-                                        name="Blacks"
-                                        min={-100}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientStartColor={"#000000"}
-                                        gradientEndColor={"#161616"}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "blacks",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
                                 </div>
-                                <div class="flex h-7.5"></div>
-                            </div>
-                            <!-- HSL Panel -->
-                            {#if isRgb}
-                                <div class="controls-page">
-                                    <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+                                {#if isRgb}
+                                    <div
+                                        class="slider-section flex flex-col mt-4 ml-4 mr-3"
+                                        transition:slide={{ duration: 200 }}
+                                    >
                                         <span class="section-title pb-1.5">HSL</span>
                                         <SingleValSliderGroup
                                             bind:value={sliders.hue}
@@ -1132,7 +1049,11 @@
                                                     newValue: newVal,
                                                 })}
                                         ></SingleValSliderGroup>
-                                        <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
+                                    </div>
+                                    <div
+                                        class="slider-section flex flex-col mt-4 ml-4 mr-3"
+                                        transition:slide={{ duration: 200 }}
+                                    >
                                         <div class="flex flex-row items-center justify-between pb-1.5 pr-1.5">
                                             <span class="section-title">Colour Mixer</span>
                                             <RevertButton
@@ -1151,11 +1072,10 @@
                                                     newValue: newVal,
                                                 })}
                                         ></HslBandGroup>
-                                        <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     </div>
-                                </div>
+                                {/if}
                                 <div class="flex h-7.5"></div>
-                            {/if}
+                            </div>
                         </div>
                     {/if}
                     {#if isDarkroom}
@@ -1261,7 +1181,7 @@
                         class:shown={!isDarkroom}
                         aria-hidden={isDarkroom}
                     >
-                        {#each Array(isRgb ? 4 : 3) as _, i}
+                        {#each Array(3) as _, i}
                             <button
                                 class="dot size-1.5 rounded-full border-0 cursor-pointer p-0"
                                 class:active={activePageNormal === i}

@@ -68,6 +68,7 @@ export interface RenderStage {
 
 import type { Sliders } from "./imgParameters";
 import type { ToneMap } from "./toneMap";
+import type { CurveChannel } from "./curves";
 
 export interface Renderer {
     // `srcToWorking` is passed alongside the texture rather than set separately
@@ -102,13 +103,13 @@ export interface HistogramPipeline {
     setToneMap: (toneMap: ToneMap) => void;
     setCurves: (lut: Float32Array | null) => void;
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
-    // in one submit. Omitting the target bins without drawing. The mono target
-    // gets the channels' union in white, for the curves editor's backdrop.
+    // in one submit. Omitting the target bins without drawing. The backdrop
+    // gets one curve channel's bins in that curve's colour, for the curves editor.
     render: (
         inputTexture: GPUTexture,
         sliders: Sliders,
         target?: GPUTextureView,
-        monoTarget?: GPUTextureView,
+        backdrop?: { view: GPUTextureView; channel: CurveChannel },
     ) => void;
     // The bins on the CPU, at the cost of the round trip drawing on the GPU
     // exists to avoid. For tests.
