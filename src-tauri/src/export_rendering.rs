@@ -527,10 +527,17 @@ pub async fn render_image(
         on_progress,
     )
     .await
+    .map(|image| image.rgb)
 }
 
-/// Run the GPU pipeline over the cropped region and return raw RGB bytes at
-/// the dimensions `crop_view` gives for it.
+/// Raw RGB bytes (no alpha) and the dimensions they were rendered at.
+pub struct RenderedImage {
+    pub rgb: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Run the GPU pipeline over the cropped region only.
 #[allow(clippy::too_many_arguments)]
 pub async fn render_cropped_image(
     pixels_u16: &[u16],
@@ -543,7 +550,7 @@ pub async fn render_cropped_image(
     output: OutputSpace,
     bit_depth: u8,
     on_progress: impl Fn(f32) + Send + Sync,
-) -> Result<Vec<u8>, String> {
+) -> Result<RenderedImage, String> {
     render_cropped_with_chunk_rows(
         pixels_u16,
         width,
@@ -601,6 +608,7 @@ pub async fn render_image_with_chunk_rows(
         on_progress,
     )
     .await
+    .map(|image| image.rgb)
 }
 
 /// [`render_image_with_chunk_rows`] over a crop. `chunk_rows` counts output
@@ -619,7 +627,7 @@ pub async fn render_cropped_with_chunk_rows(
     bit_depth: u8,
     chunk_rows: u32,
     on_progress: impl Fn(f32) + Send + Sync,
-) -> Result<Vec<u8>, String> {
+) -> Result<RenderedImage, String> {
     let t = Instant::now();
 
     // ── 0. Validate inputs ────────────────────────────────────────────────────
@@ -1097,10 +1105,12 @@ pub async fn render_cropped_with_chunk_rows(
     let view = crop_view(crop, width, height);
     let (out_width, out_height) = (view.width, view.height);
 
+    // A rotated band of rows reaches diagonally across the source, so it is
+    // split into square tiles to keep the region each one renders bounded.
+    let tile_cols = if view.is_axis_aligned() { out_width } else { chunk_rows.min(out_width) };
+
     // Rgba8Unorm = 4 bytes/pixel, Rgba32Float = 16 bytes/pixel
     let bytes_per_texel = if bit_depth >= 16 { 16u32 } else { 4u32 };
-    let bytes_per_row_unpadded = out_width * bytes_per_texel;
-    let padded_bytes_per_row = (bytes_per_row_unpadded + 255) & !255;
 
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
@@ -1109,7 +1119,6 @@ pub async fn render_cropped_with_chunk_rows(
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
     let mut row_start = 0u32;
-    let mut out_rgb_offset = 0usize;
 
     // Pixels rendered on every side of what a chunk samples, purely to feed the
     // blur, then discarded. At the edges of the image there is nothing to fetch
@@ -1117,10 +1126,9 @@ pub async fn render_cropped_with_chunk_rows(
     // render clamps at those edges too.
     let margin = sharp_margin_rows(sliders, width, height) as i64;
 
-    // Intermediates the chain hands between its stages. Chunks share a size
-    // except at the ends of the crop, so these are built once and reused rather
-    // than reallocated per chunk — at up to 16 bytes per texel they are the
-    // largest allocations in the loop.
+    // Intermediates the chain hands between its stages. Tiles mostly share a
+    // size, so these are reused rather than reallocated per tile — at up to 16
+    // bytes per texel they are the largest allocations in the loop.
     #[allow(clippy::type_complexity)]
     let mut intermediates: Option<(
         (u32, u32),
@@ -1134,311 +1142,323 @@ pub async fn render_cropped_with_chunk_rows(
         let row_end = (row_start + chunk_rows).min(out_height);
         let chunk_height = row_end - row_start;
 
-        // The source region actually rendered: what these output rows sample,
-        // grown by the margin and clamped to the image.
-        let [sx0, sy0, sx1, sy1] = view.source_texels(row_start..row_end);
-        let region_x0 = (sx0 - margin).clamp(0, width as i64 - 1) as u32;
-        let region_y0 = (sy0 - margin).clamp(0, height as i64 - 1) as u32;
-        let region_x1 = (sx1 + margin).clamp(region_x0 as i64 + 1, width as i64) as u32;
-        let region_y1 = (sy1 + margin).clamp(region_y0 as i64 + 1, height as i64) as u32;
-        let region_width = region_x1 - region_x0;
-        let region_height = region_y1 - region_y0;
+        let mut col_start = 0u32;
+        while col_start < out_width {
+            let col_end = (col_start + tile_cols).min(out_width);
+            let tile_width = col_end - col_start;
+            let bytes_per_row_unpadded = tile_width * bytes_per_texel;
+            let padded_bytes_per_row = (bytes_per_row_unpadded + 255) & !255;
 
-        let chunk_bytes = if region_width == width {
-            let pixel_start = (region_y0 * width) as usize;
-            let pixel_count = (region_height * width) as usize;
-            linearize_u16_f32(
-                &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels],
-                channels,
-                &luts,
-            )
-        } else {
-            let row_len = region_width as usize * channels;
-            let mut region = Vec::with_capacity(row_len * region_height as usize);
-            for y in region_y0..region_y1 {
-                let at = (y as usize * width as usize + region_x0 as usize) * channels;
-                region.extend_from_slice(&pixels_u16[at..at + row_len]);
-            }
-            linearize_u16_f32(&region, channels, &luts)
-        };
+            // The source region actually rendered: what this tile samples, grown
+            // by the margin and clamped to the image.
+            let [sx0, sy0, sx1, sy1] = view.source_texels(col_start..col_end, row_start..row_end);
+            let region_x0 = (sx0 - margin).clamp(0, width as i64 - 1) as u32;
+            let region_y0 = (sy0 - margin).clamp(0, height as i64 - 1) as u32;
+            let region_x1 = (sx1 + margin).clamp(region_x0 as i64 + 1, width as i64) as u32;
+            let region_y1 = (sy1 + margin).clamp(region_y0 as i64 + 1, height as i64) as u32;
+            let region_width = region_x1 - region_x0;
+            let region_height = region_y1 - region_y0;
 
-        let region_size = wgpu::Extent3d {
-            width: region_width,
-            height: region_height,
-            depth_or_array_layers: 1,
-        };
-
-        let input_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("input_tex"),
-            size: region_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: INPUT_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &input_tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &chunk_bytes,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(region_width * LINEAR_F32_BYTES_PER_PIXEL as u32),
-                rows_per_image: None,
-            },
-            region_size,
-        );
-
-        let input_view = input_tex.create_view(&Default::default());
-
-        let region_dims = (region_width, region_height);
-        if intermediates.as_ref().map(|(dims, _, _, _, _)| *dims) != Some(region_dims) {
-            let intermediate = |label, format| {
-                device
-                    .create_texture(&wgpu::TextureDescriptor {
-                        label: Some(label),
-                        size: region_size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                            | wgpu::TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    })
-                    .create_view(&Default::default())
+            let chunk_bytes = if region_width == width {
+                let pixel_start = (region_y0 * width) as usize;
+                let pixel_count = (region_height * width) as usize;
+                linearize_u16_f32(
+                    &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels],
+                    channels,
+                    &luts,
+                )
+            } else {
+                let row_len = region_width as usize * channels;
+                let mut region = Vec::with_capacity(row_len * region_height as usize);
+                for y in region_y0..region_y1 {
+                    let at = (y as usize * width as usize + region_x0 as usize) * channels;
+                    region.extend_from_slice(&pixels_u16[at..at + row_len]);
+                }
+                linearize_u16_f32(&region, channels, &luts)
             };
-            intermediates = Some((
-                region_dims,
-                intermediate("develop_tex", WORKING_FORMAT),
-                intermediate("sharp_h_tex", SHARP_FORMAT),
-                intermediate("detail_tex", SHARP_FORMAT),
-                intermediate("composite_tex", WORKING_FORMAT),
-            ));
-        }
-        let (_, develop_view, sharp_h_view, detail_view, composite_view) =
-            intermediates.as_ref().unwrap();
 
-        let output_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("output_tex"),
-            size: wgpu::Extent3d { width: out_width, height: chunk_height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: output_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+            let region_size = wgpu::Extent3d {
+                width: region_width,
+                height: region_height,
+                depth_or_array_layers: 1,
+            };
 
-        let output_view = output_tex.create_view(&Default::default());
+            let input_tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("input_tex"),
+                size: region_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: INPUT_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
 
-        let staging_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("staging_buf"),
-            size: (padded_bytes_per_row * chunk_height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        let dev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("dev_bg"),
-            layout: &dev_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&input_view),
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &input_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                &chunk_bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(region_width * LINEAR_F32_BYTES_PER_PIXEL as u32),
+                    rows_per_image: None,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buf.as_entire_binding(),
-                },
-            ],
-        });
+                region_size,
+            );
 
-        // The horizontal pass never reads binding 1; it is the same developed
-        // texture it is already blurring, so the layout can stay shared.
-        let blur_bg = |label, input: &wgpu::TextureView| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &blur_bgl,
+            let input_view = input_tex.create_view(&Default::default());
+
+            let region_dims = (region_width, region_height);
+            if intermediates.as_ref().map(|(dims, _, _, _, _)| *dims) != Some(region_dims) {
+                let intermediate = |label, format| {
+                    device
+                        .create_texture(&wgpu::TextureDescriptor {
+                            label: Some(label),
+                            size: region_size,
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
+                        })
+                        .create_view(&Default::default())
+                };
+                intermediates = Some((
+                    region_dims,
+                    intermediate("develop_tex", WORKING_FORMAT),
+                    intermediate("sharp_h_tex", SHARP_FORMAT),
+                    intermediate("detail_tex", SHARP_FORMAT),
+                    intermediate("composite_tex", WORKING_FORMAT),
+                ));
+            }
+            let (_, develop_view, sharp_h_view, detail_view, composite_view) =
+                intermediates.as_ref().unwrap();
+
+            let output_tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("output_tex"),
+                size: wgpu::Extent3d { width: tile_width, height: chunk_height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: output_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+
+            let output_view = output_tex.create_view(&Default::default());
+
+            let staging_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("staging_buf"),
+                size: (padded_bytes_per_row * chunk_height) as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+
+            let dev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("dev_bg"),
+                layout: &dev_bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(input),
+                        resource: wgpu::BindingResource::TextureView(&input_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buf.as_entire_binding(),
+                    },
+                ],
+            });
+
+            // The horizontal pass never reads binding 1; it is the same developed
+            // texture it is already blurring, so the layout can stay shared.
+            let blur_bg = |label, input: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &blur_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(input),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(develop_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: sharp_buf.as_entire_binding(),
+                        },
+                    ],
+                })
+            };
+            let sharp_h_bg = blur_bg("sharp_h_bg", develop_view);
+            let sharp_v_bg = blur_bg("sharp_v_bg", sharp_h_view);
+
+            let composite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("composite_bg"),
+                layout: &composite_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
                         resource: wgpu::BindingResource::TextureView(develop_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(detail_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: sharp_buf.as_entire_binding(),
                     },
                 ],
-            })
-        };
-        let sharp_h_bg = blur_bg("sharp_h_bg", develop_view);
-        let sharp_v_bg = blur_bg("sharp_v_bg", sharp_h_view);
+            });
 
-        let composite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("composite_bg"),
-            layout: &composite_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(develop_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(detail_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: sharp_buf.as_entire_binding(),
-                },
-            ],
-        });
+            // The crop as this tile sees it: from its own first pixel, and from the
+            // corner of the region rather than of the image.
+            let chunk_view =
+                view.shifted([region_x0 as f64, region_y0 as f64], [col_start, row_start]);
+            let crop_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crop_buf"),
+                contents: &crop_view_to_bytes(&chunk_view),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-        // The crop as this chunk sees it: from its own first row, and from the
-        // corner of the region rather than of the image.
-        let chunk_view = view.shifted([region_x0 as f64, region_y0 as f64], row_start);
-        let crop_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crop_buf"),
-            contents: &crop_view_to_bytes(&chunk_view),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
-        let encode_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("encode_bg"),
-            layout: &encode_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(composite_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: output_space_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: crop_buf.as_entire_binding(),
-                },
-            ],
-        });
-
-        let mut enc = device.create_command_encoder(&Default::default());
-
-        // The blur is skipped whenever the margin is zero, which is exactly when
-        // the effect is switched off. Skipping is only ever a saving: calcParams
-        // zeroes the amount over the same condition, so composite is a no-op and
-        // the untouched detail texture goes nowhere.
-        let mut passes: Vec<(&str, &wgpu::TextureView, &wgpu::RenderPipeline, &wgpu::BindGroup)> =
-            vec![("develop_pass", develop_view, &dev_pipeline, &dev_bg)];
-        if margin > 0 {
-            passes.push(("sharp_h_pass", sharp_h_view, &sharp_h_pipeline, &sharp_h_bg));
-            passes.push(("sharp_v_pass", detail_view, &sharp_v_pipeline, &sharp_v_bg));
-        }
-        passes.push(("composite_pass", composite_view, &composite_pipeline, &composite_bg));
-        passes.push(("encode_pass", &output_view, &encode_pipeline, &encode_bg));
-
-        // Each stage reads the previous one's target, so they cannot be merged:
-        // a fragment can only read a texture it is not currently writing.
-        for (label, target, pipeline, bind_group) in passes {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some(label),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
+            let encode_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("encode_bg"),
+                layout: &encode_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(composite_view),
                     },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: output_space_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: crop_buf.as_entire_binding(),
+                    },
+                ],
             });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
-            pass.draw(0..6, 0..1);
-        }
 
-        enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &output_tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &staging_buf,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: None,
+            let mut enc = device.create_command_encoder(&Default::default());
+
+            // The blur is skipped whenever the margin is zero, which is exactly when
+            // the effect is switched off. Skipping is only ever a saving: calcParams
+            // zeroes the amount over the same condition, so composite is a no-op and
+            // the untouched detail texture goes nowhere.
+            let mut passes: Vec<(&str, &wgpu::TextureView, &wgpu::RenderPipeline, &wgpu::BindGroup)> =
+                vec![("develop_pass", develop_view, &dev_pipeline, &dev_bg)];
+            if margin > 0 {
+                passes.push(("sharp_h_pass", sharp_h_view, &sharp_h_pipeline, &sharp_h_bg));
+                passes.push(("sharp_v_pass", detail_view, &sharp_v_pipeline, &sharp_v_bg));
+            }
+            passes.push(("composite_pass", composite_view, &composite_pipeline, &composite_bg));
+            passes.push(("encode_pass", &output_view, &encode_pipeline, &encode_bg));
+
+            // Each stage reads the previous one's target, so they cannot be merged:
+            // a fragment can only read a texture it is not currently writing.
+            for (label, target, pipeline, bind_group) in passes {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(label),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, bind_group, &[]);
+                pass.draw(0..6, 0..1);
+            }
+
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &output_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
                 },
-            },
-            wgpu::Extent3d { width: out_width, height: chunk_height, depth_or_array_layers: 1 },
-        );
-        queue.submit(std::iter::once(enc.finish()));
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &staging_buf,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_bytes_per_row),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::Extent3d { width: tile_width, height: chunk_height, depth_or_array_layers: 1 },
+            );
+            queue.submit(std::iter::once(enc.finish()));
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        staging_buf
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let _ = tx.send(result);
-            });
-        let _ = device.poll(wgpu::MaintainBase::Wait);
-        rx.recv()
-            .unwrap()
-            .map_err(|e| format!("GPU buffer map failed: {e}"))?;
+            let (tx, rx) = std::sync::mpsc::channel();
+            staging_buf
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            let _ = device.poll(wgpu::MaintainBase::Wait);
+            rx.recv()
+                .unwrap()
+                .map_err(|e| format!("GPU buffer map failed: {e}"))?;
 
-        {
-            let mapped = staging_buf.slice(..).get_mapped_range();
-            for row in 0..chunk_height as usize {
-                let row_src = &mapped[row * padded_bytes_per_row as usize
-                    ..row * padded_bytes_per_row as usize + bytes_per_row_unpadded as usize];
-                let dst_base = out_rgb_offset + row * out_width as usize * bytes_per_output_pixel;
-                if bit_depth >= 16 {
-                    // Each channel is an f32 (4 bytes LE); convert to u16 and store LE.
-                    for px in 0..out_width as usize {
-                        let s = px * 16; // 16 bytes per Rgba32Float texel
-                        let d = dst_base + px * 6;
-                        for c in 0..3 {
-                            let o = s + c * 4;
-                            let v = f32::from_le_bytes([
-                                row_src[o],
-                                row_src[o + 1],
-                                row_src[o + 2],
-                                row_src[o + 3],
-                            ]);
-                            let v16 = (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
-                            output_rgb[d + c * 2..d + c * 2 + 2]
-                                .copy_from_slice(&v16.to_le_bytes());
+            {
+                let mapped = staging_buf.slice(..).get_mapped_range();
+                for row in 0..chunk_height as usize {
+                    let row_src = &mapped[row * padded_bytes_per_row as usize
+                        ..row * padded_bytes_per_row as usize + bytes_per_row_unpadded as usize];
+                    let dst_base = ((row_start as usize + row) * out_width as usize
+                        + col_start as usize)
+                        * bytes_per_output_pixel;
+                    if bit_depth >= 16 {
+                        // Each channel is an f32 (4 bytes LE); convert to u16 and store LE.
+                        for px in 0..tile_width as usize {
+                            let s = px * 16; // 16 bytes per Rgba32Float texel
+                            let d = dst_base + px * 6;
+                            for c in 0..3 {
+                                let o = s + c * 4;
+                                let v = f32::from_le_bytes([
+                                    row_src[o],
+                                    row_src[o + 1],
+                                    row_src[o + 2],
+                                    row_src[o + 3],
+                                ]);
+                                let v16 = (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16;
+                                output_rgb[d + c * 2..d + c * 2 + 2]
+                                    .copy_from_slice(&v16.to_le_bytes());
+                            }
                         }
-                    }
-                } else {
-                    for px in 0..out_width as usize {
-                        output_rgb[dst_base + px * 3]     = row_src[px * 4];
-                        output_rgb[dst_base + px * 3 + 1] = row_src[px * 4 + 1];
-                        output_rgb[dst_base + px * 3 + 2] = row_src[px * 4 + 2];
+                    } else {
+                        for px in 0..tile_width as usize {
+                            output_rgb[dst_base + px * 3]     = row_src[px * 4];
+                            output_rgb[dst_base + px * 3 + 1] = row_src[px * 4 + 1];
+                            output_rgb[dst_base + px * 3 + 2] = row_src[px * 4 + 2];
+                        }
                     }
                 }
             }
-        }
-        staging_buf.unmap();
+            staging_buf.unmap();
 
-        out_rgb_offset += chunk_height as usize * out_width as usize * bytes_per_output_pixel;
+            col_start = col_end;
+        }
+
         row_start = row_end;
 
         let progress = row_end as f32 / out_height as f32;
@@ -1454,5 +1474,5 @@ pub async fn render_cropped_with_chunk_rows(
         );
     }
 
-    Ok(output_rgb)
+    Ok(RenderedImage { rgb: output_rgb, width: out_width, height: out_height })
 }

@@ -44,16 +44,13 @@
     let frame: HTMLDivElement;
     let renderer: Renderer | null = $state(null);
     let canvasLink: GPUCanvasLink | null = $state(null);
-    let image: GPUImage | null = $state(null);
+    let image = $state<GPUImage | null>(null);
 
     // The part of the preview that reaches the canvas, which is sized to it.
-    let view = $derived(
-        imagePayload ? cropView(crop, imagePayload.width, imagePayload.height) : null,
-    );
+    // Taken from the texture on the GPU, so it never runs ahead of the upload.
+    let view = $derived(image ? cropView(crop, image.width, image.height) : null);
     let frameView = $derived(
-        imagePayload && frameCrop
-            ? cropView(frameCrop, imagePayload.width, imagePayload.height)
-            : view,
+        image && frameCrop ? cropView(frameCrop, image.width, image.height) : view,
     );
 
     // The canvas against the frame, centred on it, in percent of the frame.
@@ -99,12 +96,8 @@
         };
     });
 
-    // Fit the image to the slot, but never past 1:1 — one image pixel covers at
-    // most one device pixel, so the preview is downscaled or shown at native
-    // size and never magnified to fill the slot.
-    //
-    // The fit is taken on the whole canvas, so a canvas spilling past its frame
-    // still lands inside the slot; the frame is then drawn at the same scale.
+    // Fit the whole canvas to the slot, never past 1:1 (one image pixel per
+    // device pixel), then draw the frame at the same scale.
     let displaySize = $derived.by(() => {
         if (!view || !frameView) return null;
 

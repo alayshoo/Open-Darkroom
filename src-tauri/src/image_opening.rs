@@ -222,29 +222,41 @@ fn resample(
 /// Each worker bins into its own set of counters and the partials are summed at
 /// the end, so the hot loop needs no atomics.
 pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
-    let empty = || ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS]);
-
-    let (r, g, b) = src
-        .par_chunks(HIST_BLOCK_PIXELS * channels)
+    src.par_chunks(HIST_BLOCK_PIXELS * channels)
         .map(|block| {
-            let mut bins = empty();
-            for px in block.chunks_exact(channels) {
-                bins.0[(px[0] >> 8) as usize] += 1;
-                bins.1[(px[1] >> 8) as usize] += 1;
-                bins.2[(px[2] >> 8) as usize] += 1;
-            }
+            let mut bins = empty_bins();
+            block.chunks_exact(channels).for_each(|px| bin_pixel(&mut bins, px));
             bins
         })
-        .reduce(empty, |mut acc, part| {
-            for i in 0..HIST_BINS {
-                acc.0[i] += part.0[i];
-                acc.1[i] += part.1[i];
-                acc.2[i] += part.2[i];
-            }
-            acc
-        });
+        .reduce(empty_bins, sum_bins)
+        .into()
+}
 
-    Histograms { r, g, b }
+type Bins = ([u32; HIST_BINS], [u32; HIST_BINS], [u32; HIST_BINS]);
+
+fn empty_bins() -> Bins {
+    ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS])
+}
+
+fn bin_pixel(bins: &mut Bins, px: &[u16]) {
+    bins.0[(px[0] >> 8) as usize] += 1;
+    bins.1[(px[1] >> 8) as usize] += 1;
+    bins.2[(px[2] >> 8) as usize] += 1;
+}
+
+fn sum_bins(mut acc: Bins, part: Bins) -> Bins {
+    for i in 0..HIST_BINS {
+        acc.0[i] += part.0[i];
+        acc.1[i] += part.1[i];
+        acc.2[i] += part.2[i];
+    }
+    acc
+}
+
+impl From<Bins> for Histograms {
+    fn from((r, g, b): Bins) -> Self {
+        Histograms { r, g, b }
+    }
 }
 
 /// [`compute_histograms`] over only the pixels inside a crop of an image
@@ -256,35 +268,23 @@ pub fn compute_histograms_in(
     channels: usize,
     view: &CropView,
 ) -> Histograms {
-    let empty = || ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS]);
-
-    let [x0, y0, x1, y1] = view.source_texels(0..view.height);
+    let [x0, y0, x1, y1] = view.source_texels(0..view.width, 0..view.height);
     let x0 = x0.clamp(0, width as i64) as u32;
     let x1 = x1.clamp(x0 as i64, width as i64) as u32;
     let y0 = y0.clamp(0, height as i64) as u32;
     let y1 = y1.clamp(y0 as i64, height as i64) as u32;
 
-    let (r, g, b) = (y0..y1)
+    (y0..y1)
         .into_par_iter()
-        .fold(empty, |mut bins, y| {
+        .fold(empty_bins, |mut bins, y| {
             for x in (x0..x1).filter(|&x| view.contains(x, y)) {
                 let at = (y as usize * width as usize + x as usize) * channels;
-                bins.0[(src[at] >> 8) as usize] += 1;
-                bins.1[(src[at + 1] >> 8) as usize] += 1;
-                bins.2[(src[at + 2] >> 8) as usize] += 1;
+                bin_pixel(&mut bins, &src[at..at + channels]);
             }
             bins
         })
-        .reduce(empty, |mut acc, part| {
-            for i in 0..HIST_BINS {
-                acc.0[i] += part.0[i];
-                acc.1[i] += part.1[i];
-                acc.2[i] += part.2[i];
-            }
-            acc
-        });
-
-    Histograms { r, g, b }
+        .reduce(empty_bins, sum_bins)
+        .into()
 }
 
 /// R, G, B bins as u32 LE, end to end — the tail of the open payload.

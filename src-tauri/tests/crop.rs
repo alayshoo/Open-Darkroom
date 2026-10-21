@@ -31,6 +31,7 @@ fn render(img: &Rgba16Image, sliders: &SlidersPayload, crop: &CropPayload, chunk
         |_| {},
     ))
     .expect("render")
+    .rgb
 }
 
 /// The rows and columns `view` keeps, cut out of a full RGB8 render.
@@ -48,7 +49,7 @@ fn the_full_frame_maps_one_to_one() {
     let view = crop_view(&CropPayload::FULL_FRAME, 640, 480);
     assert_eq!((view.width, view.height), (640, 480));
     assert_eq!(view.origin, [0.0, 0.0]);
-    assert_eq!(view.source_texels(0..480), [0, 0, 640, 480]);
+    assert_eq!(view.source_texels(0..640, 0..480), [0, 0, 640, 480]);
 }
 
 /// Mirrors the same case in tests/unit/crop.test.ts, so the two snap alike.
@@ -150,6 +151,31 @@ fn a_rotated_crop_renders_at_its_own_size() {
     let view = crop_view(&crop, 80, 60);
     let out = render(&img, &SlidersPayload::default(), &crop, 7);
     assert_eq!(out.len(), (view.width * view.height * 3) as usize);
+}
+
+/// A rotated crop is rendered in tiles; how it is tiled must not show beyond
+/// rounding.
+#[test]
+fn a_rotated_crop_renders_the_same_however_it_is_tiled() {
+    let img = noise(160, 120, 11);
+    let sliders = SlidersPayload { usm_amount: 120.0, usm_radius: 2.0, ..Default::default() };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.6, quarter_turns: 1 };
+    let whole = render(&img, &sliders, &crop, 1000);
+    for chunk_rows in [13, 32] {
+        let got = render(&img, &sliders, &crop, chunk_rows);
+        assert_eq!(got.len(), whole.len());
+        let worst = got.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
+        assert!(worst <= Some(1), "differs by {worst:?} at {chunk_rows} rows per tile");
+    }
+}
+
+#[test]
+fn a_rotated_tile_reads_a_bounded_region_of_the_source() {
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.785, quarter_turns: 0 };
+    let view = crop_view(&crop, 6000, 4000);
+    assert!(!view.is_axis_aligned());
+    let [x0, y0, x1, y1] = view.source_texels(0..512, 0..512);
+    assert!(x1 - x0 < 740 && y1 - y0 < 740, "tile reads {}x{}", x1 - x0, y1 - y0);
 }
 
 /// Output pixel (u, v) of a clockwise quarter turn is source pixel

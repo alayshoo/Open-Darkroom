@@ -72,7 +72,7 @@
     import { applyAction, undoAction, type StateAccessors, } from "$lib/history/historyDispatch";
     import type { Action } from "$lib/types/historyActions";
 
-    import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
+    import { createKeydownHandler, isTextField } from "$lib/config/keyboardShortcuts";
 
     // ===== Control Modes =====
 
@@ -298,10 +298,11 @@
             const payload = await openImage();
             if (payload) {
                 imagePayload = payload;
-                // A crop describes one frame, so it does not carry over the way
-                // the adjustments do.
+                // A crop describes one frame, so neither it nor its history
+                // carries over the way the adjustments do.
                 crop = { ...FULL_FRAME };
-                isCropping = false;
+                cancelCrop();
+                history.discard((a) => a.type === "crop");
             }
         } catch (e) {
             imagePayload = null;
@@ -317,6 +318,10 @@
     let draftCrop: Crop = $state({ ...FULL_FRAME });
     let isCropping = $state(false);
     let isStraightening = $state(false);
+
+    // The adjustments have nothing to act on without an image, and are set
+    // aside while the crop tool has the preview.
+    let sidebarInactive = $derived(!imagePayload || isCropping);
 
     function enterCrop() {
         draftCrop = { ...crop };
@@ -431,7 +436,7 @@
         },
         setCrop: (value) => {
             crop = { ...value };
-            isCropping = false;
+            cancelCrop();
         },
     };
 
@@ -439,8 +444,8 @@
         history.push(action);
     }
 
-    // Undo inside the crop tool first throws away an unapplied drag; only with
-    // nothing to throw away does it reach the history.
+    // Undo or redo inside the crop tool first throws away an unapplied drag;
+    // only with nothing to throw away does it reach the history.
     function leaveCropForHistory(): boolean {
         if (!isCropping) return false;
         const discarded = !cropsEqual(draftCrop, crop);
@@ -454,7 +459,7 @@
         if (a) undoAction(a, stateAccessors);
     }
     function redo() {
-        leaveCropForHistory();
+        if (leaveCropForHistory()) return;
         const a = history.redo();
         if (a) applyAction(a, stateAccessors);
     }
@@ -600,9 +605,12 @@
         isSettingsOpen: () => settings.open,
     });
 
-    // Enter and Escape belong to the crop tool while it is open.
+    // Enter and Escape belong to the crop tool while it is open, unless a field
+    // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
-        if (isCropping && !settings.open && (e.key === "Enter" || e.key === "Escape")) {
+        const ownsKey =
+            isCropping && !settings.open && !exportMenuOpen && !isTextField(e.target);
+        if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") applyCrop();
             else if (isStraightening) isStraightening = false;
             else cancelCrop();
@@ -674,7 +682,11 @@
             class="histogram-panel glass shrink-0 rounded-[12px]"
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
         >
-            <div class="histogram-container m-1.25">
+            <div
+                class="histogram-container m-1.25"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <Histogram
                     {sliders}
                     {curveLut}
@@ -688,7 +700,8 @@
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
             <div
                 class="quick-actions flex items-center flex-row gap-2 ml-3 mr-3 mt-2.5"
-                class:dimmed={exportMenuOpen}
+                class:dimmed={exportMenuOpen || sidebarInactive}
+                inert={sidebarInactive}
             >
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 <!-- Stays mounted and fades. It is the last item in a
@@ -707,7 +720,11 @@
                     />
                 </div>
             </div>
-            <div class="controls-section flex relative flex-1 flex-col" class:dimmed={exportMenuOpen}>
+            <div
+                class="controls-section flex relative flex-1 flex-col"
+                class:dimmed={exportMenuOpen || sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <div
                     class="controls-pager-wrapper relative flex-1"
                     class:sliding={isModeSliding}
@@ -1483,6 +1500,10 @@
 
     .quick-actions {
         overflow: hidden;
+        transition: opacity 0.2s ease;
+    }
+
+    .histogram-container {
         transition: opacity 0.2s ease;
     }
 

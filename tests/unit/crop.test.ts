@@ -34,6 +34,12 @@ describe("cropView", () => {
         expect(view.origin).toEqual([49, 49]);
     });
 
+    it("reads a malformed crop as the full frame, as the export does", () => {
+        const full = cropView(FULL_FRAME, 30, 20);
+        expect(cropView({ ...FULL_FRAME, w: 0, h: 0 }, 30, 20)).toEqual(full);
+        expect(cropView({ ...FULL_FRAME, cx: NaN }, 30, 20)).toEqual(full);
+    });
+
     it("keeps a rotated crop centred where it was put", () => {
         const view = cropView({ cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: Math.PI / 6, quarterTurns: 0 }, 200, 100);
         const centreX = view.origin[0] + (view.width / 2) * view.axisX[0] + (view.height / 2) * view.axisY[0];

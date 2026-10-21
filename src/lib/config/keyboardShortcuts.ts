@@ -16,7 +16,7 @@ interface ShortcutDeps {
     isSettingsOpen: () => boolean;
 }
 
-function isTextField(target: EventTarget | null) {
+export function isTextField(target: EventTarget | null) {
     return (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||

@@ -28,6 +28,11 @@ export function isFullFrame(c: Crop): boolean {
     return cropsEqual(c, FULL_FRAME);
 }
 
+/** Anything malformed is read as the whole frame, as crop.rs does. */
+export function isValidCrop(c: Crop): boolean {
+    return [c.cx, c.cy, c.w, c.h, c.angle].every(Number.isFinite) && c.w > 0 && c.h > 0;
+}
+
 export function cropsEqual(a: Crop, b: Crop): boolean {
     return (
         a.cx === b.cx &&
@@ -163,6 +168,7 @@ export interface CropView {
  * lands on a texel centre and the encode stage reads it back untouched.
  */
 export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropView {
+    if (!isValidCrop(crop)) crop = FULL_FRAME;
     const size = turnedSize(crop, srcWidth, srcHeight);
     let x0: number, y0: number, width: number, height: number;
 

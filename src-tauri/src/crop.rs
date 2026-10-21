@@ -51,10 +51,9 @@ pub struct CropView {
     pub axis_y: [f64; 2],
 }
 
-/// The image is turned, then rotated about its centre, and the crop box is
-/// upright in that rotated frame. An unrotated crop is snapped to whole source
-/// pixels, so every output pixel lands on a texel centre and the encode stage
-/// reads it back untouched. Mirrors `cropView()` in src/lib/types/crop.ts.
+/// The image is turned, then rotated about its centre, with the box upright in
+/// that frame. Unrotated crops snap to whole pixels so they sample texel centres.
+/// Mirrors `cropView()` in src/lib/types/crop.ts.
 pub fn crop_view(crop: &CropPayload, src_width: u32, src_height: u32) -> CropView {
     let crop = if crop.is_valid() { *crop } else { CropPayload::FULL_FRAME };
     let turns = crop.quarter_turns % 4;
@@ -111,11 +110,20 @@ impl CropView {
         ]
     }
 
-    /// Source texels that bilinear sampling of output rows `rows` reads, as a
-    /// half-open `[x0, x1) × [y0, y1)` before any clamping to the image.
-    pub fn source_texels(&self, rows: std::ops::Range<u32>) -> [i64; 4] {
+    /// Whether output rows and columns run along the source's own axes.
+    pub fn is_axis_aligned(&self) -> bool {
+        self.axis_x[0] * self.axis_x[1] == 0.0 && self.axis_y[0] * self.axis_y[1] == 0.0
+    }
+
+    /// Source texels that bilinear sampling of the output block `cols × rows`
+    /// reads, as a half-open `[x0, x1) × [y0, y1)` before any clamping.
+    pub fn source_texels(
+        &self,
+        cols: std::ops::Range<u32>,
+        rows: std::ops::Range<u32>,
+    ) -> [i64; 4] {
         let (top, bottom) = (rows.start as f64 + 0.5, rows.end as f64 - 0.5);
-        let (left, right) = (0.5, self.width as f64 - 0.5);
+        let (left, right) = (cols.start as f64 + 0.5, cols.end as f64 - 0.5);
         let corners = [
             self.source_point(left, top),
             self.source_point(right, top),
@@ -146,9 +154,9 @@ impl CropView {
     }
 
     /// The same view, as seen from a region of the source starting at `offset`
-    /// and from output row `first_row` onwards.
-    pub fn shifted(&self, offset: [f64; 2], first_row: u32) -> CropView {
-        let start = self.source_point(0.0, first_row as f64);
+    /// and from output pixel `first` onwards.
+    pub fn shifted(&self, offset: [f64; 2], first: [u32; 2]) -> CropView {
+        let start = self.source_point(first[0] as f64, first[1] as f64);
         CropView {
             origin: [start[0] - offset[0], start[1] - offset[1]],
             ..*self
