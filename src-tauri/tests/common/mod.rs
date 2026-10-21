@@ -43,6 +43,7 @@ pub const OUTPUT_SPACE_TS: &str = include_str!("../../../src/lib/gpu/outputSpace
 pub const OUTPUT_SPACE_BUFFER_TS: &str =
     include_str!("../../../src/lib/gpu/outputSpaceBuffer.ts");
 pub const EXPORT_SETTINGS_TS: &str = include_str!("../../../src/lib/types/exportSettings.ts");
+pub const CROP_TS: &str = include_str!("../../../src/lib/types/crop.ts");
 
 // ── The working space ─────────────────────────────────────────────────
 
@@ -722,6 +723,17 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
+    // The whole frame, so every pixel is binned.
+    let crop = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("crop"),
+        contents: &open_darkroom_lib::crop::crop_view_to_bytes(&open_darkroom_lib::crop::crop_view(
+            &open_darkroom_lib::crop::CropPayload::FULL_FRAME,
+            width,
+            height,
+        )),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("histogram"),
         source: wgpu::ShaderSource::Wgsl(HISTOGRAM_WGSL.into()),
@@ -756,6 +768,10 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: output_space.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: crop.as_entire_binding(),
             },
         ],
     });

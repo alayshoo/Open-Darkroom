@@ -88,7 +88,7 @@ export function createCompositeStage(gpu: GPUSession): RenderStage {
 
 // The output transform — the only stage that knows what it is rendering for, so
 // the only one targeting the destination format and the only one bound to the
-// uniform naming that destination.
+// uniform naming that destination. It also applies the crop.
 export function createEncodeStage(gpu: GPUSession): RenderStage {
     return createRenderStage(gpu, {
         label: "Colour Space Encode",
@@ -98,6 +98,11 @@ export function createEncodeStage(gpu: GPUSession): RenderStage {
             intermediateBinding(0),
             {
                 binding: 1, // outputSpace
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+            {
+                binding: 2, // crop
                 visibility: GPUShaderStage.FRAGMENT,
                 buffer: { type: "uniform" },
             },

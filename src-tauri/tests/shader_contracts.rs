@@ -22,6 +22,7 @@ use open_darkroom_lib::export_rendering::{
     SOURCE_SPACE_BYTES, TONE_MAP_BYTES, VIEW_BYTES,
 };
 use open_darkroom_lib::export_rendering::OUTPUT_SPACE_BYTES;
+use open_darkroom_lib::crop::CROP_VIEW_BYTES;
 use open_darkroom_lib::icc::SRGB_TO_WORKING;
 use open_darkroom_lib::output_space::{OutputSpace, Transfer};
 use open_darkroom_lib::image_opening::{OPEN_CANCELLED, PAYLOAD_HEADER_BYTES};
@@ -144,6 +145,7 @@ fn wgsl_struct(source: &str, name: &str) -> Vec<Field> {
 fn wgsl_size(ty: &str) -> usize {
     match ty {
         "f32" | "u32" | "i32" => 4,
+        "vec2f" => 8,
         "vec3f" | "vec4f" => 16,
         // A mat3x3 has 16-byte column stride, so it occupies 48 bytes, not 36.
         "mat3x3<f32>" => 48,
@@ -386,6 +388,31 @@ fn view_struct_is_all_f32_and_matches_the_declared_size() {
         fields.first().map(|f| f.name.as_str()),
         Some("render_scale"),
         "render_scale must be the first field — it is the only one the packers write"
+    );
+}
+
+/// The crop uniform is packed as eight flat f32 on both sides, and the encode
+/// stage and the histogram both read it.
+#[test]
+fn crop_view_struct_matches_the_declared_size_everywhere() {
+    for (name, source) in [
+        ("colorSpaceEncode.wgsl", COLOR_SPACE_ENCODE_WGSL),
+        ("histogram.wgsl", HISTOGRAM_WGSL),
+    ] {
+        let fields = wgsl_struct(source, "CropView");
+        assert!(
+            fields.iter().all(|f| f.ty == "vec2f"),
+            "{name}: every CropView field must be a vec2f"
+        );
+        assert_eq!(
+            struct_size(&fields).next_multiple_of(16),
+            CROP_VIEW_BYTES,
+            "{name}: CROP_VIEW_BYTES disagrees with the WGSL CropView struct"
+        );
+    }
+    assert!(
+        common::CROP_TS.contains(&format!("CROP_VIEW_BUFFER_SIZE = {CROP_VIEW_BYTES};")),
+        "crop.ts does not declare CROP_VIEW_BUFFER_SIZE = {CROP_VIEW_BYTES}"
     );
 }
 
