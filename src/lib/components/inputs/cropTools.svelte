@@ -14,7 +14,7 @@
 
 <!-- Stays mounted and fades, like the reset button, so the column never jumps. -->
 <div class="crop-tools flex flex-col items-center gap-1.5" class:shown={visible} aria-hidden={!visible}>
-	<GlassButton label="Rotate left" onclick={() => onturn?.(false)}>
+	<GlassButton size={34} label="Rotate left" onclick={() => onturn?.(false)}>
 		<svg width="28" height="28" viewBox="0 0 24 24">
 			<rect x="4.5" y="11" width="10" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />
 			<path
@@ -27,7 +27,7 @@
 			/>
 		</svg>
 	</GlassButton>
-	<GlassButton label="Rotate right" onclick={() => onturn?.(true)}>
+	<GlassButton size={34} label="Rotate right" onclick={() => onturn?.(true)}>
 		<svg width="28" height="28" viewBox="0 0 24 24" style="transform: scaleX(-1);">
 			<rect x="4.5" y="11" width="10" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />
 			<path
@@ -41,6 +41,7 @@
 		</svg>
 	</GlassButton>
 	<GlassButton
+		size={34}
 		label="Straighten: draw along a horizon"
 		active={straightening}
 		onclick={() => (straightening = !straightening)}
@@ -76,5 +77,6 @@
 	.crop-tools :global(svg) {
 		color: var(--color2);
 		position: relative;
+		margin: auto;
 	}
 </style>

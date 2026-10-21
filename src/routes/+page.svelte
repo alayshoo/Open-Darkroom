@@ -772,10 +772,9 @@
                                         >Unsharp Mask</span
                                     >
                                     <div
-                                        class="flex w-full aspect-[1.3/1] rounded-[6px]"
+                                        class="flex w-full aspect-square rounded-[6px] mb-3"
                                         style="background: black;"
                                     ></div>
-                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.usmAmount}
                                         defaultValue={0}
@@ -1381,7 +1380,10 @@
     }
 
     .canvas-center {
-        inset: 36px; /* breathing room so a fitted image never touches the panels */
+        /* Breathing room so a fitted image never touches the panels. The left
+           is shorter because the toolbar's buttons sit inside its column, so
+           this leaves the same gap to them as to the side bar. */
+        inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
     }
@@ -1427,7 +1429,7 @@
     .toolbar {
         position: relative;
         margin: -44px 0 -12px -12px;
-        min-width: 54px;
+        min-width: 48px;
         z-index: 10;
         pointer-events: auto;
     }
@@ -1435,7 +1437,8 @@
     /* Clears the title bar the toolbar bleeds up behind, and sits above the
        falloff painted by ::before. */
     .toolbar-tools {
-        padding-top: 56px;
+        padding-top: 50px;
+        padding-right: 6px;
         gap: 10px;
         z-index: 1;
     }
@@ -1443,7 +1446,7 @@
     .toolbar::before {
         content: "";
         position: absolute;
-        inset: 0 -48px 0 0;
+        inset: 0 -40px 0 0;
         background: linear-gradient(
             to right,
             var(--canvasBackdrop) 0%,
