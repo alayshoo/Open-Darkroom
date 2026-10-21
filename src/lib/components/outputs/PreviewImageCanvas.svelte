@@ -22,6 +22,7 @@
         curveLut,
         imagePayload,
         crop,
+        frameCrop,
         overlay,
     }: {
         sliders: Sliders;
@@ -29,7 +30,10 @@
         curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
         crop: Crop;
-        // Drawn over the canvas, sized to it.
+        // What the frame is laid out to, when the canvas spills past it. Left
+        // out, the frame is the crop.
+        frameCrop?: Crop;
+        // Drawn over the frame, sized to it.
         overlay?: Snippet;
     } = $props();
 
@@ -46,6 +50,19 @@
     let view = $derived(
         imagePayload ? cropView(crop, imagePayload.width, imagePayload.height) : null,
     );
+    let frameView = $derived(
+        imagePayload && frameCrop
+            ? cropView(frameCrop, imagePayload.width, imagePayload.height)
+            : view,
+    );
+
+    // The canvas against the frame, centred on it, in percent of the frame.
+    let canvasStyle = $derived.by(() => {
+        if (!view || !frameView) return "";
+        const w = (view.width / frameView.width) * 100;
+        const h = (view.height / frameView.height) * 100;
+        return `width: ${w}%; height: ${h}%; left: ${(100 - w) / 2}%; top: ${(100 - h) / 2}%;`;
+    });
 
     let slotWidth = $state(0);
     let slotHeight = $state(0);
@@ -85,19 +102,22 @@
     // Fit the image to the slot, but never past 1:1 — one image pixel covers at
     // most one device pixel, so the preview is downscaled or shown at native
     // size and never magnified to fill the slot.
+    //
+    // The fit is taken on the whole canvas, so a canvas spilling past its frame
+    // still lands inside the slot; the frame is then drawn at the same scale.
     let displaySize = $derived.by(() => {
-        if (!view) return null;
+        if (!view || !frameView) return null;
 
-        const nativeWidth = view.width / dpr;
-        const nativeHeight = view.height / dpr;
-        if (!slotWidth || !slotHeight) return { w: nativeWidth, h: nativeHeight };
+        const frameWidth = frameView.width / dpr;
+        const frameHeight = frameView.height / dpr;
+        if (!slotWidth || !slotHeight) return { w: frameWidth, h: frameHeight };
 
         const scale = Math.min(
             1,
-            slotWidth / nativeWidth,
-            slotHeight / nativeHeight,
+            slotWidth / (view.width / dpr),
+            slotHeight / (view.height / dpr),
         );
-        return { w: nativeWidth * scale, h: nativeHeight * scale };
+        return { w: frameWidth * scale, h: frameHeight * scale };
     });
 
     // Link the canvas to GPU and create the renderer once canvas is mounted
@@ -106,7 +126,7 @@
 
         let destroyed = false;
 
-        linkCanvas2GPU(canvas, gpu).then((link) => {
+        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
             if (destroyed) return;
             canvasLink = link;
             renderer = createRenderer(gpu, canvasLink);
@@ -128,7 +148,7 @@
 
         const localRenderer = renderer;
 
-        linkCanvas2GPU(canvas, gpu).then((link) => {
+        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
             canvasLink = link;
 
             // Clean up old texture
@@ -161,7 +181,7 @@
         if (canvas.width !== view.width || canvas.height !== view.height) {
             canvas.width = view.width;
             canvas.height = view.height;
-            void linkCanvas2GPU(canvas, gpu);
+            void linkCanvas2GPU(canvas, gpu, "premultiplied");
         }
         renderer.setCrop(view);
         renderer.requestRender();
@@ -204,7 +224,7 @@
         ? `width: ${displaySize.w}px; height: ${displaySize.h}px;`
         : "width: 0; height: 0;"}
 >
-    <canvas bind:this={canvas}></canvas>
+    <canvas bind:this={canvas} style={canvasStyle}></canvas>
     {#if displaySize}
         {@render overlay?.()}
     {/if}
@@ -216,9 +236,10 @@
         max-height: 100%;
     }
 
+    /* Premultiplied, so wherever the render leaves the image the backdrop
+       shows through. */
     canvas {
+        position: absolute;
         display: block;
-        width: 100%;
-        height: 100%;
     }
 </style>

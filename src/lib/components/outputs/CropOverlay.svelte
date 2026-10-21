@@ -1,6 +1,6 @@
 <!-- src/lib/components/outputs/CropOverlay.svelte -->
 <script lang="ts">
-    import { MAX_ANGLE, cropInside, fitCrop, type Crop } from "$lib/types/crop";
+    import { MAX_ANGLE, cropInside, fitCrop, turnedSize, type Crop } from "$lib/types/crop";
 
     // Laid over the whole turned and rotated frame, so every position here is a
     // fraction of that frame and maps straight onto the crop's own units.
@@ -70,7 +70,13 @@
     // The straighten line, in fractions of the frame.
     let line: { x0: number; y0: number; x1: number; y1: number } | null = $state(null);
 
-    const inside = (c: Crop) => cropInside(c, imageWidth, imageHeight);
+    // On the image, and within the upright frame the overlay is laid out on.
+    const inside = (c: Crop) =>
+        cropInside(c, imageWidth, imageHeight) &&
+        c.cx - c.w / 2 >= -1e-9 &&
+        c.cy - c.h / 2 >= -1e-9 &&
+        c.cx + c.w / 2 <= 1 + 1e-9 &&
+        c.cy + c.h / 2 <= 1 + 1e-9;
 
     // The furthest a change can go from a crop on the image towards `to`
     // before a corner leaves it.
@@ -218,6 +224,22 @@
 
     const pct = (v: number) => `${v * 100}%`;
 
+    // The photo outside the box, in fractions of the frame: the rotated image's
+    // outline with the box cut out of it. Only the photo is shaded, corners that
+    // spill past the frame included, and never the backdrop around it.
+    let shade = $derived.by(() => {
+        const [w, h] = turnedSize(crop, imageWidth, imageHeight);
+        const cos = Math.cos(crop.angle);
+        const sin = Math.sin(crop.angle);
+        const outline = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+            const dx = (sx * w) / 2;
+            const dy = (sy * h) / 2;
+            return `${0.5 + (cos * dx - sin * dy) / w},${0.5 + (sin * dx + cos * dy) / h}`;
+        });
+        const { x0, y0, x1, y1 } = rect;
+        return `M${outline.join("L")}Z M${x0},${y0}L${x1},${y0}L${x1},${y1}L${x0},${y1}Z`;
+    });
+
     // Thirds at rest; a finer grid to sight along while the image is turning.
     let gridLines = $derived(
         mode === "rotate" ? [1, 2, 3, 4, 5, 6, 7].map((i) => i / 8) : [1 / 3, 2 / 3],
@@ -237,16 +259,9 @@
     role="presentation"
 >
     <div class="rotate-zone"></div>
-    <div class="shade" style="left: 0; top: 0; right: 0; height: {pct(rect.y0)};"></div>
-    <div class="shade" style="left: 0; bottom: 0; right: 0; top: {pct(rect.y1)};"></div>
-    <div
-        class="shade"
-        style="left: 0; top: {pct(rect.y0)}; width: {pct(rect.x0)}; height: {pct(rect.y1 - rect.y0)};"
-    ></div>
-    <div
-        class="shade"
-        style="right: 0; top: {pct(rect.y0)}; left: {pct(rect.x1)}; height: {pct(rect.y1 - rect.y0)};"
-    ></div>
+    <svg class="shade absolute" viewBox="0 0 1 1" preserveAspectRatio="none">
+        <path d={shade} fill-rule="evenodd" />
+    </svg>
 
     <div
         class="crop-box absolute"
@@ -302,9 +317,14 @@
     }
 
     .shade {
-        position: absolute;
-        background: rgba(0, 0, 0, 0.55);
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
         pointer-events: none;
+    }
+    .shade path {
+        fill: rgba(0, 0, 0, 0.55);
     }
 
     .crop-box {

@@ -39,9 +39,22 @@ export function cropsEqual(a: Crop, b: Crop): boolean {
     );
 }
 
-/** The whole turned and rotated image, as the crop tool shows it. */
-export function wholeFrame(c: Crop): Crop {
-    return { ...FULL_FRAME, angle: c.angle, quarterTurns: c.quarterTurns };
+/** The turned image before any rotation: the frame the crop tool lays out. */
+export function uprightFrame(c: Crop): Crop {
+    return { ...FULL_FRAME, quarterTurns: c.quarterTurns };
+}
+
+/** All of the turned and rotated image, corners included. */
+export function rotatedBounds(c: Crop, width: number, height: number): Crop {
+    const [w, h] = turnedSize(c, width, height);
+    const cos = Math.abs(Math.cos(c.angle));
+    const sin = Math.abs(Math.sin(c.angle));
+    return {
+        ...uprightFrame(c),
+        angle: c.angle,
+        w: (cos * w + sin * h) / w,
+        h: (sin * w + cos * h) / h,
+    };
 }
 
 /** The image's size once turned. */

@@ -16,26 +16,28 @@
 <div class="crop-tools flex flex-col items-center gap-1.5" class:shown={visible} aria-hidden={!visible}>
 	<GlassButton label="Rotate left" onclick={() => onturn?.(false)}>
 		<svg width="28" height="28" viewBox="0 0 24 24">
+			<rect x="4.5" y="11" width="10" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />
 			<path
-				d="M8.2 9.3A5 5 0 1 1 7.5 14"
+				d="M19.5 14.5A7.5 7.5 0 0 0 12 7M14.1 4.9 12 7 14.1 9.1"
 				fill="none"
 				stroke="currentColor"
 				stroke-width="1.2"
 				stroke-linecap="round"
+				stroke-linejoin="round"
 			/>
-			<path d="M6.2 6.6 9.9 7.6 7.4 10.4Z" fill="currentColor" />
 		</svg>
 	</GlassButton>
 	<GlassButton label="Rotate right" onclick={() => onturn?.(true)}>
 		<svg width="28" height="28" viewBox="0 0 24 24" style="transform: scaleX(-1);">
+			<rect x="4.5" y="11" width="10" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />
 			<path
-				d="M8.2 9.3A5 5 0 1 1 7.5 14"
+				d="M19.5 14.5A7.5 7.5 0 0 0 12 7M14.1 4.9 12 7 14.1 9.1"
 				fill="none"
 				stroke="currentColor"
 				stroke-width="1.2"
 				stroke-linecap="round"
+				stroke-linejoin="round"
 			/>
-			<path d="M6.2 6.6 9.9 7.6 7.4 10.4Z" fill="currentColor" />
 		</svg>
 	</GlassButton>
 	<GlassButton
@@ -43,22 +45,12 @@
 		active={straightening}
 		onclick={() => (straightening = !straightening)}
 	>
+		<!-- A ruler laid at a slant: draw along something that should be level. -->
 		<svg width="28" height="28" viewBox="0 0 24 24">
-			<path
-				d="M5 16.5H19M6 13.5 18 9"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.2"
-				stroke-linecap="round"
-			/>
-			<path
-				d="M14 16.5A4.5 4.5 0 0 0 13.4 10.6"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1"
-				stroke-linecap="round"
-				stroke-dasharray="1 1.6"
-			/>
+			<g transform="rotate(-24 12 12)" fill="none" stroke="currentColor" stroke-linecap="round">
+				<rect x="2.5" y="9.5" width="19" height="5" rx="1" stroke-width="1.2" />
+				<path d="M6 9.5V11.5M9 9.5V11M12 9.5V12M15 9.5V11M18 9.5V11.5" stroke-width="1" />
+			</g>
 		</svg>
 	</GlassButton>
 </div>
