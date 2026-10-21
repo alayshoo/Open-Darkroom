@@ -5,6 +5,7 @@ import {
     cropView,
     fitCrop,
     isFullFrame,
+    rotationCanvas,
     turnCrop,
     type Crop,
 } from "$lib/types/crop";
@@ -123,4 +124,26 @@ it("maps a turned and rotated crop as the backend does", () => {
     expect(view.axisX[1]).toBeCloseTo(-0.9800666, 6);
     expect(view.axisY[0]).toBeCloseTo(0.9800666, 6);
     expect(view.axisY[1]).toBeCloseTo(-0.1986693, 6);
+});
+
+describe("the rotation canvas", () => {
+    // A resize clears the canvas, so a rotation drag must never change its size.
+    it("keeps one size at every angle and turn", () => {
+        const sizes = new Set<string>();
+        for (const angle of [0, 0.1, -0.4, Math.PI / 4]) {
+            for (const quarterTurns of [0, 1]) {
+                const c = rotationCanvas({ ...FULL_FRAME, angle, quarterTurns }, 300, 200);
+                const view = cropView(c, 300, 200);
+                sizes.add(`${view.width}x${view.height}`);
+            }
+        }
+        expect([...sizes]).toEqual(["362x362"]);
+    });
+
+    it("lands an unrotated image on texel centres", () => {
+        const view = cropView(rotationCanvas(FULL_FRAME, 300, 200), 300, 200);
+        expect(view.origin).toEqual([-31, -81]);
+        expect(view.axisX).toEqual([1, 0]);
+        expect(view.axisY).toEqual([0, 1]);
+    });
 });

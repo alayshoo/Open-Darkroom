@@ -55,9 +55,7 @@
         FULL_FRAME,
         cropsEqual,
         isFullFrame,
-        rotatedBounds,
         turnCrop,
-        uprightFrame,
     } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
@@ -666,10 +664,8 @@
                 {sliders}
                 {curveLut}
                 {imagePayload}
-                crop={isCropping && imagePayload
-                    ? rotatedBounds(draftCrop, imagePayload.fullWidth, imagePayload.fullHeight)
-                    : crop}
-                frameCrop={isCropping ? uprightFrame(draftCrop) : undefined}
+                crop={isCropping ? draftCrop : crop}
+                showWhole={isCropping}
             >
                 {#snippet overlay()}
                     {#if isCropping && imagePayload}

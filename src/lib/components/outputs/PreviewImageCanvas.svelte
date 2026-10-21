@@ -14,7 +14,13 @@
     import { type Sliders } from "$lib/types/imgParameters";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
-    import { cropView, type Crop } from "$lib/types/crop";
+    import {
+        cropView,
+        rotatedBounds,
+        rotationCanvas,
+        uprightFrame,
+        type Crop,
+    } from "$lib/types/crop";
 
     // Props
     let {
@@ -22,7 +28,7 @@
         curveLut,
         imagePayload,
         crop,
-        frameCrop,
+        showWhole = false,
         overlay,
     }: {
         sliders: Sliders;
@@ -30,9 +36,9 @@
         curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
         crop: Crop;
-        // What the frame is laid out to, when the canvas spills past it. Left
-        // out, the frame is the crop.
-        frameCrop?: Crop;
+        // Show all of the turned and rotated image the crop is cut from, laid
+        // out on its upright frame, rather than the crop itself.
+        showWhole?: boolean;
         // Drawn over the frame, sized to it.
         overlay?: Snippet;
     } = $props();
@@ -48,9 +54,18 @@
 
     // The part of the preview that reaches the canvas, which is sized to it.
     // Taken from the texture on the GPU, so it never runs ahead of the upload.
-    let view = $derived(image ? cropView(crop, image.width, image.height) : null);
-    let frameView = $derived(
-        image && frameCrop ? cropView(frameCrop, image.width, image.height) : view,
+    //
+    // Showing the whole image, the canvas is one size at every angle, since a
+    // resize clears it and a rotation drag would flash on every step. The
+    // frame is the upright image, and what has to fit the slot is the rotated
+    // image's own bounds.
+    const viewOf = (c: Crop) => (image ? cropView(c, image.width, image.height) : null);
+    let view = $derived(
+        image && showWhole ? viewOf(rotationCanvas(crop, image.width, image.height)) : viewOf(crop),
+    );
+    let frameView = $derived(showWhole ? viewOf(uprightFrame(crop)) : view);
+    let fitView = $derived(
+        image && showWhole ? viewOf(rotatedBounds(crop, image.width, image.height)) : view,
     );
 
     // The canvas against the frame, centred on it, in percent of the frame.
@@ -96,10 +111,10 @@
         };
     });
 
-    // Fit the whole canvas to the slot, never past 1:1 (one image pixel per
-    // device pixel), then draw the frame at the same scale.
+    // Fit the image to the slot, never past 1:1 (one image pixel per device
+    // pixel), then draw the frame at the same scale.
     let displaySize = $derived.by(() => {
-        if (!view || !frameView) return null;
+        if (!fitView || !frameView) return null;
 
         const frameWidth = frameView.width / dpr;
         const frameHeight = frameView.height / dpr;
@@ -107,8 +122,8 @@
 
         const scale = Math.min(
             1,
-            slotWidth / (view.width / dpr),
-            slotHeight / (view.height / dpr),
+            slotWidth / (fitView.width / dpr),
+            slotHeight / (fitView.height / dpr),
         );
         return { w: frameWidth * scale, h: frameHeight * scale };
     });

@@ -61,7 +61,8 @@ pub fn crop_view(crop: &CropPayload, src_width: u32, src_height: u32) -> CropVie
     let size = if turns % 2 == 0 { [src_w, src_h] } else { [src_h, src_w] };
 
     let (x0, y0, width, height);
-    if crop.angle == 0.0 {
+    // A frame reaching past the image is never snapped: snapping clamps to it.
+    if crop.angle == 0.0 && crop.w <= 1.0 && crop.h <= 1.0 {
         let snap = |centre: f64, extent: f64, size: f64| {
             let lo = ((centre - extent / 2.0) * size).round().clamp(0.0, size - 1.0);
             let hi = ((centre + extent / 2.0) * size).round().clamp(lo + 1.0, size);

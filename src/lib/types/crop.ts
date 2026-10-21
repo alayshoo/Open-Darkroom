@@ -62,6 +62,24 @@ export function rotatedBounds(c: Crop, width: number, height: number): Crop {
     };
 }
 
+/**
+ * A canvas that holds the turned image at any angle, so rotating never resizes
+ * it. The margins are whole pixels, so an unrotated image still lands on texel
+ * centres.
+ */
+export function rotationCanvas(c: Crop, width: number, height: number): Crop {
+    const [w, h] = turnedSize(c, width, height);
+    const diagonal = Math.hypot(w, h);
+    const marginX = Math.ceil((diagonal - w) / 2);
+    const marginY = Math.ceil((diagonal - h) / 2);
+    return {
+        ...uprightFrame(c),
+        angle: c.angle,
+        w: (w + 2 * marginX) / w,
+        h: (h + 2 * marginY) / h,
+    };
+}
+
 /** The image's size once turned. */
 export function turnedSize(c: Crop, width: number, height: number): [number, number] {
     return c.quarterTurns % 2 === 0 ? [width, height] : [height, width];
@@ -172,7 +190,8 @@ export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropV
     const size = turnedSize(crop, srcWidth, srcHeight);
     let x0: number, y0: number, width: number, height: number;
 
-    if (crop.angle === 0) {
+    // A frame reaching past the image is never snapped: snapping clamps to it.
+    if (crop.angle === 0 && crop.w <= 1 && crop.h <= 1) {
         const snap = (centre: number, extent: number, size: number) => {
             const lo = Math.min(Math.max(Math.round((centre - extent / 2) * size), 0), size - 1);
             const hi = Math.min(Math.max(Math.round((centre + extent / 2) * size), lo + 1), size);
