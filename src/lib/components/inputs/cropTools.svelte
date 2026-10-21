@@ -13,7 +13,7 @@
 </script>
 
 <!-- Stays mounted and fades, like the reset button, so the column never jumps. -->
-<div class="crop-tools flex flex-col items-center gap-1.5" class:shown={visible} aria-hidden={!visible}>
+<div class="crop-tools flex flex-col items-center gap-1" class:shown={visible} aria-hidden={!visible}>
 	<GlassButton size={34} label="Rotate left" onclick={() => onturn?.(false)}>
 		<svg width="28" height="28" viewBox="0 0 24 24">
 			<rect x="4.5" y="11" width="10" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2" />

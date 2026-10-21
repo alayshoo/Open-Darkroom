@@ -1481,7 +1481,7 @@
         transition: opacity 0.2s ease;
         padding-top: 50px;
         padding-right: 6px;
-        gap: 10px;
+        gap: 4px;
         z-index: 1;
     }
 
