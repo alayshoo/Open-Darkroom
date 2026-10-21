@@ -71,6 +71,9 @@ fn sample_composite(src: vec2f) -> vec4f {
 // lands here.
 const OFF_IMAGE = vec4f(0.0);
 
+// What is left of the image outside the crop tool's box: black at 55% over it.
+const OUTSIDE_KEEP: f32 = 0.45;
+
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let src = crop.origin + position.x * crop.axis_x + position.y * crop.axis_y;
@@ -85,7 +88,14 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   // negatives reach the matrix intact rather than being flattened on the way.
   let working = decode_srgb(c.rgb);
 
+  // Shaded here rather than by an overlay, so the shade turns with the image
+  // on the same frame.
+  var rgb = to_destination(working, outputSpace);
+  if (any(position.xy < crop.keep_min) || any(position.xy > crop.keep_max)) {
+    rgb *= OUTSIDE_KEEP;
+  }
+
   // Opaque whatever the source's alpha: the preview canvas is premultiplied
   // only so that off-image areas can be left clear.
-  return vec4f(to_destination(working, outputSpace), 1.0);
+  return vec4f(rgb, 1.0);
 }

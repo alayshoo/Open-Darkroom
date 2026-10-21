@@ -6,4 +6,8 @@ struct CropView {
   axis_x: vec2f,
   axis_y: vec2f,
   size:   vec2f,   // output extent in pixels
+  // Output pixels outside this box are shaded. Only the crop tool's preview
+  // draws a box; everything else passes one that covers the whole output.
+  keep_min: vec2f,
+  keep_max: vec2f,
 }

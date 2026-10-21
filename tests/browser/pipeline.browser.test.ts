@@ -155,6 +155,8 @@ interface DevelopOptions {
   alreadyWorking?: boolean;
   /** The crop the encode stage applies. The result is read back at its size. */
   crop?: Crop;
+  /** The box, in output pixels, outside which the encode stage shades. */
+  keep?: [number, number, number, number];
 }
 
 /**
@@ -205,7 +207,7 @@ async function develop(
     size: CROP_VIEW_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view));
+  gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, options.keep));
   const outWidth = view.width;
   const outHeight = view.height;
 
@@ -808,6 +810,23 @@ describe("the crop", () => {
     const edge = (WIDTH / 2) * 3;
     expect(whole[edge]).toBeGreaterThan(plain[edge]);
     expect(cropped[0]).toBe(whole[edge]);
+  });
+
+  // The crop tool's shade is drawn by the encode stage, on the same pixels as
+  // the image, so it can neither lag behind it nor leave a sliver uncovered.
+  it("shades exactly the pixels outside the crop tool's box", async () => {
+    const source = solid(200, 160, 120);
+    const plain = await develop(source, defaultSlidersRGB);
+    const shaded = await develop(source, defaultSlidersRGB, undefined, { keep: [0, 0, 32, 4] });
+
+    for (let x = 0; x < WIDTH; x++) {
+      const i = x * 3;
+      if (x < 32) {
+        expect(shaded[i], `column ${x}`).toBe(plain[i]);
+      } else {
+        expect(Math.abs(shaded[i] - plain[i] * 0.45), `column ${x}`).toBeLessThanOrEqual(1);
+      }
+    }
   });
 
   it("limits the histogram to what it keeps", async () => {

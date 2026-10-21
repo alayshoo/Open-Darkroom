@@ -4,11 +4,16 @@
 	let {
 		visible = false,
 		straightening = $bindable(false),
+		canReset = false,
 		onturn,
+		onreset,
 	}: {
 		visible?: boolean;
 		straightening?: boolean;
+		// Whether the crop differs from the original image at all.
+		canReset?: boolean;
 		onturn?: (clockwise: boolean) => void;
+		onreset?: () => void;
 	} = $props();
 </script>
 
@@ -52,6 +57,19 @@
 				<rect x="2.5" y="9.5" width="19" height="5" rx="1" stroke-width="1.2" />
 				<path d="M6 9.5V11.5M9 9.5V11M12 9.5V12M15 9.5V11M18 9.5V11.5" stroke-width="1" />
 			</g>
+		</svg>
+	</GlassButton>
+	<!-- The same arrow as the adjustments' reset button. -->
+	<GlassButton size={34} label="Reset crop" disabled={!canReset} onclick={() => onreset?.()}>
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<path
+				d="M12.7 7.56A4.5 4.5 0 1 1 7.57 12.78"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.2"
+				stroke-linecap="round"
+			/>
+			<path d="M9.15 7.5 12 5.35 12 9.65Z" fill="currentColor" />
 		</svg>
 	</GlassButton>
 </div>

@@ -185,8 +185,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         calcParams.updateCurves(lut);
     }
 
-    function setCrop(view: CropView) {
-        gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view));
+    function setCrop(view: CropView, keep?: [number, number, number, number]) {
+        gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, keep));
     }
 
     function setSliders(sliders: Sliders) {

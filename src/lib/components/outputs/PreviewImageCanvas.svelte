@@ -64,6 +64,19 @@
         image && showWhole ? viewOf(rotationCanvas(crop, image.width, image.height)) : viewOf(crop),
     );
     let frameView = $derived(showWhole ? viewOf(uprightFrame(crop)) : view);
+    // Showing the whole image, everything outside the crop box is shaded, in
+    // canvas pixels. The frame sits centred in the canvas.
+    let keep = $derived.by((): [number, number, number, number] | undefined => {
+        if (!showWhole || !view || !frameView) return undefined;
+        const mx = (view.width - frameView.width) / 2;
+        const my = (view.height - frameView.height) / 2;
+        return [
+            mx + (crop.cx - crop.w / 2) * frameView.width,
+            my + (crop.cy - crop.h / 2) * frameView.height,
+            mx + (crop.cx + crop.w / 2) * frameView.width,
+            my + (crop.cy + crop.h / 2) * frameView.height,
+        ];
+    });
     let fitView = $derived(
         image && showWhole ? viewOf(rotatedBounds(crop, image.width, image.height)) : view,
     );
@@ -191,7 +204,7 @@
             canvas.height = view.height;
             void linkCanvas2GPU(canvas, gpu, "premultiplied");
         }
-        renderer.setCrop(view);
+        renderer.setCrop(view, keep);
         renderer.requestRender();
     });
 

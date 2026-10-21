@@ -11,6 +11,7 @@
 		label,
 		size = 28,
 		active = false,
+		disabled = false,
 		onclick,
 		children,
 	}: {
@@ -18,6 +19,7 @@
 		size?: number;
 		// Holds the face up, for a button standing in for a mode that is on.
 		active?: boolean;
+		disabled?: boolean;
 		onclick?: () => void;
 		children?: Snippet;
 	} = $props();
@@ -27,6 +29,7 @@
 	class="bg relative flex border-0 p-0"
 	class:active
 	style="--size: {size}px;"
+	{disabled}
 	{onclick}
 	aria-label={label}
 	aria-pressed={active ? true : undefined}
@@ -43,6 +46,11 @@
 		border-radius: 10px;
 		background: transparent;
 		transition: transform 0.12s ease;
+	}
+
+	.bg:disabled {
+		opacity: 0.3;
+		pointer-events: none;
 	}
 
 	.bg:active {

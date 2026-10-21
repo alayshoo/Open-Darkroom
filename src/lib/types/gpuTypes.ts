@@ -86,7 +86,8 @@ export interface Renderer {
     setCurves: (lut: Float32Array | null) => void;
     // Which part of the image reaches the canvas, in preview pixels. The canvas
     // has to be sized to match.
-    setCrop: (view: CropView) => void;
+    // `keep` is the box, in canvas pixels, outside which the image is shaded.
+    setCrop: (view: CropView, keep?: [number, number, number, number]) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
     requestRender: () => void;

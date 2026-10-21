@@ -649,7 +649,13 @@
             inert={!imagePayload}
         >
             <CropButton active={isCropping} ontoggle={toggleCrop} />
-            <CropTools visible={isCropping} bind:straightening={isStraightening} onturn={turnDraft} />
+            <CropTools
+                visible={isCropping}
+                bind:straightening={isStraightening}
+                canReset={!isFullFrame(draftCrop)}
+                onturn={turnDraft}
+                onreset={() => (draftCrop = { ...FULL_FRAME })}
+            />
         </div>
     </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->

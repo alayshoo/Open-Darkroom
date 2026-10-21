@@ -232,14 +232,25 @@ export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropV
 }
 
 /** The `CropView` uniform, as chunks/cropView.wgsl declares it. */
-export const CROP_VIEW_BUFFER_SIZE = 32;
+export const CROP_VIEW_BUFFER_SIZE = 48;
 
-export function cropViewToFloats(view: CropView): Float32Array {
+/** A box no output pixel falls outside, so nothing is shaded. */
+const KEEP_ALL: [number, number, number, number] = [-1e30, -1e30, 1e30, 1e30];
+
+/**
+ * `keep` is the box, in output pixels, outside which the output is shaded, as
+ * [x0, y0, x1, y1].
+ */
+export function cropViewToFloats(
+    view: CropView,
+    keep: [number, number, number, number] = KEEP_ALL,
+): Float32Array {
     return new Float32Array([
         ...view.origin,
         ...view.axisX,
         ...view.axisY,
         view.width,
         view.height,
+        ...keep,
     ]);
 }

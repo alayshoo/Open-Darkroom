@@ -1,6 +1,6 @@
 <!-- src/lib/components/outputs/CropOverlay.svelte -->
 <script lang="ts">
-    import { MAX_ANGLE, cropInside, fitCrop, turnedSize, type Crop } from "$lib/types/crop";
+    import { MAX_ANGLE, cropInside, fitCrop, type Crop } from "$lib/types/crop";
 
     // Laid over the whole turned and rotated frame, so every position here is a
     // fraction of that frame and maps straight onto the crop's own units.
@@ -67,6 +67,17 @@
 
     let drag: Drag | null = null;
     let mode = $state<"idle" | "resize" | "rotate" | "line">("idle");
+    // The cursor a drag started with, held over the whole window until it
+    // ends, so passing over another part of the overlay never swaps it.
+    let dragCursor = $state<string | null>(null);
+
+    function cursorFor(sides: Sides): string {
+        const { l, r, t, b } = sides;
+        if (l && r && t && b) return "move";
+        if ((l && t) || (r && b)) return "nwse-resize";
+        if ((r && t) || (l && b)) return "nesw-resize";
+        return t || b ? "ns-resize" : "ew-resize";
+    }
     // The straighten line, in fractions of the frame.
     let line: { x0: number; y0: number; x1: number; y1: number } | null = $state(null);
 
@@ -127,6 +138,7 @@
         drag = { kind: "line" };
         line = { x0: x, y0: y, x1: x, y1: y };
         mode = "line";
+        dragCursor = "crosshair";
     }
 
     function beginResize(e: PointerEvent, sides: Sides) {
@@ -136,6 +148,7 @@
         if (straightening || e.ctrlKey) return beginLine(e);
         drag = { kind: "resize", sides, pointerX: e.clientX, pointerY: e.clientY, start: { ...crop } };
         mode = "resize";
+        dragCursor = cursorFor(sides);
     }
 
     // Anywhere off the box turns the image about the box's centre.
@@ -154,6 +167,7 @@
             start: { ...crop },
         };
         mode = "rotate";
+        dragCursor = "var(--rotate-cursor)";
     }
 
     function move(e: PointerEvent) {
@@ -220,25 +234,10 @@
         drag = null;
         line = null;
         mode = "idle";
+        dragCursor = null;
     }
 
     const pct = (v: number) => `${v * 100}%`;
-
-    // The photo outside the box, in fractions of the frame: the rotated image's
-    // outline with the box cut out of it. Only the photo is shaded, corners that
-    // spill past the frame included, and never the backdrop around it.
-    let shade = $derived.by(() => {
-        const [w, h] = turnedSize(crop, imageWidth, imageHeight);
-        const cos = Math.cos(crop.angle);
-        const sin = Math.sin(crop.angle);
-        const outline = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
-            const dx = (sx * w) / 2;
-            const dy = (sy * h) / 2;
-            return `${0.5 + (cos * dx - sin * dy) / w},${0.5 + (sin * dx + cos * dy) / h}`;
-        });
-        const { x0, y0, x1, y1 } = rect;
-        return `M${outline.join("L")}Z M${x0},${y0}L${x1},${y0}L${x1},${y1}L${x0},${y1}Z`;
-    });
 
     // Thirds at rest; a finer grid to sight along while the image is turning.
     let gridLines = $derived(
@@ -259,9 +258,9 @@
     role="presentation"
 >
     <div class="rotate-zone"></div>
-    <svg class="shade absolute" viewBox="0 0 1 1" preserveAspectRatio="none">
-        <path d={shade} fill-rule="evenodd" />
-    </svg>
+    {#if dragCursor}
+        <div class="drag-shield" style="cursor: {dragCursor};"></div>
+    {/if}
 
     <div
         class="crop-box absolute"
@@ -300,7 +299,15 @@
         inset: 0;
         touch-action: none;
         user-select: none;
-        cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 15a8 8 0 0 1 14 0M5 15l-1-4M5 15l4-1M19 15l1-4M19 15l-4-1' stroke='black' stroke-width='3.5'/%3E%3Cpath d='M5 15a8 8 0 0 1 14 0M5 15l-1-4M5 15l4-1M19 15l1-4M19 15l-4-1' stroke='white' stroke-width='1.5'/%3E%3C/g%3E%3C/svg%3E") 12 12, grab;
+        --rotate-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 15a8 8 0 0 1 14 0M5 15l-1-4M5 15l4-1M19 15l1-4M19 15l-4-1' stroke='black' stroke-width='3.5'/%3E%3Cpath d='M5 15a8 8 0 0 1 14 0M5 15l-1-4M5 15l4-1M19 15l1-4M19 15l-4-1' stroke='white' stroke-width='1.5'/%3E%3C/g%3E%3C/svg%3E") 12 12, grab;
+        cursor: var(--rotate-cursor);
+    }
+
+    /* Over everything, the side panels included, for as long as a drag runs. */
+    .drag-shield {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
     }
 
     /* Reaches well past the image, so a box filling the frame still leaves
@@ -314,17 +321,6 @@
     .crop-overlay.straightening .crop-box,
     .crop-overlay.straightening .handle {
         cursor: crosshair;
-    }
-
-    .shade {
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        overflow: visible;
-        pointer-events: none;
-    }
-    .shade path {
-        fill: rgba(0, 0, 0, 0.55);
     }
 
     .crop-box {
