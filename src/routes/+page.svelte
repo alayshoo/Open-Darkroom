@@ -323,6 +323,12 @@
     // aside while the crop tool has the preview.
     let sidebarInactive = $derived(!imagePayload || isCropping);
 
+    // An export menu left open when the footer goes inactive would stay up,
+    // dimmed and unreachable.
+    $effect(() => {
+        if (sidebarInactive) exportMenuOpen = false;
+    });
+
     function enterCrop() {
         draftCrop = { ...crop };
         isCropping = true;
@@ -639,7 +645,11 @@
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
     <div class="toolbar shrink-0">
-        <div class="toolbar-tools relative flex flex-col items-center">
+        <div
+            class="toolbar-tools relative flex flex-col items-center"
+            class:dimmed={!imagePayload}
+            inert={!imagePayload}
+        >
             <CropButton active={isCropping} ontoggle={toggleCrop} />
             <CropTools visible={isCropping} bind:straightening={isStraightening} onturn={turnDraft} />
         </div>
@@ -1317,10 +1327,19 @@
             {#if exportMenuOpen}
                 <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
             {/if}
-            <div class="absolute" style="left: 10px;">
+            <div
+                class="footer-item absolute"
+                style="left: 10px;"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>
             </div>
-            <div class="page-dots-wrapper relative flex justify-center items-center">
+            <div
+                class="footer-item page-dots-wrapper relative flex justify-center items-center"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                     <!-- Both groups stay mounted and crossfade on opacity
                          alone. `blur` animated filter: blur(), and these sit
                          inside .side-panel-footer — a backdrop-filter surface,
@@ -1356,7 +1375,12 @@
                         ></button>
                     </div>
             </div>
-            <div class="absolute" style="right: 10px;">
+            <div
+                class="footer-item absolute"
+                style="right: 10px;"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <ModeToggle bind:isDarkroom onModeToggle={handleModeToggle}
                 ></ModeToggle>
             </div>
@@ -1453,7 +1477,12 @@
 
     /* Clears the title bar the toolbar bleeds up behind, and sits above the
        falloff painted by ::before. */
+    .footer-item {
+        transition: opacity 0.2s ease;
+    }
+
     .toolbar-tools {
+        transition: opacity 0.2s ease;
         padding-top: 50px;
         padding-right: 6px;
         gap: 10px;
