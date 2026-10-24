@@ -9,6 +9,13 @@ import { createFrameTimer } from "./frameTimer";
 import { debugStats } from "../debugStats.svelte";
 import { createOutputSpaceBuffer } from "../outputSpaceBuffer";
 import type { OutputSpaceId } from "../outputSpace";
+import {
+    CROP_VIEW_BUFFER_SIZE,
+    FULL_FRAME,
+    cropView,
+    cropViewToFloats,
+    type Crop,
+} from "$lib/types/crop";
 import shaderSource from "../shaders/histogram.wgsl?raw";
 import scaleSource from "../shaders/histogramScale.wgsl?raw";
 import drawSource from "../shaders/histogramDraw.wgsl?raw";
@@ -71,8 +78,22 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "uniform" },
             },
+            {
+                binding: 4, // crop
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
+            },
         ],
     });
+
+    // Written per render, since it is the crop mapped onto whichever texture
+    // is being binned.
+    const cropBuffer = device.createBuffer({
+        label: "Histogram Crop View",
+        size: CROP_VIEW_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    let crop: Crop = FULL_FRAME;
 
     // ── Pipeline ─────────────────────────────────────────────────────
     const pipelineLayout = device.createPipelineLayout({
@@ -219,6 +240,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 { binding: 1, resource: { buffer: calcParams.paramsBuffer } },
                 { binding: 2, resource: { buffer: bins } },
                 { binding: 3, resource: { buffer: outputSpace.buffer } },
+                { binding: 4, resource: { buffer: cropBuffer } },
             ],
         });
         return bindGroup;
@@ -266,6 +288,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         drawPass.end();
     }
 
+    function setCrop(next: Crop) {
+        crop = next;
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
@@ -274,6 +300,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
+        device.queue.writeBuffer(
+            cropBuffer,
+            0,
+            cropViewToFloats(cropView(crop, inputTexture.width, inputTexture.height)),
+        );
 
         const measure = debugStats.enabled;
         const start = measure ? performance.now() : 0;
@@ -380,6 +411,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     function destroy() {
         calcParams.destroy();
         outputSpace.destroy();
+        cropBuffer.destroy();
         timer.destroy();
         bins.destroy();
         scaleBuffer.destroy();
@@ -392,5 +424,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     // black image.
     setOutputSpace(gpu.displaySpace, null);
 
-    return { setSourceSpace, setOutputSpace, setToneMap, setCurves, render, readBins, destroy };
+    return {
+        setSourceSpace, setOutputSpace, setToneMap, setCurves, setCrop, render, readBins, destroy,
+    };
 }

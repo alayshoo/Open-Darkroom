@@ -9,6 +9,7 @@
 
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
+    import CropOverlay from "$lib/components/outputs/CropOverlay.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
     import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
@@ -17,6 +18,8 @@
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
+    import CropButton from "$lib/components/inputs/cropButton.svelte";
+    import CropTools from "$lib/components/inputs/cropTools.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -47,6 +50,14 @@
     } from "$lib/types/curves";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import {
+        type Crop,
+        FULL_FRAME,
+        cropsEqual,
+        isFullFrame,
+        turnCrop,
+    } from "$lib/types/crop";
+    import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
     import { exportImage } from "$lib/utils/exportImage";
@@ -59,7 +70,7 @@
     import { applyAction, undoAction, type StateAccessors, } from "$lib/history/historyDispatch";
     import type { Action } from "$lib/types/historyActions";
 
-    import { createKeydownHandler } from "$lib/config/keyboardShortcuts";
+    import { createKeydownHandler, isTextField } from "$lib/config/keyboardShortcuts";
 
     // ===== Control Modes =====
 
@@ -283,12 +294,89 @@
     async function handleOpenImage() {
         try {
             const payload = await openImage();
-            if (payload) imagePayload = payload;
+            if (payload) {
+                imagePayload = payload;
+                // A crop describes one frame, so neither it nor its history
+                // carries over the way the adjustments do.
+                crop = { ...FULL_FRAME };
+                cancelCrop();
+                history.discard((a) => a.type === "crop");
+            }
         } catch (e) {
             imagePayload = null;
             console.error("Failed to open image:", e);
         }
     }
+
+    // ===== Crop =====
+
+    // What is applied, and what the overlay is editing while the tool is open.
+    // The preview shows the whole frame for as long as the tool is.
+    let crop: Crop = $state({ ...FULL_FRAME });
+    let draftCrop: Crop = $state({ ...FULL_FRAME });
+    let isCropping = $state(false);
+    let isStraightening = $state(false);
+
+    // The adjustments have nothing to act on without an image, and are set
+    // aside while the crop tool has the preview.
+    let sidebarInactive = $derived(!imagePayload || isCropping);
+
+    // An export menu left open when the footer goes inactive would stay up,
+    // dimmed and unreachable.
+    $effect(() => {
+        if (sidebarInactive) exportMenuOpen = false;
+    });
+
+    function enterCrop() {
+        draftCrop = { ...crop };
+        isCropping = true;
+    }
+
+    function applyCrop() {
+        isCropping = false;
+        isStraightening = false;
+        if (cropsEqual(draftCrop, crop)) return;
+        commit({ type: "crop", oldValue: { ...crop }, newValue: { ...draftCrop } });
+        crop = { ...draftCrop };
+    }
+
+    function cancelCrop() {
+        isCropping = false;
+        isStraightening = false;
+    }
+
+    function turnDraft(clockwise: boolean) {
+        draftCrop = turnCrop(draftCrop, clockwise);
+    }
+
+    function toggleCrop() {
+        if (!imagePayload) return;
+        if (isCropping) applyCrop();
+        else enterCrop();
+    }
+
+    // The darkroom's per-channel histograms follow the crop, so a film border
+    // left outside it stops weighing on the black and white points.
+    let inputHistograms: ChannelHistograms | null = $state(null);
+    let histogramRequest = 0;
+
+    $effect(() => {
+        const payload = imagePayload;
+        const kept = { ...crop };
+        const request = ++histogramRequest;
+
+        if (!payload) {
+            inputHistograms = null;
+        } else if (isFullFrame(kept)) {
+            inputHistograms = { r: payload.histR, g: payload.histG, b: payload.histB };
+        } else {
+            cropHistograms(kept)
+                .then((h) => {
+                    if (request === histogramRequest) inputHistograms = h;
+                })
+                .catch((e) => console.error("Failed to bin the crop:", e));
+        }
+    });
 
     let isExportPending = $state(false);
     let showExportModal = $state(false);
@@ -318,8 +406,9 @@
         const unlisten = await listen("export:started", () => {
             showExportModal = true;
         });
+        if (isCropping) applyCrop();
         try {
-            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, exportSettings);
+            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, crop, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
@@ -349,16 +438,32 @@
         setCurves: (next) => {
             curves = cloneCurves(next);
         },
+        setCrop: (value) => {
+            crop = { ...value };
+            cancelCrop();
+        },
     };
 
     function commit(action: Action) {
         history.push(action);
     }
+
+    // Undo or redo inside the crop tool first throws away an unapplied drag;
+    // only with nothing to throw away does it reach the history.
+    function leaveCropForHistory(): boolean {
+        if (!isCropping) return false;
+        const discarded = !cropsEqual(draftCrop, crop);
+        cancelCrop();
+        return discarded;
+    }
+
     function undo() {
+        if (leaveCropForHistory()) return;
         const a = history.undo();
         if (a) undoAction(a, stateAccessors);
     }
     function redo() {
+        if (leaveCropForHistory()) return;
         const a = history.redo();
         if (a) applyAction(a, stateAccessors);
     }
@@ -415,7 +520,10 @@
         }
     }
 
+    // Pasting and resetting change the sliders, so they wait while the
+    // sidebar is set aside. Copying only reads them.
     async function handlePasteAdjustments() {
+        if (sidebarInactive) return;
         try {
             const pasted = await readAdjustments(activeKeys, !isDarkroom);
             applySliderSet(pasted.sliders, pasted.curves);
@@ -434,8 +542,10 @@
         applySliderSet(next, curveValues);
     }
 
-    const handleResetAdjustments = () =>
+    function handleResetAdjustments() {
+        if (sidebarInactive) return;
         resetKeys(activeKeys, isDarkroom ? {} : defaultCurves());
+    }
     const handleResetColourMixer = () => resetKeys(HSL_KEYS);
 
     /* The tolerance is there because animated values land on their target
@@ -478,6 +588,7 @@
             copyAdjustments: handleCopyAdjustments,
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
+            toggleCrop: toggleCrop,
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
@@ -502,9 +613,25 @@
         closeSettings: () => settings.close(),
         isSettingsOpen: () => settings.open,
     });
+
+    // Enter and Escape belong to the crop tool while it is open, unless a field
+    // or the export menu has the keyboard.
+    function handleWindowKeydown(e: KeyboardEvent) {
+        const ownsKey =
+            isCropping && !settings.open && !exportMenuOpen && !isTextField(e.target);
+        if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
+            if (e.key === "Enter") applyCrop();
+            else if (isStraightening) isStraightening = false;
+            else cancelCrop();
+            e.preventDefault();
+            (document.activeElement as HTMLElement)?.blur();
+            return;
+        }
+        handleKeydown(e);
+    }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <TitleBar
     {undo}
@@ -520,7 +647,22 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="toolbar shrink-0"></div>
+    <div class="toolbar shrink-0">
+        <div
+            class="toolbar-tools relative flex flex-col items-center"
+            class:dimmed={!imagePayload}
+            inert={!imagePayload}
+        >
+            <CropButton active={isCropping} ontoggle={toggleCrop} />
+            <CropTools
+                visible={isCropping}
+                bind:straightening={isStraightening}
+                canReset={!isFullFrame(draftCrop)}
+                onturn={turnDraft}
+                onreset={() => (draftCrop = { ...FULL_FRAME })}
+            />
+        </div>
+    </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
         <div class="colour-space-bar shrink-0">
@@ -529,7 +671,24 @@
     {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
-            <PreviewImageCanvas {sliders} {curveLut} {imagePayload} />
+            <PreviewImageCanvas
+                {sliders}
+                {curveLut}
+                {imagePayload}
+                crop={isCropping ? draftCrop : crop}
+                showWhole={isCropping}
+            >
+                {#snippet overlay()}
+                    {#if isCropping && imagePayload}
+                        <CropOverlay
+                            bind:crop={draftCrop}
+                            bind:straightening={isStraightening}
+                            imageWidth={imagePayload.fullWidth}
+                            imageHeight={imagePayload.fullHeight}
+                        />
+                    {/if}
+                {/snippet}
+            </PreviewImageCanvas>
         </div>
         {#if settings.debugTools && debugStats.enabled}
             <DebugStatsOverlay />
@@ -540,11 +699,16 @@
             class="histogram-panel glass shrink-0 rounded-[12px]"
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
         >
-            <div class="histogram-container m-1.25">
+            <div
+                class="histogram-container m-1.25"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <Histogram
                     {sliders}
                     {curveLut}
                     {imagePayload}
+                    {crop}
                     curveCanvas={curveHistogramCanvas}
                     curveChannel={isRgb ? curveChannel : "master"}
                 />
@@ -553,7 +717,8 @@
         <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
             <div
                 class="quick-actions flex items-center flex-row gap-2 ml-3 mr-3 mt-2.5"
-                class:dimmed={exportMenuOpen}
+                class:dimmed={exportMenuOpen || sidebarInactive}
+                inert={sidebarInactive}
             >
                 <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
                 <!-- Stays mounted and fades. It is the last item in a
@@ -572,7 +737,11 @@
                     />
                 </div>
             </div>
-            <div class="controls-section flex relative flex-1 flex-col" class:dimmed={exportMenuOpen}>
+            <div
+                class="controls-section flex relative flex-1 flex-col"
+                class:dimmed={exportMenuOpen || sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <div
                     class="controls-pager-wrapper relative flex-1"
                     class:sliding={isModeSliding}
@@ -637,10 +806,9 @@
                                         >Unsharp Mask</span
                                     >
                                     <div
-                                        class="flex w-full aspect-[1.3/1] rounded-[6px]"
+                                        class="flex w-full aspect-square rounded-[6px] mb-3"
                                         style="background: black;"
                                     ></div>
-                                    <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
                                         bind:value={sliders.usmAmount}
                                         defaultValue={0}
@@ -1106,7 +1274,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histR ?? null}
+                                        histogramData={inputHistograms?.r ?? null}
                                         histogramChannel="r"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
@@ -1123,7 +1291,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histG ?? null}
+                                        histogramData={inputHistograms?.g ?? null}
                                         histogramChannel="g"
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
@@ -1140,7 +1308,7 @@
                                         maxB={2}
                                         innerColor={"#430000"}
                                         outerColor={"#000000"}
-                                        histogramData={imagePayload?.histB ?? null}
+                                        histogramData={inputHistograms?.b ?? null}
                                         histogramChannel="b"
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
@@ -1166,10 +1334,19 @@
             {#if exportMenuOpen}
                 <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
             {/if}
-            <div class="absolute" style="left: 10px;">
+            <div
+                class="footer-item absolute"
+                style="left: 10px;"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <ExportButton onexport={handleExport} bind:menuOpen={exportMenuOpen} settings={exportSettings}></ExportButton>
             </div>
-            <div class="page-dots-wrapper relative flex justify-center items-center">
+            <div
+                class="footer-item page-dots-wrapper relative flex justify-center items-center"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                     <!-- Both groups stay mounted and crossfade on opacity
                          alone. `blur` animated filter: blur(), and these sit
                          inside .side-panel-footer — a backdrop-filter surface,
@@ -1205,7 +1382,12 @@
                         ></button>
                     </div>
             </div>
-            <div class="absolute" style="right: 10px;">
+            <div
+                class="footer-item absolute"
+                style="right: 10px;"
+                class:dimmed={sidebarInactive}
+                inert={sidebarInactive}
+            >
                 <ModeToggle bind:isDarkroom onModeToggle={handleModeToggle}
                 ></ModeToggle>
             </div>
@@ -1246,7 +1428,10 @@
     }
 
     .canvas-center {
-        inset: 36px; /* breathing room so a fitted image never touches the panels */
+        /* Breathing room so a fitted image never touches the panels. The left
+           is shorter because the toolbar's buttons sit inside its column, so
+           this leaves the same gap to them as to the side bar. */
+        inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
     }
@@ -1292,15 +1477,29 @@
     .toolbar {
         position: relative;
         margin: -44px 0 -12px -12px;
-        min-width: 54px;
+        min-width: 48px;
         z-index: 10;
         pointer-events: auto;
+    }
+
+    /* Clears the title bar the toolbar bleeds up behind, and sits above the
+       falloff painted by ::before. */
+    .footer-item {
+        transition: opacity 0.2s ease;
+    }
+
+    .toolbar-tools {
+        transition: opacity 0.2s ease;
+        padding-top: 50px;
+        padding-right: 6px;
+        gap: 4px;
+        z-index: 1;
     }
 
     .toolbar::before {
         content: "";
         position: absolute;
-        inset: 0 -48px 0 0;
+        inset: 0 -40px 0 0;
         background: linear-gradient(
             to right,
             var(--canvasBackdrop) 0%,
@@ -1337,6 +1536,10 @@
 
     .quick-actions {
         overflow: hidden;
+        transition: opacity 0.2s ease;
+    }
+
+    .histogram-container {
         transition: opacity 0.2s ease;
     }
 

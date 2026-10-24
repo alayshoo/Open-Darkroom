@@ -1,5 +1,6 @@
 <!-- src/lib/components/PreviewImageCanvas.svelte -->
 <script lang="ts">
+    import type { Snippet } from "svelte";
     import type {
         GPUCanvasLink,
         GPUImage,
@@ -13,26 +14,80 @@
     import { type Sliders } from "$lib/types/imgParameters";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
+    import {
+        cropView,
+        rotatedBounds,
+        rotationCanvas,
+        uprightFrame,
+        type Crop,
+    } from "$lib/types/crop";
 
     // Props
     let {
         sliders,
         curveLut,
         imagePayload,
+        crop,
+        showWhole = false,
+        overlay,
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
         curveLut: Float32Array | null;
         imagePayload: ImagePayload | null;
+        crop: Crop;
+        // Show all of the turned and rotated image the crop is cut from, laid
+        // out on its upright frame, rather than the crop itself.
+        showWhole?: boolean;
+        // Drawn over the frame, sized to it.
+        overlay?: Snippet;
     } = $props();
 
     // Get the shared GPU session from layout context
     const gpu = getGPU()!;
 
     let canvas: HTMLCanvasElement;
+    let frame: HTMLDivElement;
     let renderer: Renderer | null = $state(null);
     let canvasLink: GPUCanvasLink | null = $state(null);
-    let image: GPUImage | null = $state(null);
+    let image = $state<GPUImage | null>(null);
+
+    // The part of the preview that reaches the canvas, which is sized to it.
+    // Taken from the texture on the GPU, so it never runs ahead of the upload.
+    //
+    // Showing the whole image, the canvas is one size at every angle, since a
+    // resize clears it and a rotation drag would flash on every step. The
+    // frame is the upright image, and what has to fit the slot is the rotated
+    // image's own bounds.
+    const viewOf = (c: Crop) => (image ? cropView(c, image.width, image.height) : null);
+    let view = $derived(
+        image && showWhole ? viewOf(rotationCanvas(crop, image.width, image.height)) : viewOf(crop),
+    );
+    let frameView = $derived(showWhole ? viewOf(uprightFrame(crop)) : view);
+    // Showing the whole image, everything outside the crop box is shaded, in
+    // canvas pixels. The frame sits centred in the canvas.
+    let keep = $derived.by((): [number, number, number, number] | undefined => {
+        if (!showWhole || !view || !frameView) return undefined;
+        const mx = (view.width - frameView.width) / 2;
+        const my = (view.height - frameView.height) / 2;
+        return [
+            mx + (crop.cx - crop.w / 2) * frameView.width,
+            my + (crop.cy - crop.h / 2) * frameView.height,
+            mx + (crop.cx + crop.w / 2) * frameView.width,
+            my + (crop.cy + crop.h / 2) * frameView.height,
+        ];
+    });
+    let fitView = $derived(
+        image && showWhole ? viewOf(rotatedBounds(crop, image.width, image.height)) : view,
+    );
+
+    // The canvas against the frame, centred on it, in percent of the frame.
+    let canvasStyle = $derived.by(() => {
+        if (!view || !frameView) return "";
+        const w = (view.width / frameView.width) * 100;
+        const h = (view.height / frameView.height) * 100;
+        return `width: ${w}%; height: ${h}%; left: ${(100 - w) / 2}%; top: ${(100 - h) / 2}%;`;
+    });
 
     let slotWidth = $state(0);
     let slotHeight = $state(0);
@@ -41,7 +96,9 @@
     // Track the slot the canvas is centred in, and the device pixel ratio: the
     // fit below is expressed in CSS pixels but has to hold in device pixels.
     $effect(() => {
-        const slot = canvas?.parentElement;
+        // The frame's parent, not the frame: the frame is sized from this
+        // measurement, so observing it would feed each fit back into the next.
+        const slot = frame?.parentElement;
         if (!slot) return;
 
         const observer = new ResizeObserver(([entry]) => {
@@ -67,22 +124,21 @@
         };
     });
 
-    // Fit the image to the slot, but never past 1:1 — one image pixel covers at
-    // most one device pixel, so the preview is downscaled or shown at native
-    // size and never magnified to fill the slot.
+    // Fit the image to the slot, never past 1:1 (one image pixel per device
+    // pixel), then draw the frame at the same scale.
     let displaySize = $derived.by(() => {
-        if (!imagePayload) return null;
+        if (!fitView || !frameView) return null;
 
-        const nativeWidth = imagePayload.width / dpr;
-        const nativeHeight = imagePayload.height / dpr;
-        if (!slotWidth || !slotHeight) return { w: nativeWidth, h: nativeHeight };
+        const frameWidth = frameView.width / dpr;
+        const frameHeight = frameView.height / dpr;
+        if (!slotWidth || !slotHeight) return { w: frameWidth, h: frameHeight };
 
         const scale = Math.min(
             1,
-            slotWidth / nativeWidth,
-            slotHeight / nativeHeight,
+            slotWidth / (fitView.width / dpr),
+            slotHeight / (fitView.height / dpr),
         );
-        return { w: nativeWidth * scale, h: nativeHeight * scale };
+        return { w: frameWidth * scale, h: frameHeight * scale };
     });
 
     // Link the canvas to GPU and create the renderer once canvas is mounted
@@ -91,7 +147,7 @@
 
         let destroyed = false;
 
-        linkCanvas2GPU(canvas, gpu).then((link) => {
+        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
             if (destroyed) return;
             canvasLink = link;
             renderer = createRenderer(gpu, canvasLink);
@@ -113,12 +169,7 @@
 
         const localRenderer = renderer;
 
-        // Resize canvas to match image
-        canvas.width = imagePayload.width;
-        canvas.height = imagePayload.height;
-
-        // Re-link canvas after resize
-        linkCanvas2GPU(canvas, gpu).then((link) => {
+        linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
             canvasLink = link;
 
             // Clean up old texture
@@ -142,6 +193,19 @@
             );
             localRenderer.requestRender();
         });
+    });
+
+    // The crop is applied by the last stage, so a change resizes the canvas
+    // without touching the image already on the GPU.
+    $effect(() => {
+        if (!renderer || !image || !view) return;
+        if (canvas.width !== view.width || canvas.height !== view.height) {
+            canvas.width = view.width;
+            canvas.height = view.height;
+            void linkCanvas2GPU(canvas, gpu, "premultiplied");
+        }
+        renderer.setCrop(view, keep);
+        renderer.requestRender();
     });
 
     // The destination the chain encodes for: the display, unless the export
@@ -174,17 +238,29 @@
     });
 </script>
 
-<canvas
-    bind:this={canvas}
+<div
+    bind:this={frame}
+    class="preview-frame relative"
     style={displaySize
         ? `width: ${displaySize.w}px; height: ${displaySize.h}px;`
         : "width: 0; height: 0;"}
-></canvas>
+>
+    <canvas bind:this={canvas} style={canvasStyle}></canvas>
+    {#if displaySize}
+        {@render overlay?.()}
+    {/if}
+</div>
 
 <style>
-    canvas {
-        display: block;
+    .preview-frame {
         max-width: 100%;
         max-height: 100%;
+    }
+
+    /* Premultiplied, so wherever the render leaves the image the backdrop
+       shows through. */
+    canvas {
+        position: absolute;
+        display: block;
     }
 </style>

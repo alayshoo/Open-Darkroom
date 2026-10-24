@@ -14,6 +14,7 @@ use image::{ImageBuffer, ImageDecoder, Rgba};
 use crate::color::{
     linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
 };
+use crate::crop::{crop_view, CropPayload, CropView};
 use crate::icc::{Matrix3, SourceSpace};
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
@@ -221,29 +222,78 @@ fn resample(
 /// Each worker bins into its own set of counters and the partials are summed at
 /// the end, so the hot loop needs no atomics.
 pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
-    let empty = || ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS]);
-
-    let (r, g, b) = src
-        .par_chunks(HIST_BLOCK_PIXELS * channels)
+    src.par_chunks(HIST_BLOCK_PIXELS * channels)
         .map(|block| {
-            let mut bins = empty();
-            for px in block.chunks_exact(channels) {
-                bins.0[(px[0] >> 8) as usize] += 1;
-                bins.1[(px[1] >> 8) as usize] += 1;
-                bins.2[(px[2] >> 8) as usize] += 1;
+            let mut bins = empty_bins();
+            block.chunks_exact(channels).for_each(|px| bin_pixel(&mut bins, px));
+            bins
+        })
+        .reduce(empty_bins, sum_bins)
+        .into()
+}
+
+type Bins = ([u32; HIST_BINS], [u32; HIST_BINS], [u32; HIST_BINS]);
+
+fn empty_bins() -> Bins {
+    ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS])
+}
+
+fn bin_pixel(bins: &mut Bins, px: &[u16]) {
+    bins.0[(px[0] >> 8) as usize] += 1;
+    bins.1[(px[1] >> 8) as usize] += 1;
+    bins.2[(px[2] >> 8) as usize] += 1;
+}
+
+fn sum_bins(mut acc: Bins, part: Bins) -> Bins {
+    for i in 0..HIST_BINS {
+        acc.0[i] += part.0[i];
+        acc.1[i] += part.1[i];
+        acc.2[i] += part.2[i];
+    }
+    acc
+}
+
+impl From<Bins> for Histograms {
+    fn from((r, g, b): Bins) -> Self {
+        Histograms { r, g, b }
+    }
+}
+
+/// [`compute_histograms`] over only the pixels inside a crop of an image
+/// `width` pixels wide.
+pub fn compute_histograms_in(
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    view: &CropView,
+) -> Histograms {
+    let [x0, y0, x1, y1] = view.source_texels(0..view.width, 0..view.height);
+    let x0 = x0.clamp(0, width as i64) as u32;
+    let x1 = x1.clamp(x0 as i64, width as i64) as u32;
+    let y0 = y0.clamp(0, height as i64) as u32;
+    let y1 = y1.clamp(y0 as i64, height as i64) as u32;
+
+    (y0..y1)
+        .into_par_iter()
+        .fold(empty_bins, |mut bins, y| {
+            for x in (x0..x1).filter(|&x| view.contains(x, y)) {
+                let at = (y as usize * width as usize + x as usize) * channels;
+                bin_pixel(&mut bins, &src[at..at + channels]);
             }
             bins
         })
-        .reduce(empty, |mut acc, part| {
-            for i in 0..HIST_BINS {
-                acc.0[i] += part.0[i];
-                acc.1[i] += part.1[i];
-                acc.2[i] += part.2[i];
-            }
-            acc
-        });
+        .reduce(empty_bins, sum_bins)
+        .into()
+}
 
-    Histograms { r, g, b }
+/// R, G, B bins as u32 LE, end to end — the tail of the open payload.
+pub fn histogram_bytes(h: &Histograms) -> Vec<u8> {
+    h.r.iter()
+        .chain(h.g.iter())
+        .chain(h.b.iter())
+        .flat_map(|v| v.to_le_bytes())
+        .collect()
 }
 
 /// Build the preview and overview textures and the histograms for a decoded
@@ -381,10 +431,7 @@ pub fn build_payload(prepared: &PreparedImage) -> Vec<u8> {
     payload.extend_from_slice(&prepared.preview_pixels);
     payload.extend_from_slice(&prepared.overview_pixels);
 
-    let h = &prepared.histograms;
-    for &v in h.r.iter().chain(h.g.iter()).chain(h.b.iter()) {
-        payload.extend_from_slice(&v.to_le_bytes());
-    }
+    payload.extend_from_slice(&histogram_bytes(&prepared.histograms));
 
     payload
 }
@@ -520,4 +567,21 @@ pub(crate) async fn open_image_file(
     );
 
     Ok(Response::new(payload))
+}
+
+/// The open image's per-channel histograms, binned over only what a crop keeps.
+#[tauri::command]
+pub(crate) async fn crop_histograms(
+    state: tauri::State<'_, ImageState>,
+    crop: CropPayload,
+) -> Result<Response, String> {
+    let (pixels_u16, width, height, channels) = {
+        let guard = state.lock().unwrap();
+        let img = guard.as_ref().ok_or("No image loaded")?;
+        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels)
+    };
+
+    let view = crop_view(&crop, width, height);
+    let histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view);
+    Ok(Response::new(histogram_bytes(&histograms)))
 }

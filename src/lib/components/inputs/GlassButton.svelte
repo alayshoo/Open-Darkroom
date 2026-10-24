@@ -10,24 +10,32 @@
 	let {
 		label,
 		size = 28,
+		active = false,
+		disabled = false,
 		onclick,
 		children,
 	}: {
 		label: string;
 		size?: number;
+		// Holds the face up, for a button standing in for a mode that is on.
+		active?: boolean;
+		disabled?: boolean;
 		onclick?: () => void;
 		children?: Snippet;
 	} = $props();
 </script>
 
 <button
-	class="bg relative flex border-0 rounded-[10px] p-0"
+	class="bg relative flex border-0 p-0"
+	class:active
 	style="--size: {size}px;"
+	{disabled}
 	{onclick}
 	aria-label={label}
+	aria-pressed={active ? true : undefined}
 	title={label}
 >
-	<div class="face glass absolute rounded-[7px]"></div>
+	<div class="face glass absolute"></div>
 	{@render children?.()}
 </button>
 
@@ -35,8 +43,14 @@
 	.bg {
 		width: var(--size);
 		height: var(--size);
+		border-radius: 10px;
 		background: transparent;
 		transition: transform 0.12s ease;
+	}
+
+	.bg:disabled {
+		opacity: 0.3;
+		pointer-events: none;
 	}
 
 	.bg:active {
@@ -58,6 +72,7 @@
 		   the chip reads as one of the toggles sitting at the end of the row.
 		   The box itself stays square and keeps the hit area. */
 		inset: 3px 2px;
+		border-radius: 7px;
 		box-sizing: border-box;
 		backdrop-filter: none;
 		-webkit-backdrop-filter: none;
@@ -70,7 +85,8 @@
 	}
 
 	.bg:hover .face,
-	.bg:active .face {
+	.bg:active .face,
+	.bg.active .face {
 		opacity: 1;
 	}
 

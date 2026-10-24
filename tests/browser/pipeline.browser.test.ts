@@ -43,6 +43,13 @@ import {
   type OutputSpaceId,
 } from "$lib/gpu/outputSpace";
 import { OUTPUT_SPACE_BUFFER_SIZE } from "$lib/gpu/outputSpaceBuffer";
+import {
+  CROP_VIEW_BUFFER_SIZE,
+  FULL_FRAME,
+  cropView,
+  cropViewToFloats,
+  type Crop,
+} from "$lib/types/crop";
 
 // ── Reference maths, mirroring the shaders ────────────────────────────────────
 
@@ -146,6 +153,10 @@ interface DevelopOptions {
   /** Treat the source as already in the working space, so only the output
    *  transform runs — the one way to reach colour outside the destination. */
   alreadyWorking?: boolean;
+  /** The crop the encode stage applies. The result is read back at its size. */
+  crop?: Crop;
+  /** The box, in output pixels, outside which the encode stage shades. */
+  keep?: [number, number, number, number];
 }
 
 /**
@@ -191,8 +202,17 @@ async function develop(
   const detailTexture = intermediate("detail", SHARP_FORMAT);
   const compositeTexture = intermediate("composited", WORKING_FORMAT);
 
+  const view = cropView(options.crop ?? FULL_FRAME, width, height);
+  const cropBuffer = gpu.device.createBuffer({
+    size: CROP_VIEW_BUFFER_SIZE,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, options.keep));
+  const outWidth = view.width;
+  const outHeight = view.height;
+
   const target = gpu.device.createTexture({
-    size: { width, height },
+    size: { width: outWidth, height: outHeight },
     format: "rgba8unorm",
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
   });
@@ -200,9 +220,9 @@ async function develop(
   // Readback rows are padded to the 256-byte alignment the copy requires, so a
   // width whose rows do not land on it is a case the harness handles rather
   // than a width the tests have to avoid.
-  const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+  const bytesPerRow = Math.ceil((outWidth * 4) / 256) * 256;
   const staging = gpu.device.createBuffer({
-    size: bytesPerRow * height,
+    size: bytesPerRow * outHeight,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
@@ -261,13 +281,14 @@ async function develop(
     createStageBindGroup(gpu, colorSpaceEncode, [
       { binding: 0, resource: compositeTexture.createView() },
       { binding: 1, resource: { buffer: outputSpace.buffer } },
+      { binding: 2, resource: { buffer: cropBuffer } },
     ]),
   );
 
   encoder.copyTextureToBuffer(
     { texture: target },
     { buffer: staging, bytesPerRow },
-    { width, height },
+    { width: outWidth, height: outHeight },
   );
   gpu.device.queue.submit([encoder.finish()]);
 
@@ -277,11 +298,11 @@ async function develop(
 
   // Drop alpha and the row padding so the result lines up with the Rust
   // renderer's RGB output.
-  const out = new Uint8Array(width * height * 3);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
+  const out = new Uint8Array(outWidth * outHeight * 3);
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
       const from = y * bytesPerRow + x * 4;
-      const to = (y * width + x) * 3;
+      const to = (y * outWidth + x) * 3;
       out[to] = rgba[from];
       out[to + 1] = rgba[from + 1];
       out[to + 2] = rgba[from + 2];
@@ -289,6 +310,7 @@ async function develop(
   }
   calcParams.destroy();
   outputSpace.destroy();
+  cropBuffer.destroy();
   image.texture.destroy();
   developTexture.destroy();
   sharpHTexture.destroy();
@@ -307,10 +329,12 @@ async function develop(
 async function histogram(
   rgb: Uint8Array,
   sliders: Sliders,
+  crop: Crop = FULL_FRAME,
 ): Promise<{ r: Uint32Array; g: Uint32Array; b: Uint32Array; scale: number }> {
   const pipeline = createHistogramPipeline(gpu);
   const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rgb), WIDTH, HEIGHT);
   pipeline.setSourceSpace(SRGB_TO_WORKING);
+  pipeline.setCrop(crop);
   try {
     // No target: the app draws the curves from the bins on the GPU, but what is
     // under test here is the binning, so this stops at the buffer.
@@ -746,6 +770,72 @@ describe("histogram draw", () => {
     image.texture.destroy();
     pipeline.destroy();
     expect(error?.message ?? null).toBeNull();
+  });
+});
+
+describe("the crop", () => {
+  // Columns 16–47 and rows 1–2 of the 64 × 4 chart.
+  const CROP: Crop = { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0, quarterTurns: 0 };
+
+  it("keeps exactly the pixels it covers, untouched", async () => {
+    const source = rampChart();
+    const whole = await develop(source, defaultSlidersRGB);
+    const cropped = await develop(source, defaultSlidersRGB, undefined, { crop: CROP });
+
+    const expected: number[] = [];
+    for (let y = 1; y < 3; y++) {
+      for (let x = 16; x < 48; x++) {
+        const i = (y * WIDTH + x) * 3;
+        expected.push(whole[i], whole[i + 1], whole[i + 2]);
+      }
+    }
+    expect(Array.from(cropped)).toEqual(expected);
+  });
+
+  // Sharpening runs before the crop, so the pixels along its edges still see
+  // their neighbours beyond it.
+  it("is applied after sharpening", async () => {
+    // An edge down the middle, and a crop starting right on its bright side.
+    const source = solid(60, 60, 60);
+    for (let y = 0; y < HEIGHT; y++) {
+      source.fill(190, (y * WIDTH + WIDTH / 2) * 3, (y + 1) * WIDTH * 3);
+    }
+    const rightHalf: Crop = { cx: 0.75, cy: 0.5, w: 0.5, h: 1, angle: 0, quarterTurns: 0 };
+    const sliders = { ...defaultSlidersRGB, usmAmount: 200, usmRadius: 3 };
+
+    const plain = await develop(source, defaultSlidersRGB);
+    const whole = await develop(source, sliders);
+    const cropped = await develop(source, sliders, undefined, { crop: rightHalf });
+
+    const edge = (WIDTH / 2) * 3;
+    expect(whole[edge]).toBeGreaterThan(plain[edge]);
+    expect(cropped[0]).toBe(whole[edge]);
+  });
+
+  // The crop tool's shade is drawn by the encode stage, on the same pixels as
+  // the image, so it can neither lag behind it nor leave a sliver uncovered.
+  it("shades exactly the pixels outside the crop tool's box", async () => {
+    const source = solid(200, 160, 120);
+    const plain = await develop(source, defaultSlidersRGB);
+    const shaded = await develop(source, defaultSlidersRGB, undefined, { keep: [0, 0, 32, 4] });
+
+    for (let x = 0; x < WIDTH; x++) {
+      const i = x * 3;
+      if (x < 32) {
+        expect(shaded[i], `column ${x}`).toBe(plain[i]);
+      } else {
+        expect(Math.abs(shaded[i] - plain[i] * 0.45), `column ${x}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("limits the histogram to what it keeps", async () => {
+    const bins = await histogram(rampChart(), defaultSlidersRGB, CROP);
+    const kept = 32 * 2 * VOTE;
+
+    expect(sum(bins.r)).toBe(kept);
+    expect(sum(bins.g)).toBe(kept);
+    expect(sum(bins.b)).toBe(kept);
   });
 });
 

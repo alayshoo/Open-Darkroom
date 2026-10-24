@@ -10,7 +10,8 @@ use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::export_encoding::{encode_and_save, ExportFormat, ExportSettings};
-use crate::export_rendering::{render_image, SlidersPayload};
+use crate::crop::CropPayload;
+use crate::export_rendering::{render_cropped_image, SlidersPayload};
 use crate::image_opening::ImageState;
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ pub(crate) async fn export_image(
     app: tauri::AppHandle,
     state: tauri::State<'_, ImageState>,
     sliders: SlidersPayload,
+    crop: CropPayload,
     settings: ExportSettings,
 ) -> Result<(), String> {
     println!(
@@ -74,12 +76,13 @@ pub(crate) async fn export_image(
     // The renderer is Tauri-agnostic; bridging its progress to the frontend is
     // this command's job.
     let progress_handle = app.clone();
-    let rgb_bytes = render_image(
+    let rendered = render_cropped_image(
         &pixels_u16,
         width,
         height,
         channels,
         &sliders,
+        &crop,
         &space,
         settings.output_space,
         bit_depth,
@@ -94,7 +97,7 @@ pub(crate) async fn export_image(
         t.elapsed().as_millis()
     );
 
-    encode_and_save(rgb_bytes, width, height, &settings, &path)?;
+    encode_and_save(rendered.rgb, rendered.width, rendered.height, &settings, &path)?;
 
     let _ = app.emit("export:progress", 1.0f32);
 

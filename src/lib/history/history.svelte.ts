@@ -29,6 +29,13 @@ class History {
     return this.stack[++this.pointer];
   }
 
+  /** Drop every action matching `pred`, keeping the pointer on the same step. */
+  discard(pred: (a: Action) => boolean) {
+    const removedBefore = this.stack.slice(0, this.pointer + 1).filter(pred).length;
+    this.stack = this.stack.filter((a) => !pred(a));
+    this.pointer -= removedBefore;
+  }
+
   clear() {
     this.stack = [];
     this.pointer = -1;
