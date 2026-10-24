@@ -145,7 +145,7 @@
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
-        if (straightening || e.ctrlKey) return beginLine(e);
+        if (straightening || e.ctrlKey || e.metaKey) return beginLine(e);
         drag = { kind: "resize", sides, pointerX: e.clientX, pointerY: e.clientY, start: { ...crop } };
         mode = "resize";
         dragCursor = cursorFor(sides);
@@ -155,7 +155,7 @@
     function beginRotate(e: PointerEvent) {
         if (e.button !== 0) return;
         e.preventDefault();
-        if (straightening || e.ctrlKey) return beginLine(e);
+        if (straightening || e.ctrlKey || e.metaKey) return beginLine(e);
         const bounds = frame.getBoundingClientRect();
         const pivotX = bounds.left + crop.cx * bounds.width;
         const pivotY = bounds.top + crop.cy * bounds.height;
@@ -255,6 +255,7 @@
     class:straightening
     bind:this={frame}
     onpointerdown={beginRotate}
+    oncontextmenu={(e) => e.preventDefault()}
     role="presentation"
 >
     <div class="rotate-zone"></div>

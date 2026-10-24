@@ -520,7 +520,10 @@
         }
     }
 
+    // Pasting and resetting change the sliders, so they wait while the
+    // sidebar is set aside. Copying only reads them.
     async function handlePasteAdjustments() {
+        if (sidebarInactive) return;
         try {
             const pasted = await readAdjustments(activeKeys, !isDarkroom);
             applySliderSet(pasted.sliders, pasted.curves);
@@ -539,8 +542,10 @@
         applySliderSet(next, curveValues);
     }
 
-    const handleResetAdjustments = () =>
+    function handleResetAdjustments() {
+        if (sidebarInactive) return;
         resetKeys(activeKeys, isDarkroom ? {} : defaultCurves());
+    }
     const handleResetColourMixer = () => resetKeys(HSL_KEYS);
 
     /* The tolerance is there because animated values land on their target
