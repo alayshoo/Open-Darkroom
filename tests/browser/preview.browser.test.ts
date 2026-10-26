@@ -8,11 +8,10 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import type { GPUSession, Renderer } from "$lib/types/gpuTypes";
+import type { GPUCanvasLink, GPUSession, Renderer } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB } from "$lib/types/imgParameters";
-import { FULL_FRAME } from "$lib/types/crop";
+import { FULL_FRAME, type Crop } from "$lib/types/crop";
 import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
-import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
 import { createRenderer } from "$lib/gpu/renderer";
 import { ROWS_HEADER_BYTES, loadFullResolution, uploadSource } from "$lib/gpu/fullResolution";
 import {
@@ -118,14 +117,14 @@ describe("the full-resolution stream", () => {
 
     // Serves bands of five rows, whatever is asked for, as full_resolution.rs
     // lays them out.
-    function serve(requests: number[]) {
+    function serve(requests: number[], width = WIDTH, height = HEIGHT, image = pixels) {
         return async (_maxEdge: number, y: number): Promise<ArrayBuffer> => {
             requests.push(y);
-            const rows = Math.min(5, HEIGHT - y);
-            const buffer = new ArrayBuffer(ROWS_HEADER_BYTES + WIDTH * rows * 8);
+            const rows = Math.min(5, height - y);
+            const buffer = new ArrayBuffer(ROWS_HEADER_BYTES + width * rows * 8);
             const view = new DataView(buffer);
-            [WIDTH, HEIGHT, y, rows].forEach((v, i) => view.setUint32(i * 4, v, true));
-            new Uint8Array(buffer, ROWS_HEADER_BYTES).set(pixels.subarray(y * WIDTH * 8, (y + rows) * WIDTH * 8));
+            [width, height, y, rows].forEach((v, i) => view.setUint32(i * 4, v, true));
+            new Uint8Array(buffer, ROWS_HEADER_BYTES).set(image.subarray(y * width * 8, (y + rows) * width * 8));
             return buffer;
         };
     }
@@ -142,18 +141,39 @@ describe("the full-resolution stream", () => {
     });
 
     it("fills each mip level with the mean of the four texels above it", async () => {
-        const image = (await loadFullResolution(gpu.device, WIDTH, serve([]), () => false))!;
+        const [w, h] = [64, 36];
+        const even = linearise(scatterChart(w, h));
+        const image = (await loadFullResolution(gpu.device, w, serve([], w, h, even), () => false))!;
         expect(image.texture.mipLevelCount).toBe(7);
 
         const top = await readLevel(image.texture, 0);
         const next = await readLevel(image.texture, 1);
-        expect([next.width, next.height]).toEqual([50, 18]);
-        for (const [x, y] of [[0, 0], [17, 9], [49, 17]]) {
+        expect([next.width, next.height]).toEqual([32, 18]);
+        for (const [x, y] of [[0, 0], [17, 9], [31, 17]]) {
             for (let c = 0; c < 3; c++) {
-                const at = (px: number, py: number) => fromHalf(top.words[(py * WIDTH + px) * 4 + c]);
+                const at = (px: number, py: number) => fromHalf(top.words[(py * w + px) * 4 + c]);
                 const mean = (at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1)) / 4;
-                expect(fromHalf(next.words[(y * 50 + x) * 4 + c])).toBeCloseTo(mean, 2);
+                expect(fromHalf(next.words[(y * 32 + x) * 4 + c])).toBeCloseTo(mean, 2);
             }
+        }
+        image.texture.destroy();
+    });
+
+    it("spreads an odd level over the whole of its parent", async () => {
+        const image = (await loadFullResolution(gpu.device, WIDTH, serve([]), () => false))!;
+        const top = await readLevel(image.texture, 0);
+        const next = await readLevel(image.texture, 1);
+        expect([next.width, next.height]).toEqual([50, 18]);
+        // The last row of the level reads the parent's last two rows, not the
+        // pair a 2:1 map would end on and leave the final row unread.
+        const y = 17;
+        const py = ((y + 0.5) * HEIGHT) / 18 - 0.5;
+        const [r0, f] = [Math.floor(py), py - Math.floor(py)];
+        for (let c = 0; c < 3; c++) {
+            const at = (px: number, row: number) => fromHalf(top.words[(row * WIDTH + px) * 4 + c]);
+            const row = (r: number) => (at(20, r) + at(21, r)) / 2;
+            const expected = row(r0) * (1 - f) + row(r0 + 1) * f;
+            expect(fromHalf(next.words[(y * 50 + 10) * 4 + c])).toBeCloseTo(expected, 2);
         }
         image.texture.destroy();
     });
@@ -162,8 +182,8 @@ describe("the full-resolution stream", () => {
         const requests: number[] = [];
         let cancelled = false;
         const fetch = serve(requests);
-        const result = await loadFullResolution(gpu.device, WIDTH, async (m, y, r) => {
-            const band = await fetch(m, y, r);
+        const result = await loadFullResolution(gpu.device, WIDTH, async (m, y) => {
+            const band = await fetch(m, y);
             cancelled = y >= 10;
             return band;
         }, () => cancelled);
@@ -172,17 +192,19 @@ describe("the full-resolution stream", () => {
     });
 });
 
-// ── The renderer on a canvas ──────────────────────────────────────────────────
+// ── The renderer ──────────────────────────────────────────────────────────────
 
 describe("the preview renderer", () => {
-    const WIDTH = 253;
+    const WIDTH = 700;
     const HEIGHT = 161;
     const CANVAS_W = 120;
     const CANVAS_H = 90;
     const source = scatterChart(WIDTH, HEIGHT);
     const slot: Slot = { center: [CANVAS_W / 2, CANVAS_H / 2], width: CANVAS_W, height: CANVAS_H };
 
-    let canvas: HTMLCanvasElement;
+    // Presenting to a real canvas loses the device in headless Chromium, so the
+    // renderer draws into a texture of the canvas's size and format instead.
+    let target: GPUTexture;
     let renderer: Renderer;
     let passes: string[] = [];
 
@@ -199,17 +221,19 @@ describe("the preview renderer", () => {
             return encoder;
         };
 
-        canvas = document.createElement("canvas");
-        canvas.width = CANVAS_W;
-        canvas.height = CANVAS_H;
-        document.body.appendChild(canvas);
-        renderer = createRenderer(gpu, await linkCanvas2GPU(canvas, gpu, "premultiplied", "srgb"));
+        target = gpu.device.createTexture({
+            size: { width: CANVAS_W, height: CANVAS_H },
+            format: gpu.format,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        });
+        const link = { canvasConfig: { getCurrentTexture: () => target } } as unknown as GPUCanvasLink;
+        renderer = createRenderer(gpu, link);
         renderer.loadImage(uploadSource(gpu.device, linearise(source), WIDTH, HEIGHT), SRGB_TO_WORKING);
     });
 
     /** Show the image at `zoom` about `center`, and return what reached the canvas. */
-    async function show(zoom: number | null, center: Point | null) {
-        const layout = cropLayout(FULL_FRAME, WIDTH, HEIGHT, slot, zoom, center);
+    async function show(zoom: number | null, center: Point | null, crop: Crop = FULL_FRAME) {
+        const layout = cropLayout(crop, WIDTH, HEIGHT, slot, zoom, center);
         passes = [];
         renderer.setFrame(viewFrame(layout, CANVAS_W, CANVAS_H, WIDTH, HEIGHT));
         renderer.requestRender();
@@ -217,13 +241,24 @@ describe("the preview renderer", () => {
         await gpu.device.queue.onSubmittedWorkDone();
         await new Promise((r) => requestAnimationFrame(r));
 
-        const readback = document.createElement("canvas");
-        readback.width = CANVAS_W;
-        readback.height = CANVAS_H;
-        const context = readback.getContext("2d")!;
-        context.drawImage(canvas, 0, 0);
-        const rgba = context.getImageData(0, 0, CANVAS_W, CANVAS_H).data;
-        return { layout, rgba, passes: [...passes] };
+        const recorded = [...passes];
+        const bytesPerRow = Math.ceil((CANVAS_W * 4) / 256) * 256;
+        const staging = gpu.device.createBuffer({
+            size: bytesPerRow * CANVAS_H,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        const encoder = gpu.device.createCommandEncoder();
+        encoder.copyTextureToBuffer({ texture: target }, { buffer: staging, bytesPerRow }, { width: CANVAS_W, height: CANVAS_H });
+        gpu.device.queue.submit([encoder.finish()]);
+        await staging.mapAsync(GPUMapMode.READ);
+        const padded = new Uint8Array(staging.getMappedRange());
+        const rgba = new Uint8Array(CANVAS_W * CANVAS_H * 4);
+        for (let y = 0; y < CANVAS_H; y++) {
+            rgba.set(padded.subarray(y * bytesPerRow, y * bytesPerRow + CANVAS_W * 4), y * CANVAS_W * 4);
+        }
+        staging.unmap();
+        staging.destroy();
+        return { layout, rgba, passes: recorded };
     }
 
     /** The largest difference between the canvas and the source pixel it shows. */
@@ -256,8 +291,11 @@ describe("the preview renderer", () => {
     });
 
     it("renders a fresh region once a pan runs past it", async () => {
+        // A fresh region about the starting point, which a change of
+        // adjustments forces.
+        renderer.setSliders({ ...defaultSlidersRGB });
         await show(1, [60, 45]);
-        const shown = await show(1, [60 + PAN_MARGIN, 45]);
+        const shown = await show(1, [60 + PAN_MARGIN + 10, 45]);
         expect(shown.passes).toContain("View Sample Pass");
         expect(worstAt1to1(shown)).toBeLessThanOrEqual(2);
     });
@@ -270,14 +308,15 @@ describe("the preview renderer", () => {
     });
 
     it("draws nothing outside the image", async () => {
-        // Fitted, the image is narrower than the canvas, with a band either side.
+        // Fitted, the image is wider than the canvas's shape, with a band above
+        // and below.
         const shown = await show(null, null);
-        const [x0, , x1] = shown.layout.clip!;
-        expect(x0).toBeGreaterThan(2);
+        const [, y0, , y1] = shown.layout.clip!;
+        expect(y0).toBeGreaterThan(2);
         const alpha = (x: number, y: number) => shown.rgba[(y * CANVAS_W + x) * 4 + 3];
-        expect(alpha(0, 45)).toBe(0);
-        expect(alpha(Math.floor(x0) - 1, 45)).toBe(0);
-        expect(alpha(Math.ceil(x1) + 1, 45)).toBe(0);
+        expect(alpha(60, 0)).toBe(0);
+        expect(alpha(60, Math.floor(y0) - 1)).toBe(0);
+        expect(alpha(60, Math.ceil(y1) + 1)).toBe(0);
         expect(alpha(60, 45)).toBe(255);
     });
 
@@ -292,5 +331,27 @@ describe("the preview renderer", () => {
         // The settled frame was drawn by the renderer's own timer.
         const settled = await show(0.7, [120, 80]);
         expect(settled.passes).toEqual(["Colour Space Encode Pass"]);
+    });
+
+    it("at 1:1 on a quarter-turned crop still shows the source's own pixels", async () => {
+        const turned: Crop = { ...FULL_FRAME, quarterTurns: 1 };
+        renderer.setSliders({ ...defaultSlidersRGB });
+        const shown = await show(1, [80, 300], turned);
+        expect(worstAt1to1(shown)).toBeLessThanOrEqual(2);
+        const moved = await show(1, [91.6, 287.2], turned);
+        expect(moved.passes).toEqual(["Colour Space Encode Pass"]);
+        expect(worstAt1to1(moved)).toBeLessThanOrEqual(2);
+    });
+
+    it("with the blurs on, a pan drawn from the held region matches a fresh render", async () => {
+        renderer.setSliders({ ...defaultSlidersRGB, clarity: 60, usmAmount: 80 });
+        await show(1, [300, 80]);
+        const held = await show(1, [300 + PAN_MARGIN - 20, 80]);
+        expect(held.passes).toEqual(["Colour Space Encode Pass"]);
+
+        renderer.setSliders({ ...defaultSlidersRGB, clarity: 60, usmAmount: 80 });
+        const fresh = await show(1, [300 + PAN_MARGIN - 20, 80]);
+        expect(fresh.passes).toContain("Sharp Blur V Pass");
+        expect(held.rgba).toEqual(fresh.rgba);
     });
 });

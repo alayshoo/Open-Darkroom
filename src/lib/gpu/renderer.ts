@@ -24,7 +24,6 @@ import {
     createEncodeStage,
     createSharpHorizontalStage,
     createSharpVerticalStage,
-    createSourceSampler,
     createViewSampleStage,
     createViewSampler,
 } from "./pipelines/chainStages";
@@ -68,7 +67,11 @@ const SETTLE_MS = 120;
 // The `ViewSample` uniform in viewSample.wgsl.
 const VIEW_SAMPLE_BUFFER_SIZE = 32;
 
-const affineToFloats = (a: Affine) => new Float32Array([...a.origin, ...a.axisX, ...a.axisY, 0, 0]);
+// The `ViewSample` uniform: the map, and whether it copies whole texels.
+function viewSampleFloats(a: Affine): Float32Array {
+    const exact = [...a.origin, ...a.axisX, ...a.axisY].every(Number.isInteger);
+    return new Float32Array([...a.origin, ...a.axisX, ...a.axisY, exact ? 1 : 0, 0]);
+}
 
 export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
 
@@ -82,7 +85,15 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     const composite: RenderStage = createCompositeStage(gpu);
     const colorSpaceEncode: RenderStage = createEncodeStage(gpu);
 
-    const sampler = createSourceSampler(gpu);
+    // Develop reads the view texture texel for texel, so nearest copies it
+    // exactly wherever the region sits, as the export's sampler does.
+    const sampler = gpu.device.createSampler({
+        label: "Develop Sampler",
+        magFilter: "nearest",
+        minFilter: "nearest",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+    });
     const viewSampler = createViewSampler(gpu);
 
     // Where the chain is rendering to. The buffer outlives every image, so the
@@ -380,7 +391,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         gpu.device.queue.writeBuffer(
             viewSampleBuffer,
             0,
-            affineToFloats(chainToSource(next, image.width, image.height, fullWidth, fullHeight)),
+            viewSampleFloats(chainToSource(next, image.width, image.height, fullWidth, fullHeight)),
         );
         // Radii are full-resolution measurements, so the blurs need to know
         // how far this render is from full resolution.

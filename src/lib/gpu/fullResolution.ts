@@ -101,9 +101,11 @@ function sourceTexture(device: GPUDevice, label: string, width: number, height: 
         size: { width, height },
         format: SOURCE_FORMAT,
         mipLevelCount: mipLevelCount(width, height),
+        // Copied out only by the browser tests, which read the levels back.
         usage:
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.COPY_SRC |
             GPUTextureUsage.RENDER_ATTACHMENT,
     });
 }
