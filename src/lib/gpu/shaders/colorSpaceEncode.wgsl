@@ -81,6 +81,12 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   if (any(src < vec2f(-0.5)) || any(src > extent + 0.5)) {
     return OFF_IMAGE;
   }
+  if (any(src < crop.image_min - 0.5) || any(src > crop.image_max + 0.5)) {
+    return OFF_IMAGE;
+  }
+  if (any(position.xy < crop.clip_min) || any(position.xy > crop.clip_max)) {
+    return OFF_IMAGE;
+  }
   let c = sample_composite(src);
 
   // The working curve is undone exactly: encode_srgb and decode_srgb both pass

@@ -15,6 +15,7 @@ use crate::color::{
     linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
 };
 use crate::crop::{crop_view, CropPayload, CropView};
+use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
@@ -67,6 +68,8 @@ pub struct OriginalImage {
     /// because export has to decode the same buffer the same way, at its own
     /// table width.
     pub space: SourceSpace,
+    /// What the preview's full-resolution texture is streamed from.
+    pub full_resolution: Arc<FullResolution>,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -553,6 +556,7 @@ pub(crate) async fn open_image_file(
             height: full_height,
             channels,
             space,
+            full_resolution: Arc::default(),
         });
     }
 

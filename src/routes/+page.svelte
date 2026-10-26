@@ -19,6 +19,7 @@
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
     import CropButton from "$lib/components/inputs/cropButton.svelte";
+    import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
     import CropTools from "$lib/components/inputs/cropTools.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
@@ -296,6 +297,7 @@
             const payload = await openImage();
             if (payload) {
                 imagePayload = payload;
+                zoom = null;
                 // A crop describes one frame, so neither it nor its history
                 // carries over the way the adjustments do.
                 crop = { ...FULL_FRAME };
@@ -317,6 +319,14 @@
     let isCropping = $state(false);
     let isStraightening = $state(false);
 
+    // Canvas pixels per image pixel, or null while the image is fitted to its
+    // slot. The crop tool always shows the image fitted.
+    let zoom: number | null = $state(null);
+
+    function toggleZoom() {
+        zoom = zoom === null ? 1 : null;
+    }
+
     // The adjustments have nothing to act on without an image, and are set
     // aside while the crop tool has the preview.
     let sidebarInactive = $derived(!imagePayload || isCropping);
@@ -328,6 +338,7 @@
     });
 
     function enterCrop() {
+        zoom = null;
         draftCrop = { ...crop };
         isCropping = true;
     }
@@ -336,6 +347,7 @@
         isCropping = false;
         isStraightening = false;
         if (cropsEqual(draftCrop, crop)) return;
+        zoom = null;
         commit({ type: "crop", oldValue: { ...crop }, newValue: { ...draftCrop } });
         crop = { ...draftCrop };
     }
@@ -662,6 +674,13 @@
                 onreset={() => (draftCrop = { ...FULL_FRAME })}
             />
         </div>
+        <div
+            class="toolbar-zoom absolute flex justify-center"
+            class:dimmed={!imagePayload}
+            inert={!imagePayload}
+        >
+            <ZoomButton fitted={zoom === null} disabled={isCropping} ontoggle={toggleZoom} />
+        </div>
     </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
@@ -677,6 +696,7 @@
                 {imagePayload}
                 crop={isCropping ? draftCrop : crop}
                 showWhole={isCropping}
+                bind:zoom
             >
                 {#snippet overlay()}
                     {#if isCropping && imagePayload}
@@ -1494,6 +1514,16 @@
         padding-right: 6px;
         gap: 4px;
         z-index: 1;
+    }
+
+    /* At the foot of the icon column, clear of the window's bottom edge the
+       toolbar bleeds down to. */
+    .toolbar-zoom {
+        left: 0;
+        right: 6px;
+        bottom: 24px;
+        z-index: 1;
+        transition: opacity 0.2s ease;
     }
 
     .toolbar::before {

@@ -74,3 +74,8 @@ export async function openImage(): Promise<ImagePayload | null> {
         throw e;
     }
 }
+
+// A band of rows of the open image at full resolution. See full_resolution.rs.
+export function fetchFullResolutionRows(maxEdge: number, y: number, rows: number): Promise<ArrayBuffer> {
+    return invoke<ArrayBuffer>("full_resolution_rows", { maxEdge, y, rows });
+}

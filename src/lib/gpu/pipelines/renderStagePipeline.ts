@@ -63,6 +63,9 @@ export function createStageBindGroup(
 export interface FullScreenPassOptions {
     clearValue?: GPUColor;
     timestampWrites?: GPURenderPassTimestampWrites;
+    // Only this part of the target is drawn, as [x, y, width, height]. The
+    // rest is still cleared.
+    scissor?: [number, number, number, number];
 }
 
 const DEFAULT_CLEAR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
@@ -90,6 +93,7 @@ export function recordFullScreenPass(
         ],
         timestampWrites: options.timestampWrites,
     });
+    if (options.scissor) pass.setScissorRect(...options.scissor);
     pass.setPipeline(stage.pipeline);
     pass.setBindGroup(0, bindGroup);
     pass.draw(6); // 6 vertices = full-screen quad (2 triangles)

@@ -8,11 +8,13 @@
 
 import {
     SHARP_FORMAT,
+    VIEW_FORMAT,
     WORKING_FORMAT,
     type GPUSession,
     type RenderStage,
 } from "$lib/types/gpuTypes";
 import { createRenderStage, intermediateBinding } from "./renderStagePipeline";
+import viewSampleSource from "../shaders/viewSample.wgsl?raw";
 import developSource from "../shaders/develop.wgsl?raw";
 import calcSharpTextureSource from "../shaders/calcSharpTexture.wgsl?raw";
 import compositeSource from "../shaders/composite.wgsl?raw";
@@ -25,6 +27,32 @@ function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
         visibility: GPUShaderStage.FRAGMENT,
         buffer: { type: "read-only-storage" },
     };
+}
+
+// The source, resampled into the region of the image the chain is rendering.
+export function createViewSampleStage(gpu: GPUSession): RenderStage {
+    return createRenderStage(gpu, {
+        label: "View Sample",
+        code: viewSampleSource,
+        format: VIEW_FORMAT,
+        bindings: [
+            {
+                binding: 0, // sourceTexture
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+            {
+                binding: 1, // sourceSampler
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                binding: 2, // view
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+        ],
+    });
 }
 
 // Steps 1-12, from the source image into the perceptual working space.
@@ -117,6 +145,19 @@ export function createSourceSampler(gpu: GPUSession): GPUSampler {
         label: "Source Image Sampler",
         magFilter: "linear",
         minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+    });
+}
+
+// The view sample stage's sampler: trilinear, so a source shrunk on screen is
+// read from the mip levels nearest its size rather than aliased from the top.
+export function createViewSampler(gpu: GPUSession): GPUSampler {
+    return gpu.device.createSampler({
+        label: "View Sampler",
+        magFilter: "linear",
+        minFilter: "linear",
+        mipmapFilter: "linear",
         addressModeU: "clamp-to-edge",
         addressModeV: "clamp-to-edge",
     });
