@@ -67,9 +67,11 @@ const SETTLE_MS = 120;
 // The `ViewSample` uniform in viewSample.wgsl.
 const VIEW_SAMPLE_BUFFER_SIZE = 32;
 
-// The `ViewSample` uniform: the map, and whether it copies whole texels.
+// The `ViewSample` uniform: the map, and whether it copies whole texels — one
+// texel per pixel along the source's own axes, from a texel centre.
 function viewSampleFloats(a: Affine): Float32Array {
-    const exact = [...a.origin, ...a.axisX, ...a.axisY].every(Number.isInteger);
+    const exact =
+        a.origin.every(Number.isInteger) && [...a.axisX, ...a.axisY].every((v) => v === 0 || Math.abs(v) === 1);
     return new Float32Array([...a.origin, ...a.axisX, ...a.axisY, exact ? 1 : 0, 0]);
 }
 
@@ -140,11 +142,9 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     debugStats.supportsPassTimings = frameTimer.available;
     let lastFrameStart = 0;
 
-    // The chain's textures are sized to the region it renders, and the bind
-    // groups point at them, so neither exists until a region has been planned.
-    // The blur textures are only made once sharpening is first visible; until
-    // then composite reads the developed texture in their place, which it
-    // never looks at with the amounts at zero.
+    // Sized to the region the chain renders, so none exist until one is planned.
+    // The blur textures wait until sharpening is first visible; until then
+    // composite reads the developed texture in their place, at zero amounts.
     let capacity = { width: 0, height: 0 };
     let viewTexture: GPUTexture | null = null;
     let developTexture: GPUTexture | null = null;

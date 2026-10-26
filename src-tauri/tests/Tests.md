@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 251 Rust tests, 95 TypeScript, 32 in-browser.
+Nothing is `#[ignore]`d. 278 Rust tests, 154 TypeScript, 50 in-browser.
 
 ---
 
@@ -205,6 +205,23 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_header_carries_the_full_resolution_of_a_downscaled_preview` | the anchor for pixel-denominated sliders |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
+
+## L1 — `full_resolution.rs` (9)
+
+The bands of rows the preview's full-resolution texture is streamed from. Until
+they arrive the view shows the preview, so the two have to agree.
+
+| Test | Asserts |
+|---|---|
+| `an_image_within_the_limit_is_served_whole_and_matches_its_preview` | the bands, end to end, are the preview's own bytes |
+| `bands_of_any_height_join_up_to_the_same_image` | no row lost or repeated at a band boundary |
+| `the_last_band_is_cut_short_at_the_bottom` | a request past the end is trimmed, not padded |
+| `a_band_past_the_bottom_is_refused` | an error rather than an empty band |
+| `a_source_without_alpha_is_served_opaque` | RGB and RGBA sources serve the same bytes |
+| `served_size_keeps_an_image_that_fits_and_shrinks_one_that_does_not` | the long edge lands on the GPU's limit |
+| `an_image_past_the_limit_is_resampled_as_the_preview_is` | fitted to the preview's edge, it is the preview |
+| `a_second_texture_limit_for_the_same_image_is_refused` | the fitted copy is built once |
+| `the_payload_carries_the_size_and_band_before_the_pixels` | the 16-byte header `fullResolution.ts` reads |
 
 ## L1 — `source_space.rs` (23)
 
@@ -558,7 +575,7 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
-## L1 — `tests/unit/` (95, TypeScript)
+## L1 — `tests/unit/` (154, TypeScript)
 
 | Test | Asserts |
 |---|---|
@@ -569,8 +586,10 @@ header is there, and the pixels still decode to what went in.
 | `wgslInclude` × 10 | the directive's grammar, chunk flattening, and every shipped shader resolving |
 | `outputSpace` × 12 | the destination matrices derived on the frontend: identity on the working space, inverses, white, gamut containment, the curve table |
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
+| `viewport` × 23 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it |
+| `fullResolution` × 8 | the band header, band sizing, mip level counts, and how far the blurs reach at a render scale |
 
-## L3 — `tests/browser/` (32, real WebGPU)
+## L3 — `tests/browser/` (50, real WebGPU)
 
 Drives the frontend's own pipeline modules, including the full six-pass chain. A
 failure here that passes in L2 is a TypeScript wiring bug.
@@ -598,3 +617,23 @@ failure here that passes in L2 is a TypeScript wiring bug.
 | `returns the image it was given, pixel for pixel, at identity` | a payload framed as the backend frames one, through the whole chain |
 | `holds the edges in place` | corners and both ends of every row |
 | `agrees with the renderer about when the blur can be skipped` | `sharpnessIsVisible` tracks the shader's fade |
+
+`preview.browser.test.ts` drives the full-resolution stream and the renderer
+itself. Presenting to a real canvas loses the device in headless Chromium, so
+the renderer draws into a texture standing in for the canvas's.
+
+| Test | Asserts |
+|---|---|
+| `puts every band where it belongs` | the streamed texture is the source, byte for byte |
+| `fills each mip level with the mean of the four texels above it` | the levels average linear light |
+| `spreads an odd level over the whole of its parent` | an odd edge's last row is not dropped |
+| `stops when it is cancelled` | a superseded stream stops asking for bands |
+| `at 1:1 shows the source's own pixels` | the region, the snap and both samplers land on texel centres |
+| `pans within the margin without re-running the chain, still pixel for pixel` | a pan is the encode pass alone |
+| `renders a fresh region once a pan runs past it` | and the new region is still exact |
+| `re-runs the chain when the adjustments change` | a held region never outlives the sliders |
+| `draws nothing outside the image` | the clip leaves the backdrop showing |
+| `lets a zoom under way stand in, then settles at the new scale` | a zoom re-renders once it stops, not on every step |
+| `at 1:1 on a quarter-turned crop still shows the source's own pixels` | swapped axes keep the mapping exact |
+| `with the blurs on, a pan drawn from the held region matches a fresh render` | the apron is wide enough: bit-identical |
+| `at half size filters the source rather than picking every other texel` | a one-pixel checker averages to grey |

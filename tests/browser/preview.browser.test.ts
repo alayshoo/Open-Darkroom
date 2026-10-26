@@ -354,4 +354,19 @@ describe("the preview renderer", () => {
         expect(fresh.passes).toContain("Sharp Blur V Pass");
         expect(held.rgba).toEqual(fresh.rgba);
     });
+
+    it("at half size filters the source rather than picking every other texel", async () => {
+        // A one-pixel checker: point sampling at 2:1 would land on one colour
+        // throughout, where filtering averages the two.
+        const checker = new Uint8Array(WIDTH * HEIGHT * 3);
+        for (let y = 0; y < HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) checker.fill((x + y) % 2 ? 255 : 0, (y * WIDTH + x) * 3, (y * WIDTH + x) * 3 + 3);
+        }
+        renderer.loadImage(uploadSource(gpu.device, linearise(checker), WIDTH, HEIGHT), SRGB_TO_WORKING);
+        const shown = await show(0.5, [300, 80]);
+        // Linear 0.5 is sRGB 188.
+        const centre = shown.rgba[(45 * CANVAS_W + 60) * 4];
+        expect(Math.abs(centre - 188)).toBeLessThanOrEqual(3);
+        renderer.loadImage(uploadSource(gpu.device, linearise(source), WIDTH, HEIGHT), SRGB_TO_WORKING);
+    });
 });
