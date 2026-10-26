@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { type ImagePayload } from "$lib/types/imagePayload";
+import type { PyramidStructure } from "$lib/gpu/tileSource";
 
 
 // Returned by the backend when the file picker is dismissed. Must match
@@ -60,6 +61,7 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
         histB,
         srcToWorking,
         colourBaked,
+        pyramid: null,
     };
 }
 
@@ -68,9 +70,20 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
 // caller has to drop what it is showing rather than keep it.
 export async function openImage(): Promise<ImagePayload | null> {
     try {
-        return parseImagePayload(await invoke<ArrayBuffer>("open_image_file"));
+        const payload = parseImagePayload(await invoke<ArrayBuffer>("open_image_file"));
+        payload.pyramid = await invoke<PyramidStructure>("pyramid_structure");
+        return payload;
     } catch (e) {
         if (e === OPEN_CANCELLED) return null;
         throw e;
     }
+}
+
+// Tiles of the open image's pyramid, in the layout pyramid.rs serialises.
+export function fetchPyramidTiles(
+    id: number,
+    level: number,
+    tiles: [number, number][],
+): Promise<ArrayBuffer> {
+    return invoke<ArrayBuffer>("pyramid_tiles", { id, level, tiles });
 }

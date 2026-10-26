@@ -16,6 +16,15 @@ const { openImage } = await import("$lib/utils/openImage");
 const HIST_BINS = 256;
 const HEADER = 64;
 
+const STRUCTURE = { id: 3, tileSize: 512, levels: [{ width: 9, height: 5 }] };
+
+/** Answer the open with `buffer` and the structure query with STRUCTURE. */
+function resolveOpen(buffer: ArrayBuffer) {
+  invoke.mockImplementation(async (command: string) =>
+    command === "pyramid_structure" ? STRUCTURE : buffer,
+  );
+}
+
 /** Open and assert a payload came back; the null path has its own test. */
 async function open(): Promise<ImagePayload> {
   const image = await openImage();
@@ -76,7 +85,7 @@ describe("openImage", () => {
   beforeEach(() => invoke.mockReset());
 
   it("reads the dimensions from the header", async () => {
-    invoke.mockResolvedValue(payload(9, 5, () => 0));
+    resolveOpen(payload(9, 5, () => 0));
 
     const image = await open();
 
@@ -85,10 +94,19 @@ describe("openImage", () => {
     expect(image.height).toBe(5);
   });
 
+  it("asks for the pyramid once the image is open", async () => {
+    resolveOpen(payload(9, 5, () => 0));
+
+    const image = await open();
+
+    expect(invoke).toHaveBeenLastCalledWith("pyramid_structure");
+    expect(image.pyramid).toEqual(STRUCTURE);
+  });
+
   it("reads the full resolution the preview was downscaled from", async () => {
     // The ratio between the two is what anchors a slider measured in image
     // pixels to a preview that is smaller than the image.
-    invoke.mockResolvedValue(payload(2048, 1024, () => 0, 0, [3000, 1500]));
+    resolveOpen(payload(2048, 1024, () => 0, 0, [3000, 1500]));
 
     const image = await open();
 
@@ -99,7 +117,7 @@ describe("openImage", () => {
   });
 
   it("reports the full resolution as the preview when nothing was downscaled", async () => {
-    invoke.mockResolvedValue(payload(9, 5, () => 0));
+    resolveOpen(payload(9, 5, () => 0));
 
     const image = await open();
 
@@ -108,7 +126,7 @@ describe("openImage", () => {
   });
 
   it("slices the pixels at eight bytes per pixel", async () => {
-    invoke.mockResolvedValue(payload(4, 3, (i) => i % 256));
+    resolveOpen(payload(4, 3, (i) => i % 256));
 
     const image = await open();
 
@@ -119,7 +137,7 @@ describe("openImage", () => {
   });
 
   it("reads the three histograms in R, G, B order after the pixels", async () => {
-    invoke.mockResolvedValue(payload(2, 2, () => 0));
+    resolveOpen(payload(2, 2, () => 0));
 
     const image = await open();
 
@@ -138,7 +156,7 @@ describe("openImage", () => {
   it("does not let the pixel and histogram regions overlap", async () => {
     // A one-pixel image makes an off-by-one in the offset obvious: the first
     // histogram value would otherwise be read out of the pixel block.
-    invoke.mockResolvedValue(payload(1, 1, () => 0xff, 7));
+    resolveOpen(payload(1, 1, () => 0xff, 7));
 
     const image = await open();
 
@@ -150,7 +168,7 @@ describe("openImage", () => {
   it("slices the overview out from behind the preview", async () => {
     // The overview is the whole frame at its own smaller size, so its region is
     // sized from its own header entry rather than the preview's.
-    invoke.mockResolvedValue(
+    resolveOpen(
       payload(2048, 1024, () => 0x11, 0, [3000, 1500], [512, 256], (i) => i % 256),
     );
 
@@ -165,7 +183,7 @@ describe("openImage", () => {
   });
 
   it("keeps the histograms readable behind both pixel regions", async () => {
-    invoke.mockResolvedValue(
+    resolveOpen(
       payload(4, 3, () => 0xff, 7, [4, 3], [2, 1], () => 0xee),
     );
 
@@ -178,7 +196,7 @@ describe("openImage", () => {
   });
 
   it("handles a preview whose dimensions are not powers of two", async () => {
-    invoke.mockResolvedValue(payload(2048, 683, () => 1));
+    resolveOpen(payload(2048, 683, () => 1));
 
     const image = await open();
 
@@ -197,7 +215,7 @@ describe("the source colour space", () => {
     // Deliberately asymmetric: a transposed read of a symmetric matrix is
     // indistinguishable from a correct one.
     const matrix = [0.6, 0.1, 0.02, 0.3, 0.9, 0.08, 0.04, 0.01, 0.95];
-    invoke.mockResolvedValue(
+    resolveOpen(
       payload(2, 2, () => 0, 0, [2, 2], [2, 2], () => 0, matrix),
     );
 
@@ -209,7 +227,7 @@ describe("the source colour space", () => {
   });
 
   it("reads the baked flag", async () => {
-    invoke.mockResolvedValue(
+    resolveOpen(
       payload(2, 2, () => 0, 0, [2, 2], [2, 2], () => 0, IDENTITY_MATRIX, true),
     );
 
@@ -219,7 +237,7 @@ describe("the source colour space", () => {
   it("still finds the pixels after the enlarged header", async () => {
     // The header grew from 24 to 64 bytes. Reading it at the old size puts the
     // first pixel 40 bytes into the matrix, which looks like a plausible image.
-    invoke.mockResolvedValue(payload(2, 2, (i) => (i % 251) + 1));
+    resolveOpen(payload(2, 2, (i) => (i % 251) + 1));
 
     const got = await open();
     expect(got.pixels.byteOffset).toBe(64);

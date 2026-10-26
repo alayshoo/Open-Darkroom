@@ -1,6 +1,6 @@
 // src/lib/gpu/pipelines/chainStages.ts
 //
-// The three render stages of the develop chain, in order. Each is the generic
+// The render stages of the develop chain, in order. Each is the generic
 // stage factory plus the one thing that distinguishes it: what it binds.
 // Declared here rather than inside the renderer so the test suite builds the
 // same stages the app does — a layout that drifts from its WGSL is exactly the
@@ -8,11 +8,13 @@
 
 import {
     SHARP_FORMAT,
+    VIEW_FORMAT,
     WORKING_FORMAT,
     type GPUSession,
     type RenderStage,
 } from "$lib/types/gpuTypes";
 import { createRenderStage, intermediateBinding } from "./renderStagePipeline";
+import viewSampleSource from "../shaders/viewSample.wgsl?raw";
 import developSource from "../shaders/develop.wgsl?raw";
 import calcSharpTextureSource from "../shaders/calcSharpTexture.wgsl?raw";
 import compositeSource from "../shaders/composite.wgsl?raw";
@@ -25,6 +27,32 @@ function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
         visibility: GPUShaderStage.FRAGMENT,
         buffer: { type: "read-only-storage" },
     };
+}
+
+// Whichever pyramid level is loaded, resampled into the layout of the screen.
+export function createViewSampleStage(gpu: GPUSession): RenderStage {
+    return createRenderStage(gpu, {
+        label: "View Sample",
+        code: viewSampleSource,
+        format: VIEW_FORMAT,
+        bindings: [
+            {
+                binding: 0, // sourceTexture
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+            {
+                binding: 1, // sourceSampler
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                binding: 2, // view
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+        ],
+    });
 }
 
 // Steps 1-12, from the source image into the perceptual working space.

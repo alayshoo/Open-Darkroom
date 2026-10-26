@@ -169,16 +169,20 @@ export function fitCrop(c: Crop, width: number, height: number): Crop {
     return { ...c, cx, cy, w: c.w * scale, h: c.h * scale };
 }
 
+/** A point (x, y) mapped to `origin + x * axisX + y * axisY`. */
+export interface Affine {
+    origin: [number, number];
+    axisX: [number, number];
+    axisY: [number, number];
+}
+
 /**
  * Output pixels mapped back into a source of a given size: the source texel
  * coordinate of output point (x, y) is `origin + x * axisX + y * axisY`.
  */
-export interface CropView {
+export interface CropView extends Affine {
     width: number;
     height: number;
-    origin: [number, number];
-    axisX: [number, number];
-    axisY: [number, number];
 }
 
 /**
@@ -232,18 +236,22 @@ export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropV
 }
 
 /** The `CropView` uniform, as chunks/cropView.wgsl declares it. */
-export const CROP_VIEW_BUFFER_SIZE = 48;
+export const CROP_VIEW_BUFFER_SIZE = 80;
 
 /** A box no output pixel falls outside, so nothing is shaded. */
 const KEEP_ALL: [number, number, number, number] = [-1e30, -1e30, 1e30, 1e30];
 
+/** A clip every output pixel passes, by mapping all of them to its middle. */
+const CLIP_NONE: Affine = { origin: [0.5, 0.5], axisX: [0, 0], axisY: [0, 0] };
+
 /**
  * `keep` is the box, in output pixels, outside which the output is shaded, as
- * [x0, y0, x1, y1].
+ * [x0, y0, x1, y1]. `clip` maps output pixels to a square: outside 0–1 is clear.
  */
 export function cropViewToFloats(
     view: CropView,
     keep: [number, number, number, number] = KEEP_ALL,
+    clip: Affine = CLIP_NONE,
 ): Float32Array {
     return new Float32Array([
         ...view.origin,
@@ -252,5 +260,8 @@ export function cropViewToFloats(
         view.width,
         view.height,
         ...keep,
+        ...clip.origin,
+        ...clip.axisX,
+        ...clip.axisY,
     ]);
 }

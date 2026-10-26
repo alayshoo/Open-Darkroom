@@ -5,6 +5,7 @@
 // the longest edge fits within PREVIEW_MAX_EDGE.
 
 use half::f16;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 
@@ -71,11 +72,17 @@ pub struct Tile {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PyramidStructure {
+    /// Which open image this describes. Tile requests carry it back, so a
+    /// request made for one image is never answered from the next.
+    pub id: u64,
     pub tile_size: u32,
     pub levels: Vec<LevelSize>,
 }
 
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
 pub struct Pyramid {
+    id: u64,
     source: Arc<Vec<u16>>,
     channels: usize,
     space: SourceSpace,
@@ -100,6 +107,7 @@ impl Pyramid {
     ) -> Self {
         let sizes = level_sizes(width, height);
         Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             source,
             channels,
             f16_luts: space.luts(f16::from_f32),
@@ -113,9 +121,14 @@ impl Pyramid {
 
     pub fn structure(&self) -> PyramidStructure {
         PyramidStructure {
+            id: self.id,
             tile_size: TILE_SIZE,
             levels: self.sizes.clone(),
         }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn sizes(&self) -> &[LevelSize] {
@@ -270,6 +283,10 @@ pub fn build_tile_payload(tiles: &[Tile]) -> Vec<u8> {
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
+/// Error returned when the image a tile request was made for has since been
+/// closed or replaced. The frontend expects it and drops the request quietly.
+pub const STALE_IMAGE: &str = "pyramid:stale";
+
 fn open_pyramid(state: &ImageState) -> Result<Arc<Pyramid>, String> {
     let guard = state.lock().unwrap();
     let img = guard.as_ref().ok_or("No image loaded")?;
@@ -288,10 +305,14 @@ pub(crate) async fn pyramid_structure(
 #[tauri::command]
 pub(crate) async fn pyramid_tiles(
     state: tauri::State<'_, ImageState>,
+    id: u64,
     level: usize,
     tiles: Vec<[u32; 2]>,
 ) -> Result<Response, String> {
-    let pyramid = open_pyramid(&state)?;
+    let pyramid = open_pyramid(&state).map_err(|_| STALE_IMAGE)?;
+    if pyramid.id() != id {
+        return Err(STALE_IMAGE.into());
+    }
 
     // Off the async runtime: a level built on demand takes long enough to
     // stall whatever else that worker is carrying.

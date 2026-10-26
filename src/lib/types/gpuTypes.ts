@@ -47,6 +47,11 @@ export interface GPUImage {
 // output reaches the final clamp bit for bit.
 export const WORKING_FORMAT: GPUTextureFormat = "rgba32float";
 
+// Format of the screen-shaped texture the view sample stage resamples the
+// source into. Half float like the source itself, and filterable, which develop
+// needs since it samples rather than loads.
+export const VIEW_FORMAT: GPUTextureFormat = "rgba16float";
+
 // Format of the sharpness textures — four blurred lumas in the intermediate,
 // three bands and a blurred luma in the output. Same precision as the working
 // format, and the precision is the point: a band is the difference of two nearly
@@ -69,7 +74,23 @@ export interface RenderStage {
 import type { Sliders } from "./imgParameters";
 import type { ToneMap } from "./toneMap";
 import type { CurveChannel } from "./curves";
-import type { Crop, CropView } from "./crop";
+import type { Affine, Crop } from "./crop";
+
+// What one frame of the preview shows, and where. The chain runs on render
+// pixels: canvas pixels up to 1:1, `density` of them per canvas pixel past it.
+export interface RenderFrame {
+    // The render pixels the chain covers, padded so the blurs see past the edge.
+    viewport: { x: number; y: number; width: number; height: number };
+    density: number;
+    // Render pixel, counted from the viewport's corner → source texel.
+    sample: Affine;
+    // Canvas pixel → a square whose outside is left clear.
+    clip: Affine;
+    // The box, in canvas pixels, outside which the image is shaded.
+    keep?: [number, number, number, number];
+    canvasWidth: number;
+    canvasHeight: number;
+}
 
 export interface Renderer {
     // `srcToWorking` is passed alongside the texture rather than set separately
@@ -84,10 +105,9 @@ export interface Renderer {
     setToneMap: (toneMap: ToneMap) => void;
     // The baked point curves, or null while every curve is the identity.
     setCurves: (lut: Float32Array | null) => void;
-    // Which part of the image reaches the canvas, in preview pixels. The canvas
-    // has to be sized to match.
-    // `keep` is the box, in canvas pixels, outside which the image is shaded.
-    setCrop: (view: CropView, keep?: [number, number, number, number]) => void;
+    // Rebinds the source alone, for a pyramid level arriving mid-session.
+    setSource: (image: GPUImage) => void;
+    setFrame: (frame: RenderFrame) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
     requestRender: () => void;

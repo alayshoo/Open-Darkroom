@@ -4,10 +4,12 @@ import { defaultSlidersRGB, type Sliders } from "../types/imgParameters";
 import type { ToneMap } from "../types/toneMap";
 import {
     SHARP_FORMAT,
+    VIEW_FORMAT,
     WORKING_FORMAT,
     type GPUSession,
     type GPUImage,
     type Renderer,
+    type RenderFrame,
     type GPUCanvasLink,
     type RenderStage,
 } from "$lib/types/gpuTypes";
@@ -24,13 +26,14 @@ import {
     createSharpHorizontalStage,
     createSharpVerticalStage,
     createSourceSampler,
+    createViewSampleStage,
 } from "./pipelines/chainStages";
 import { sharpnessIsVisible } from "./sharpnessVisibility";
 import { createFrameTimer } from "./pipelines/frameTimer";
 import { debugStats } from "./debugStats.svelte";
 import { createOutputSpaceBuffer } from "./outputSpaceBuffer";
 import type { OutputSpaceId } from "./outputSpace";
-import { CROP_VIEW_BUFFER_SIZE, cropViewToFloats, type CropView } from "$lib/types/crop";
+import { CROP_VIEW_BUFFER_SIZE, cropViewToFloats } from "$lib/types/crop";
 
 
 // The backdrop the preview sits on, and the encode stage's options as an
@@ -38,11 +41,20 @@ import { CROP_VIEW_BUFFER_SIZE, cropViewToFloats, type CropView } from "$lib/typ
 const PREVIEW_CLEAR: GPUColor = { r: 0.1, g: 0.1, b: 0.1, a: 1 };
 const ENCODE_OPTIONS: FullScreenPassOptions = { clearValue: PREVIEW_CLEAR };
 
+// The chain's textures grow in steps of this many pixels, so a pinch that
+// resizes the viewport on every frame reallocates only now and then. The view
+// sample stage fills the whole texture, so the slack holds real pixels too.
+const VIEWPORT_STEP = 256;
+
+// The `ViewSample` uniform in viewSample.wgsl.
+const VIEW_SAMPLE_BUFFER_SIZE = 32;
+
 export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
 
     // Create pipelines at startup
     const calcParams: CalcParamsPipeline = createCalcParamsPipeline(gpu);
 
+    const viewSample: RenderStage = createViewSampleStage(gpu);
     const develop: RenderStage = createDevelopStage(gpu);
     const sharpH: RenderStage = createSharpHorizontalStage(gpu);
     const sharpV: RenderStage = createSharpVerticalStage(gpu);
@@ -58,6 +70,12 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     const cropBuffer = gpu.device.createBuffer({
         label: "Crop View Uniform Buffer",
         size: CROP_VIEW_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const viewSampleBuffer = gpu.device.createBuffer({
+        label: "View Sample Uniform Buffer",
+        size: VIEW_SAMPLE_BUFFER_SIZE,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
@@ -80,65 +98,73 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     debugStats.supportsPassTimings = frameTimer.available;
     let lastFrameStart = 0;
 
-    // Bind groups connect actual resources to the layout slots, and the
-    // intermediate textures are sized to the image. Neither exists until an
-    // image is loaded, so both start null.
+    // Bind groups connect actual resources to the layout slots, and the chain's
+    // textures are sized to the viewport. Neither exists until a frame has
+    // been set, so both start null.
     //
     // The views are held alongside the textures rather than made per frame: they
-    // only change when the image does, and a slider drag would otherwise build
-    // two of them on every frame for nothing.
+    // only change when the viewport outgrows them, and a slider drag would
+    // otherwise build them on every frame for nothing.
+    let viewTexture: GPUTexture | null = null;
     let developTexture: GPUTexture | null = null;
     let sharpHTexture: GPUTexture | null = null;
     let detailTexture: GPUTexture | null = null;
     let compositeTexture: GPUTexture | null = null;
+    let viewView: GPUTextureView | null = null;
     let developView: GPUTextureView | null = null;
     let sharpHView: GPUTextureView | null = null;
     let detailView: GPUTextureView | null = null;
     let compositeView: GPUTextureView | null = null;
+    let viewSampleBindGroup: GPUBindGroup | null = null;
     let developBindGroup: GPUBindGroup | null = null;
     let sharpHBindGroup: GPUBindGroup | null = null;
     let sharpVBindGroup: GPUBindGroup | null = null;
     let compositeBindGroup: GPUBindGroup | null = null;
     let encodeBindGroup: GPUBindGroup | null = null;
     let currentImage: GPUImage | null = null;
+    let capacity = { width: 0, height: 0 };
 
-    function createIntermediate(
-        label: string,
-        image: GPUImage,
-        format: GPUTextureFormat,
-    ): GPUTexture {
+    function createIntermediate(label: string, format: GPUTextureFormat): GPUTexture {
         return gpu.device.createTexture({
             label,
-            size: { width: image.width, height: image.height },
+            size: capacity,
             format,
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
     }
 
-    function loadImage(image: GPUImage, srcToWorking: Float32Array) {
-        currentImage = image;
-
-        // The source's primaries, for calcParams to compose into the matrix
-        // that ends the darkroom block.
-        calcParams.updateSourceSpace(srcToWorking);
-
-        // The intermediates are sized to the image, so a new image needs new
-        // ones — and new bind groups pointing at them.
+    function destroyIntermediates() {
+        viewTexture?.destroy();
         developTexture?.destroy();
         sharpHTexture?.destroy();
         detailTexture?.destroy();
         compositeTexture?.destroy();
-        developTexture = createIntermediate("Developed Image", image, WORKING_FORMAT);
-        sharpHTexture = createIntermediate("Sharp Blur H", image, SHARP_FORMAT);
-        detailTexture = createIntermediate("Detail Bands", image, SHARP_FORMAT);
-        compositeTexture = createIntermediate("Composited Image", image, WORKING_FORMAT);
+    }
+
+    // Sizes the chain to hold `width` × `height` render pixels, rebuilding the
+    // textures and the bind groups pointing at them only when they are outgrown
+    // or a step too large.
+    function fitViewport(width: number, height: number) {
+        const limit = gpu.device.limits.maxTextureDimension2D;
+        const step = (n: number) => Math.min(limit, Math.ceil(Math.max(n, 1) / VIEWPORT_STEP) * VIEWPORT_STEP);
+        const next = { width: step(width), height: step(height) };
+        if (next.width === capacity.width && next.height === capacity.height) return;
+        capacity = next;
+
+        destroyIntermediates();
+        viewTexture = createIntermediate("View Sample", VIEW_FORMAT);
+        developTexture = createIntermediate("Developed Image", WORKING_FORMAT);
+        sharpHTexture = createIntermediate("Sharp Blur H", SHARP_FORMAT);
+        detailTexture = createIntermediate("Detail Bands", SHARP_FORMAT);
+        compositeTexture = createIntermediate("Composited Image", WORKING_FORMAT);
+        viewView = viewTexture.createView();
         developView = developTexture.createView();
         sharpHView = sharpHTexture.createView();
         detailView = detailTexture.createView();
         compositeView = compositeTexture.createView();
 
         developBindGroup = createStageBindGroup(gpu, develop, [
-            { binding: 0, resource: image.texture.createView() },
+            { binding: 0, resource: viewView },
             { binding: 1, resource: sampler },
             { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
         ]);
@@ -170,6 +196,45 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         ]);
     }
 
+    function setSource(image: GPUImage) {
+        currentImage = image;
+        viewSampleBindGroup = createStageBindGroup(gpu, viewSample, [
+            { binding: 0, resource: image.texture.createView() },
+            { binding: 1, resource: sampler },
+            { binding: 2, resource: { buffer: viewSampleBuffer } },
+        ]);
+    }
+
+    function loadImage(image: GPUImage, srcToWorking: Float32Array) {
+        // The source's primaries, for calcParams to compose into the matrix
+        // that ends the darkroom block.
+        calcParams.updateSourceSpace(srcToWorking);
+        setSource(image);
+    }
+
+    function setFrame(frame: RenderFrame) {
+        const { viewport, density } = frame;
+        fitViewport(viewport.width, viewport.height);
+
+        const { origin, axisX, axisY } = frame.sample;
+        gpu.device.queue.writeBuffer(
+            viewSampleBuffer,
+            0,
+            new Float32Array([...origin, ...axisX, ...axisY, 0, 0]),
+        );
+
+        // Canvas pixel → render texel, the inverse of how the viewport was laid
+        // out over the canvas.
+        const view = {
+            width: frame.canvasWidth,
+            height: frame.canvasHeight,
+            origin: [-viewport.x, -viewport.y] as [number, number],
+            axisX: [density, 0] as [number, number],
+            axisY: [0, density] as [number, number],
+        };
+        gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, frame.keep, frame.clip));
+    }
+
     // The destination the preview is encoded for, and the export space it is
     // being proofed against. Does not itself request a frame: the caller owns
     // when the preview redraws, as it does for the sliders.
@@ -183,10 +248,6 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
     function setCurves(lut: Float32Array | null) {
         calcParams.updateCurves(lut);
-    }
-
-    function setCrop(view: CropView, keep?: [number, number, number, number]) {
-        gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, keep));
     }
 
     function setSliders(sliders: Sliders) {
@@ -254,8 +315,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     }
 
     function drawFrame(): boolean {
-        if (!currentImage || !developView || !compositeView) return false;
-        if (!sharpHView || !detailView) return false;
+        if (!currentImage || !viewView || !developView || !compositeView) return false;
+        if (!sharpHView || !detailView || !viewSampleBindGroup) return false;
         if (!developBindGroup || !compositeBindGroup || !encodeBindGroup) return false;
         if (!sharpHBindGroup || !sharpVBindGroup) return false;
 
@@ -291,6 +352,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         // Step 4: The chain. Each stage reads the previous one's target, so they
         // cannot be collapsed: a fragment can only read a texture it is not
         // currently writing.
+        recordFullScreenPass(
+            encoder, viewSample, viewView, viewSampleBindGroup,
+            timedOptions("view"),
+        );
         recordFullScreenPass(
             encoder, develop, developView, developBindGroup,
             timedOptions("develop"),
@@ -362,21 +427,18 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         calcParams.destroy();
         outputSpace.destroy();
         cropBuffer.destroy();
+        viewSampleBuffer.destroy();
         frameTimer.destroy();
-        developTexture?.destroy();
-        sharpHTexture?.destroy();
-        detailTexture?.destroy();
-        compositeTexture?.destroy();
+        destroyIntermediates();
     }
 
     // Initialize with default sliders, and with the display as the destination
     // — which is what an unproofed preview renders for.
     setSliders( defaultSlidersRGB );
     setOutputSpace(gpu.displaySpace, null);
-    setCrop({ width: 1, height: 1, origin: [0, 0], axisX: [1, 0], axisY: [0, 1] });
 
     return {
-        loadImage, setSliders, setOutputSpace, setView, setToneMap, setCurves, setCrop,
-        requestRender, destroy,
+        loadImage, setSource, setFrame, setSliders, setOutputSpace, setView, setToneMap,
+        setCurves, requestRender, destroy,
     };
 }

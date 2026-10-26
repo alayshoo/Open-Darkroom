@@ -10,4 +10,9 @@ struct CropView {
   // draws a box; everything else passes one that covers the whole output.
   keep_min: vec2f,
   keep_max: vec2f,
+  // Output pixels this maps outside the unit square are left clear, which is
+  // how the preview draws nothing past the edges of the image.
+  clip_origin: vec2f,
+  clip_axis_x: vec2f,
+  clip_axis_y: vec2f,
 }

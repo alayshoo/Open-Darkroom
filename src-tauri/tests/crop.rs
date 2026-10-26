@@ -90,6 +90,16 @@ fn the_uniform_matches_its_declared_size() {
     assert_eq!(size_x, 8.0);
 }
 
+/// The clip exists for the preview, which draws past the image; an export never
+/// does, so every output pixel has to land inside the clip square.
+#[test]
+fn an_export_clips_nothing() {
+    let bytes = crop_view_to_bytes(&crop_view(&CropPayload::FULL_FRAME, 8, 4));
+    let f = |i: usize| f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
+    assert_eq!([f(12), f(13)], [0.5, 0.5], "clip origin");
+    assert_eq!([f(14), f(15), f(16), f(17)], [0.0; 4], "clip axes");
+}
+
 #[test]
 fn an_export_keeps_exactly_the_pixels_it_covers() {
     let img = rgb_ramp(64, 40);

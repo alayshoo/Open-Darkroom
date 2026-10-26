@@ -1,5 +1,8 @@
+import type { PyramidStructure } from "$lib/gpu/tileSource";
+
 export interface ImagePayload {
-    // Preview dimensions — the size of the pixel buffer below.
+    // Preview dimensions — the size of the pixel buffer below. The preview is
+    // the pyramid's top level, the whole frame at its coarsest.
     width: number;
     height: number;
     // Dimensions of the image the preview was downscaled from. Sliders measured
@@ -20,4 +23,7 @@ export interface ImagePayload {
     // Set when the backend had to apply the profile itself, so the pixels are
     // already in the working space and srcToWorking is the identity.
     colourBaked: boolean;
+    // The levels the preview can stream finer tiles from, or null when the
+    // backend has none to offer.
+    pyramid: PyramidStructure | null;
 }

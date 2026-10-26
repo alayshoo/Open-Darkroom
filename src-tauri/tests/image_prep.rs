@@ -15,6 +15,7 @@ use open_darkroom_lib::color::{
     build_srgb_to_linear_lut_u16, linearize_u16, same_curve, LINEAR_BYTES_PER_PIXEL,
 };
 use open_darkroom_lib::icc::SourceSpace;
+use open_darkroom_lib::pyramid::level_sizes;
 use open_darkroom_lib::image_opening::{
     build_payload, compute_histograms, downscale_to_max_edge, downscale_to_target_pixels,
     payload_len_for, prepare_image, PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE,
@@ -187,7 +188,7 @@ fn histograms_describe_the_full_resolution_image() {
     let prepared = prepare(&img);
 
     assert_eq!(prepared.full_width, 2500);
-    assert_eq!(prepared.preview_width, PREVIEW_MAX_EDGE, "preview is capped");
+    assert_eq!(prepared.preview_width, 1250, "the preview is the top pyramid level");
 
     assert_eq!(prepared.histograms.r.iter().sum::<u32>(), 2500 * 100);
     assert_eq!(prepared.histograms.r[128], 2500 * 100);
@@ -293,15 +294,24 @@ fn the_preview_is_resampled_in_linear_light() {
 }
 
 #[test]
+fn the_preview_is_the_top_level_of_the_pyramid() {
+    for (w, h) in [(3000, 1500), (4100, 30), (9000, 20), (2048, 1000)] {
+        let prepared = prepare(&solid(w, h, [0, 0, 0, u16::MAX]));
+        let top = *level_sizes(w, h).last().unwrap();
+        assert_eq!((prepared.preview_width, prepared.preview_height), (top.width, top.height));
+    }
+}
+
+#[test]
 fn prepare_reports_both_resolutions() {
     let img = gray_ramp(3000, 1500);
     let prepared = prepare(&img);
 
     assert_eq!((prepared.full_width, prepared.full_height), (3000, 1500));
-    assert_eq!((prepared.preview_width, prepared.preview_height), (2048, 1024));
+    assert_eq!((prepared.preview_width, prepared.preview_height), (1500, 750));
     assert_eq!(
         prepared.preview_pixels.len(),
-        2048 * 1024 * LINEAR_BYTES_PER_PIXEL
+        1500 * 750 * LINEAR_BYTES_PER_PIXEL
     );
 }
 
@@ -432,7 +442,7 @@ fn payload_header_carries_the_full_resolution_of_a_downscaled_preview() {
     let full_width = u32::from_le_bytes(payload[8..12].try_into().unwrap());
     let full_height = u32::from_le_bytes(payload[12..16].try_into().unwrap());
 
-    assert_eq!((preview_width, preview_height), (2048, 1024));
+    assert_eq!((preview_width, preview_height), (1500, 750));
     assert_eq!((full_width, full_height), (3000, 1500));
     assert_ne!(
         preview_width, full_width,
@@ -504,7 +514,7 @@ fn payload_header_carries_preview_not_source_dimensions() {
     let width = u32::from_le_bytes(payload[0..4].try_into().unwrap());
     let height = u32::from_le_bytes(payload[4..8].try_into().unwrap());
 
-    assert_eq!((width, height), (2048, 410));
+    assert_eq!((width, height), (1250, 250));
     assert_eq!(
         payload.len(),
         payload_len_for(

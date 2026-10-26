@@ -4,7 +4,7 @@
 // the source that colorSpaceEncode.wgsl samples through.
 
 /// Size of the `CropView` uniform declared in chunks/cropView.wgsl.
-pub const CROP_VIEW_BYTES: usize = 48;
+pub const CROP_VIEW_BYTES: usize = 80;
 
 #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -181,6 +181,14 @@ pub fn crop_view_to_bytes(view: &CropView) -> [u8; CROP_VIEW_BYTES] {
         -1e30,
         1e30,
         1e30,
+        // Every output pixel maps to the middle of the clip square, so nothing
+        // is clipped: only the preview draws past the edges of the image.
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
     ];
     let mut bytes = [0u8; CROP_VIEW_BYTES];
     for (i, v) in floats.iter().enumerate() {

@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 268 Rust tests, 95 TypeScript, 32 in-browser.
+Nothing is `#[ignore]`d. 271 Rust tests, 152 TypeScript, 40 in-browser.
 
 ---
 
@@ -181,7 +181,7 @@ correct — a single-pass render clamps at those edges too, so the results agree
 `chunk_size_does_not_change_a_sharpened_render` is what holds that to bit
 equality, and it is the test that fails first if the arithmetic drifts.
 
-## L1 — `image_prep.rs` (23)
+## L1 — `image_prep.rs` (24)
 
 | Test | Asserts |
 |---|---|
@@ -198,6 +198,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `preview_uses_the_shared_linearisation` | the direct path uploads the shared conversion's bytes |
 | `preparing_a_three_channel_source_matches_its_rgba_equivalent` | both branches, resampled and not |
 | `the_preview_is_resampled_in_linear_light` | a checkerboard averages to linear 0.5, not 0.21 |
+| `the_preview_is_the_top_level_of_the_pyramid` | the payload's preview is what the frontend falls back to between tiles |
 | `prepare_reports_both_resolutions` | full-res and preview sizes both reported |
 | `overview_covers_the_whole_frame_within_its_own_cap` | the histogram's texture is the whole frame, at its own size |
 | `the_overview_is_resampled_in_linear_light` | the overview averages light too, so the bins do |
@@ -206,7 +207,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
-## L1 — `pyramid.rs` (17)
+## L1 — `pyramid.rs` (18)
 
 The tiles the preview streams. Level 0 has to be the bytes the export uploads,
 and every reduced level has to average light, or zooming changes the image.
@@ -229,7 +230,8 @@ and every reduced level has to average light, or zooming changes the image.
 | `prefetching_builds_the_levels_either_side` | the neighbours of a requested level get built |
 | `prefetching_skips_full_resolution_and_the_ends_of_the_pyramid` | nothing to build past either end |
 | `a_prefetch_outlived_by_its_image_does_nothing` | a closed image's queued build never starts |
-| `the_tile_payload_carries_each_tile_behind_its_header` | the batch layout the frontend will parse |
+| `the_tile_payload_carries_each_tile_behind_its_header` | the batch layout `tileSource.ts` parses |
+| `every_pyramid_is_told_apart_from_the_last` | a tile request names its image, so a stale one is refused |
 
 ## L1 — `source_space.rs` (23)
 
@@ -583,7 +585,7 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
-## L1 — `tests/unit/` (95, TypeScript)
+## L1 — `tests/unit/` (152, TypeScript)
 
 | Test | Asserts |
 |---|---|
@@ -593,9 +595,12 @@ header is there, and the pixels still decode to what went in.
 | `openImage` × 3 more | the source matrix's float order, the baked flag, the pixels after the 64-byte header |
 | `wgslInclude` × 10 | the directive's grammar, chunk flattening, and every shipped shader resolving |
 | `outputSpace` × 12 | the destination matrices derived on the frontend: identity on the working space, inverses, white, gamut containment, the curve table |
+| `openImage` × 1 more | the pyramid structure is fetched once the image is open |
+| `viewport` × 20 | the affine maps, fitting and zooming about the cursor, level choice, what a frame covers, 1:1 landing on texel centres |
+| `tileSource` × 7 | the tile payload as `pyramid.rs` writes it, which tiles a region needs, assembly into one texture, the cache, stale replies |
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 
-## L3 — `tests/browser/` (32, real WebGPU)
+## L3 — `tests/browser/` (40, real WebGPU)
 
 Drives the frontend's own pipeline modules, including the full six-pass chain. A
 failure here that passes in L2 is a TypeScript wiring bug.
@@ -603,8 +608,8 @@ failure here that passes in L2 is a TypeScript wiring bug.
 | Test | Asserts |
 |---|---|
 | `exposes an adapter and a device` | WebGPU reachable |
-| `builds every stage of the chain against the shipped WGSL` | all five stages compile, layouts valid |
-| `declares buffer sizes matching the WGSL structs` | 128, 256, 16 and 48 bytes |
+| `builds every stage of the chain against the shipped WGSL` | all six stages compile, layouts valid |
+| `declares buffer sizes matching the WGSL structs` | 128, 256, 16 and 80 bytes |
 | `accepts a params bind group built the way renderer.ts builds it` | bind group is legal |
 | `leaves the image untouched with the default sliders` | identity, as in L2 |
 | `keeps the primaries on their own channels` | no channel crossing |
@@ -623,3 +628,6 @@ failure here that passes in L2 is a TypeScript wiring bug.
 | `returns the image it was given, pixel for pixel, at identity` | a payload framed as the backend frames one, through the whole chain |
 | `holds the edges in place` | corners and both ends of every row |
 | `agrees with the renderer about when the blur can be skipped` | `sharpnessIsVisible` tracks the shader's fade |
+| `leaves clear exactly the pixels outside the clip` | the preview draws nothing past the image |
+| `copies texels exactly when render pixels land on their centres` | the view sample stage at 1:1 is a copy |
+| `repeats the border past the edges of the source` | the blurs see the image's own edge, not black |

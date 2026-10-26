@@ -22,6 +22,7 @@ import {
   createSharpHorizontalStage,
   createSharpVerticalStage,
   createSourceSampler,
+  createViewSampleStage,
 } from "$lib/gpu/pipelines/chainStages";
 import {
   createStageBindGroup,
@@ -48,6 +49,7 @@ import {
   FULL_FRAME,
   cropView,
   cropViewToFloats,
+  type Affine,
   type Crop,
 } from "$lib/types/crop";
 
@@ -157,6 +159,8 @@ interface DevelopOptions {
   crop?: Crop;
   /** The box, in output pixels, outside which the encode stage shades. */
   keep?: [number, number, number, number];
+  /** Output pixels to the clip square; outside it the encode stage draws nothing. */
+  clip?: Affine;
 }
 
 /**
@@ -207,7 +211,7 @@ async function develop(
     size: CROP_VIEW_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, options.keep));
+  gpu.device.queue.writeBuffer(cropBuffer, 0, cropViewToFloats(view, options.keep, options.clip));
   const outWidth = view.width;
   const outHeight = view.height;
 
@@ -401,6 +405,7 @@ describe("pipeline construction", () => {
     // a layout that disagrees with the WGSL throws.
     const calcParams = createCalcParamsPipeline(gpu);
     const stages = [
+      createViewSampleStage(gpu),
       createDevelopStage(gpu),
       createSharpHorizontalStage(gpu),
       createSharpVerticalStage(gpu),
@@ -829,6 +834,20 @@ describe("the crop", () => {
     }
   });
 
+  // How the preview draws nothing past the edges of the image once the canvas
+  // is larger than it.
+  it("leaves clear exactly the pixels outside the clip", async () => {
+    const source = solid(200, 160, 120);
+    const plain = await develop(source, defaultSlidersRGB);
+    const clip: Affine = { origin: [0, 0.5], axisX: [1 / 32, 0], axisY: [0, 0] };
+    const clipped = await develop(source, defaultSlidersRGB, undefined, { clip });
+
+    for (let x = 0; x < WIDTH; x++) {
+      const i = x * 3;
+      expect(clipped[i], `column ${x}`).toBe(x < 32 ? plain[i] : 0);
+    }
+  });
+
   it("limits the histogram to what it keeps", async () => {
     const bins = await histogram(rampChart(), defaultSlidersRGB, CROP);
     const kept = 32 * 2 * VOTE;
@@ -1183,5 +1202,89 @@ describe("the output space", () => {
       image.texture.destroy();
       pipeline.destroy();
     }
+  });
+});
+
+describe("the view sample stage", () => {
+  /** Resample an RGBA f16 source through `view` into a `width` × `height` target. */
+  async function viewSample(
+    pixels: Uint8Array,
+    srcWidth: number,
+    srcHeight: number,
+    view: Affine,
+    width: number,
+    height: number,
+  ): Promise<Uint16Array> {
+    const stage = createViewSampleStage(gpu);
+    const image = uploadRawPixelsToGPU(gpu.device, pixels, srcWidth, srcHeight);
+    const buffer = gpu.device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    gpu.device.queue.writeBuffer(
+      buffer,
+      0,
+      new Float32Array([...view.origin, ...view.axisX, ...view.axisY, 0, 0]),
+    );
+    const target = gpu.device.createTexture({
+      size: { width, height },
+      format: "rgba16float",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+    const bytesPerRow = Math.ceil((width * 8) / 256) * 256;
+    const staging = gpu.device.createBuffer({
+      size: bytesPerRow * height,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+
+    const encoder = gpu.device.createCommandEncoder();
+    recordFullScreenPass(
+      encoder,
+      stage,
+      target.createView(),
+      createStageBindGroup(gpu, stage, [
+        { binding: 0, resource: image.texture.createView() },
+        { binding: 1, resource: createSourceSampler(gpu) },
+        { binding: 2, resource: { buffer } },
+      ]),
+    );
+    encoder.copyTextureToBuffer({ texture: target }, { buffer: staging, bytesPerRow }, { width, height });
+    gpu.device.queue.submit([encoder.finish()]);
+
+    await staging.mapAsync(GPUMapMode.READ);
+    const rows = new Uint8Array(staging.getMappedRange().slice(0));
+    staging.unmap();
+    const out = new Uint16Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      out.set(new Uint16Array(rows.buffer, y * bytesPerRow, width * 4), y * width * 4);
+    }
+    return out;
+  }
+
+  // 8 × 4, every channel of every texel distinct.
+  const SOURCE = linearisePixels(Uint8Array.from({ length: 8 * 4 * 3 }, (_, i) => (i * 37) % 251));
+
+  function texel(x: number, y: number): number[] {
+    const halves = new Uint16Array(SOURCE.buffer, SOURCE.byteOffset, SOURCE.length / 2);
+    return Array.from(halves.slice((y * 8 + x) * 4, (y * 8 + x) * 4 + 4));
+  }
+
+  it("copies texels exactly when render pixels land on their centres", async () => {
+    const view: Affine = { origin: [3, 1], axisX: [1, 0], axisY: [0, 1] };
+    const out = await viewSample(SOURCE, 8, 4, view, 4, 2);
+    for (let y = 0; y < 2; y++) {
+      for (let x = 0; x < 4; x++) {
+        expect(Array.from(out.slice((y * 4 + x) * 4, (y * 4 + x) * 4 + 4)), `${x},${y}`).toEqual(
+          texel(x + 3, y + 1),
+        );
+      }
+    }
+  });
+
+  it("repeats the border past the edges of the source", async () => {
+    const view: Affine = { origin: [-5, 6], axisX: [1, 0], axisY: [0, 1] };
+    const out = await viewSample(SOURCE, 8, 4, view, 2, 1);
+    expect(Array.from(out.slice(0, 4))).toEqual(texel(0, 3));
+    expect(Array.from(out.slice(4, 8))).toEqual(texel(0, 3));
   });
 });

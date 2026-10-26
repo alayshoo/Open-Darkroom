@@ -16,12 +16,13 @@ use crate::color::{
 };
 use crate::crop::{crop_view, CropPayload, CropView};
 use crate::icc::{Matrix3, SourceSpace};
-use crate::pyramid::Pyramid;
+use crate::pyramid::{level_sizes, Pyramid};
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
 
-/// Longest edge of the preview handed to the frontend.
+/// The most the pyramid's top level, and so the preview handed to the frontend,
+/// may measure along its longest edge.
 pub const PREVIEW_MAX_EDGE: u32 = 2048;
 
 /// Total pixels in the overview handed to the frontend.
@@ -363,11 +364,14 @@ pub fn prepare_image(
         to_linear_u16(src, channels, &luts)
     });
 
+    // The preview is the pyramid's top level, so the frontend can stand it in
+    // for any level whose tiles have not arrived yet.
+    let top = *level_sizes(full_width, full_height).last().unwrap();
     let (preview_width, preview_height, preview_pixels) = match &linear {
         Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
-            let (preview, w, h) =
-                downscale_to_max_edge(linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
-            (w, h, linear_u16_to_f16_bytes(&preview, channels))
+            let preview =
+                resize_to(linear, full_width, full_height, channels, top.width, top.height);
+            (top.width, top.height, linear_u16_to_f16_bytes(&preview, channels))
         }
         _ => {
             let luts = space.luts(f16::from_f32);

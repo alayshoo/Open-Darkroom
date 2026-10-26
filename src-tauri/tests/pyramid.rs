@@ -325,3 +325,11 @@ fn the_tile_payload_carries_each_tile_behind_its_header() {
     }
     assert_eq!(at, payload.len());
 }
+
+#[test]
+fn every_pyramid_is_told_apart_from_the_last() {
+    let img = solid(64, 64, [0, 0, 0, u16::MAX]);
+    let (a, b) = (pyramid_of(&img), pyramid_of(&img));
+    assert_ne!(a.id(), b.id());
+    assert_eq!(a.structure().id, a.id());
+}
