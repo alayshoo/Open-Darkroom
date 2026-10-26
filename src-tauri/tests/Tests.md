@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 251 Rust tests, 95 TypeScript, 32 in-browser.
+Nothing is `#[ignore]`d. 268 Rust tests, 95 TypeScript, 32 in-browser.
 
 ---
 
@@ -205,6 +205,31 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_header_carries_the_full_resolution_of_a_downscaled_preview` | the anchor for pixel-denominated sliders |
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
+
+## L1 — `pyramid.rs` (17)
+
+The tiles the preview streams. Level 0 has to be the bytes the export uploads,
+and every reduced level has to average light, or zooming changes the image.
+
+| Test | Asserts |
+|---|---|
+| `an_image_within_the_preview_edge_is_a_single_level` | nothing to reduce at or below the cap |
+| `each_level_halves_the_one_below_until_the_preview_edge_is_reached` | a 61 MP frame gets four levels |
+| `odd_sizes_round_up_so_every_source_pixel_has_a_parent` | halving rounds up, never drops a column |
+| `only_the_top_level_fits_the_preview_edge` | the pyramid stops at the first level within the cap |
+| `edge_tiles_are_cut_short_by_what_is_left_of_the_level` | right and bottom tiles carry only real pixels |
+| `a_tile_off_the_level_is_refused` | out-of-range columns, rows and levels are errors |
+| `full_resolution_tiles_are_the_source_linearised_exactly` | level 0 stitched == the shared linearisation |
+| `a_source_without_alpha_tiles_fully_opaque` | RGB and RGBA sources tile to the same bytes |
+| `a_baked_source_tiles_as_its_converted_pixels` | a LUT profile is converted per tile |
+| `a_flat_image_stays_flat_at_every_level` | no level shifts a flat colour |
+| `reduced_levels_average_light_not_its_encoding` | a checkerboard reduces to linear 0.5 |
+| `a_level_is_the_same_whichever_order_the_levels_are_built_in` | levels are independent of each other |
+| `reduced_levels_are_only_built_when_asked_for` | building one level builds no other |
+| `prefetching_builds_the_levels_either_side` | the neighbours of a requested level get built |
+| `prefetching_skips_full_resolution_and_the_ends_of_the_pyramid` | nothing to build past either end |
+| `a_prefetch_outlived_by_its_image_does_nothing` | a closed image's queued build never starts |
+| `the_tile_payload_carries_each_tile_behind_its_header` | the batch layout the frontend will parse |
 
 ## L1 — `source_space.rs` (23)
 

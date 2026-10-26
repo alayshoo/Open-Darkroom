@@ -16,6 +16,7 @@ use crate::color::{
 };
 use crate::crop::{crop_view, CropPayload, CropView};
 use crate::icc::{Matrix3, SourceSpace};
+use crate::pyramid::Pyramid;
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
@@ -67,6 +68,8 @@ pub struct OriginalImage {
     /// because export has to decode the same buffer the same way, at its own
     /// table width.
     pub space: SourceSpace,
+    /// What the preview streams its tiles from. Shares `pixels_u16`.
+    pub pyramid: Arc<Pyramid>,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -175,13 +178,25 @@ fn resample(
     channels: usize,
     scale: f32,
 ) -> (Vec<u16>, u32, u32) {
+    let new_w = ((width as f32 * scale).round() as u32).max(1);
+    let new_h = ((height as f32 * scale).round() as u32).max(1);
+
+    (resize_to(src, width, height, channels, new_w, new_h), new_w, new_h)
+}
+
+/// Resample to exactly `new_w` × `new_h`, which need not keep the aspect ratio.
+pub fn resize_to(
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    new_w: u32,
+    new_h: u32,
+) -> Vec<u16> {
     assert!(
         channels == 3 || channels == 4,
         "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
     );
-
-    let new_w = ((width as f32 * scale).round() as u32).max(1);
-    let new_h = ((height as f32 * scale).round() as u32).max(1);
 
     let pixel_type = if channels == 4 {
         fir::PixelType::U16x4
@@ -207,13 +222,11 @@ fn resample(
         )
         .unwrap();
 
-    let dst_bytes = dst_image.into_vec();
-    let u16_vec: Vec<u16> = dst_bytes
+    dst_image
+        .into_vec()
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect();
-
-    (u16_vec, new_w, new_h)
+        .collect()
 }
 
 /// R/G/B histograms of the full-resolution image. u16 sRGB values (0–65535) are
@@ -546,13 +559,22 @@ pub(crate) async fn open_image_file(
     // `prepare_image` so the buffer can be moved into the state rather than
     // cloned — preparation only needed to borrow it.
     {
+        let pixels_u16 = Arc::new(samples);
+        let pyramid = Arc::new(Pyramid::new(
+            Arc::clone(&pixels_u16),
+            full_width,
+            full_height,
+            channels,
+            space.clone(),
+        ));
         let mut guard = state.lock().unwrap();
         *guard = Some(OriginalImage {
-            pixels_u16: Arc::new(samples),
+            pixels_u16,
             width: full_width,
             height: full_height,
             channels,
             space,
+            pyramid,
         });
     }
 

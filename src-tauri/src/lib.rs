@@ -8,6 +8,7 @@ pub mod icc;
 pub mod raw;
 pub mod output_space;
 pub mod image_opening;
+pub mod pyramid;
 pub mod export_rendering;
 pub mod shaders;
 pub mod export_encoding;
@@ -28,6 +29,8 @@ pub fn run() {
             grab_cursor,
             image_opening::open_image_file,
             image_opening::crop_histograms,
+            pyramid::pyramid_structure,
+            pyramid::pyramid_tiles,
             export::export_image,
         ])
         .run(tauri::generate_context!())
