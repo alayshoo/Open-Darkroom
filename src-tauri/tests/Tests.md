@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 278 Rust tests, 154 TypeScript, 50 in-browser.
+Nothing is `#[ignore]`d. 278 Rust tests, 161 TypeScript, 50 in-browser.
 
 ---
 
@@ -575,7 +575,7 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
-## L1 — `tests/unit/` (154, TypeScript)
+## L1 — `tests/unit/` (161, TypeScript)
 
 | Test | Asserts |
 |---|---|
@@ -586,7 +586,7 @@ header is there, and the pixels still decode to what went in.
 | `wgslInclude` × 10 | the directive's grammar, chunk flattening, and every shipped shader resolving |
 | `outputSpace` × 12 | the destination matrices derived on the frontend: identity on the working space, inverses, white, gamut containment, the curve table |
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
-| `viewport` × 23 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it |
+| `viewport` × 30 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it; when a fresh sharp region is rendered, put off or kept, and when it is drawn over the backdrop |
 | `fullResolution` × 8 | the band header, band sizing, mip level counts, and how far the blurs reach at a render scale |
 
 ## L3 — `tests/browser/` (50, real WebGPU)
@@ -630,7 +630,7 @@ the renderer draws into a texture standing in for the canvas's.
 | `stops when it is cancelled` | a superseded stream stops asking for bands |
 | `at 1:1 shows the source's own pixels` | the region, the snap and both samplers land on texel centres |
 | `pans within the margin without re-running the chain, still pixel for pixel` | a pan is the encode pass alone |
-| `renders a fresh region once a pan runs past it` | and the new region is still exact |
+| `past the margin, draws the backdrop until the view settles, then a fresh region` | no pixel left blank mid-pan, and exact again once settled |
 | `re-runs the chain when the adjustments change` | a held region never outlives the sliders |
 | `draws nothing outside the image` | the clip leaves the backdrop showing |
 | `lets a zoom under way stand in, then settles at the new scale` | a zoom re-renders once it stops, not on every step |

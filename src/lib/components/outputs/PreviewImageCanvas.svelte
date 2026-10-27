@@ -15,6 +15,7 @@
     import { type Sliders } from "$lib/types/imgParameters";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
+    import { previewDebug } from "$lib/gpu/previewDebug.svelte";
     import { type Crop } from "$lib/types/crop";
     import {
         MAX_ZOOM,
@@ -165,10 +166,17 @@
         localRenderer.requestRender();
 
         // An image no larger than the preview already has every pixel.
-        if (payload.width === payload.fullWidth && payload.height === payload.fullHeight) return;
+        if (payload.width === payload.fullWidth && payload.height === payload.fullHeight) {
+            previewDebug.stream = null;
+            return;
+        }
 
         const started = performance.now();
-        loadFullResolution(gpu.device, payload.fullWidth, fetchFullResolutionRows, () => load !== loading)
+        previewDebug.stream = { rows: 0, total: payload.fullHeight, done: false };
+        const progress = (rows: number, total: number) => {
+            if (load === loading) previewDebug.stream = { rows, total, done: rows >= total };
+        };
+        loadFullResolution(gpu.device, payload.fullWidth, fetchFullResolutionRows, () => load !== loading, progress)
             .then((full) => {
                 if (!full) return;
                 if (load !== loading) {
@@ -235,9 +243,13 @@
 
     const cursorOf = (e: { clientX: number; clientY: number }): Point => [e.clientX * dpr, e.clientY * dpr];
 
+    // Where the pointer last was, for input that does not say where it is.
+    let pointer: Point | null = null;
+    const onWindowPointer = (e: PointerEvent) => (pointer = cursorOf(e));
+
     // Zooming out as far as the fit, or past it, goes back to fitting.
     function zoomTo(scale: number, cursor: Point) {
-        if (!layout) return;
+        if (!layout || !Number.isFinite(scale) || !cursor.every(Number.isFinite)) return;
         if (scale <= layout.fit * 1.0001) {
             zoom = null;
             return;
@@ -254,14 +266,31 @@
     }
 
     // WebKit reports a trackpad pinch as gesture events, which take over from
-    // the wheel for as long as the pinch lasts.
-    type GestureEvent = Event & { scale: number; clientX: number; clientY: number };
+    // the wheel for as long as the pinch lasts. They are heard on the window,
+    // since WebKit may not aim them at the canvas, and may carry no position.
+    type GestureEvent = Event & { scale: number; clientX?: number; clientY?: number };
     let gestureStart: number | null = null;
+
+    function gestureCursor(g: GestureEvent): Point {
+        if (Number.isFinite(g.clientX) && Number.isFinite(g.clientY)) {
+            return cursorOf(g as { clientX: number; clientY: number });
+        }
+        return pointer ?? layout!.placement.anchor;
+    }
+
+    // A gesture over the panels is theirs; one over the image, or aimed at no
+    // element in particular, is the preview's.
+    function overImage(e: Event): boolean {
+        const target = e.target;
+        if (!(target instanceof Node)) return true;
+        return target === document.documentElement || target === document.body || frame.contains(target);
+    }
 
     // A trackpad pinch elsewhere arrives as a wheel event with ctrlKey set, as
     // does Ctrl + scroll on a mouse; a notch of a mouse wheel is a doubling.
     // Any other scroll pans a zoomed image.
     function onWheel(e: WheelEvent) {
+        previewDebug.noteInput("wheel", `${e.ctrlKey ? "ctrl " : ""}dx ${e.deltaX.toFixed(1)} dy ${e.deltaY.toFixed(1)}`);
         if (!layout || showWhole) return;
         const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 33 : 1;
         if (e.ctrlKey) {
@@ -276,21 +305,28 @@
     }
 
     function onGestureStart(e: Event) {
-        if (!layout || showWhole) return;
+        previewDebug.noteInput("gesturestart", describeGesture(e as GestureEvent));
+        if (!layout || showWhole || !overImage(e)) return;
         e.preventDefault();
         gestureStart = layout.placement.scale;
     }
 
     function onGestureChange(e: Event) {
+        const g = e as GestureEvent;
+        previewDebug.noteInput("gesturechange", describeGesture(g));
         if (!layout || showWhole || gestureStart === null) return;
         e.preventDefault();
-        const g = e as GestureEvent;
-        zoomTo(gestureStart * g.scale, cursorOf(g));
+        zoomTo(gestureStart * g.scale, gestureCursor(g));
     }
 
-    function onGestureEnd() {
+    function onGestureEnd(e: Event) {
+        previewDebug.noteInput("gestureend", describeGesture(e as GestureEvent));
+        if (gestureStart !== null) e.preventDefault();
         gestureStart = null;
     }
+
+    const describeGesture = (g: GestureEvent) =>
+        `scale ${Number(g.scale).toFixed(3)} at ${g.clientX ?? "?"},${g.clientY ?? "?"}`;
 
     let dragFrom: Point | null = $state(null);
 
@@ -314,15 +350,18 @@
     $effect(() => {
         if (!canvas) return;
         // Not passive: the browser's own page zoom has to be held off.
-        canvas.addEventListener("wheel", onWheel, { passive: false });
-        canvas.addEventListener("gesturestart", onGestureStart);
-        canvas.addEventListener("gesturechange", onGestureChange);
-        canvas.addEventListener("gestureend", onGestureEnd);
+        const active = { passive: false };
+        canvas.addEventListener("wheel", onWheel, active);
+        window.addEventListener("gesturestart", onGestureStart, active);
+        window.addEventListener("gesturechange", onGestureChange, active);
+        window.addEventListener("gestureend", onGestureEnd, active);
+        window.addEventListener("pointermove", onWindowPointer);
         return () => {
             canvas.removeEventListener("wheel", onWheel);
-            canvas.removeEventListener("gesturestart", onGestureStart);
-            canvas.removeEventListener("gesturechange", onGestureChange);
-            canvas.removeEventListener("gestureend", onGestureEnd);
+            window.removeEventListener("gesturestart", onGestureStart);
+            window.removeEventListener("gesturechange", onGestureChange);
+            window.removeEventListener("gestureend", onGestureEnd);
+            window.removeEventListener("pointermove", onWindowPointer);
         };
     });
 </script>

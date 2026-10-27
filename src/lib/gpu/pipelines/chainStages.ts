@@ -20,6 +20,11 @@ import calcSharpTextureSource from "../shaders/calcSharpTexture.wgsl?raw";
 import compositeSource from "../shaders/composite.wgsl?raw";
 import colorSpaceEncodeSource from "../shaders/colorSpaceEncode.wgsl?raw";
 
+const PREMULTIPLIED_OVER: GPUBlendState = {
+    color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+    alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+};
+
 // A read-only storage buffer of computed values, as calcParams.wgsl writes them.
 function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
     return {
@@ -116,10 +121,12 @@ export function createCompositeStage(gpu: GPUSession): RenderStage {
 
 // The output transform — the only stage that knows what it is rendering for, so
 // the only one targeting the destination format and the only one bound to the
-// uniform naming that destination. It also applies the crop.
-export function createEncodeStage(gpu: GPUSession): RenderStage {
+// uniform naming that destination. It also applies the crop. `over` blends
+// onto what the target holds, to lay the sharp region over the backdrop.
+export function createEncodeStage(gpu: GPUSession, over = false): RenderStage {
     return createRenderStage(gpu, {
-        label: "Colour Space Encode",
+        label: over ? "Colour Space Encode Over" : "Colour Space Encode",
+        blend: over ? PREMULTIPLIED_OVER : undefined,
         code: colorSpaceEncodeSource,
         format: gpu.format,
         bindings: [

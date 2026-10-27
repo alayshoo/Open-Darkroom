@@ -19,6 +19,9 @@ export function createRenderStage(
         // Defaults to fs_main. Named only where one file holds several stages,
         // as the two halves of the separable blur do.
         entryPoint?: string;
+        // Blending into the target, for a stage drawn over another. Defaults
+        // to replacing what is there.
+        blend?: GPUBlendState;
     },
 ): RenderStage {
     const { device } = gpu;
@@ -40,7 +43,7 @@ export function createRenderStage(
         fragment: {
             module: shaderModule,
             entryPoint: options.entryPoint ?? "fs_main",
-            targets: [{ format: options.format }],
+            targets: [{ format: options.format, blend: options.blend }],
         },
     });
 
@@ -64,8 +67,9 @@ export interface FullScreenPassOptions {
     clearValue?: GPUColor;
     timestampWrites?: GPURenderPassTimestampWrites;
     // Only this part of the target is drawn, as [x, y, width, height]. The
-    // rest is still cleared.
+    // rest is still cleared, unless `load` keeps what the target held.
     scissor?: [number, number, number, number];
+    load?: boolean;
 }
 
 const DEFAULT_CLEAR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
@@ -87,7 +91,7 @@ export function recordFullScreenPass(
             {
                 view: target,
                 clearValue: options.clearValue ?? DEFAULT_CLEAR,
-                loadOp: "clear",
+                loadOp: options.load ? "load" : "clear",
                 storeOp: "store",
             },
         ],

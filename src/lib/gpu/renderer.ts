@@ -30,24 +30,27 @@ import {
 import { sharpnessIsVisible, sharpnessReach } from "./sharpnessVisibility";
 import { createFrameTimer } from "./pipelines/frameTimer";
 import { debugStats } from "./debugStats.svelte";
+import { previewDebug } from "./previewDebug.svelte";
 import { createOutputSpaceBuffer } from "./outputSpaceBuffer";
 import type { OutputSpaceId } from "./outputSpace";
 import { CROP_VIEW_BUFFER_SIZE, EVERYWHERE, cropViewToFloats } from "$lib/types/crop";
 import {
     PAN_MARGIN,
+    backdropScale,
     canvasToChain,
     chainToSource,
     contains,
+    detailAction,
     imageInChain,
+    intersect,
     neededBox,
     planRegion,
-    standsIn,
+    showsDetail,
     validBox,
     visibleRegion,
     type Box,
     type ChainRegion,
     type ViewFrame,
-    type Visible,
 } from "$lib/utils/viewport";
 import type { Affine } from "$lib/types/crop";
 
@@ -56,13 +59,21 @@ import type { Affine } from "$lib/types/crop";
 // behind it shows through.
 const CLEAR: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
 
-// The chain's textures grow in steps of this many pixels, so a region that
-// changes size a little from one render to the next does not reallocate.
+// The chain's textures grow in steps of this many pixels.
 const TEXTURE_STEP = 256;
 
-// How long the zoom has to hold still before a region rendered at another
-// scale is replaced by one at the current scale.
+// The widest apron the blurs can ask for. Must match MAX_RADIUS in
+// calcSharpTexture.wgsl.
+const MAX_APRON = 180;
+
+// How long the view has to hold still before a render that was put off runs.
 const SETTLE_MS = 120;
+
+// A sharp render that took less than this is redone even mid-gesture.
+const CHEAP_MS = 12;
+
+// How long after the adjustments change the backdrop catches up, once idle.
+const BACKDROP_IDLE_MS = 300;
 
 // The `ViewSample` uniform in viewSample.wgsl.
 const VIEW_SAMPLE_BUFFER_SIZE = 32;
@@ -73,6 +84,17 @@ function viewSampleFloats(a: Affine): Float32Array {
     const exact =
         a.origin.every(Number.isInteger) && [...a.axisX, ...a.axisY].every((v) => v === 0 || Math.abs(v) === 1);
     return new Float32Array([...a.origin, ...a.axisX, ...a.axisY, exact ? 1 : 0, 0]);
+}
+
+const step = (n: number, limit: number) =>
+    Math.min(limit, Math.ceil(Math.max(n, 1) / TEXTURE_STEP) * TEXTURE_STEP);
+
+/** One rendered output of the chain, and how to draw it onto the canvas. */
+interface Held {
+    region: ChainRegion;
+    texture: GPUTexture;
+    encode: GPUBindGroup;
+    crop: GPUBuffer;
 }
 
 export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer {
@@ -86,6 +108,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     const sharpV: RenderStage = createSharpVerticalStage(gpu);
     const composite: RenderStage = createCompositeStage(gpu);
     const colorSpaceEncode: RenderStage = createEncodeStage(gpu);
+    const colorSpaceEncodeOver: RenderStage = createEncodeStage(gpu, true);
 
     // Develop reads the view texture texel for texel, so nearest copies it
     // exactly wherever the region sits, as the export's sampler does.
@@ -102,12 +125,6 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // destination can be set before one is open and survives a reload.
     const outputSpace = createOutputSpaceBuffer(gpu);
 
-    const cropBuffer = gpu.device.createBuffer({
-        label: "Crop View Uniform Buffer",
-        size: CROP_VIEW_BUFFER_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
     const viewSampleBuffer = gpu.device.createBuffer({
         label: "View Sample Uniform Buffer",
         size: VIEW_SAMPLE_BUFFER_SIZE,
@@ -121,13 +138,22 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
     let source: GPUImage | null = null;
     let frame: ViewFrame | null = null;
-    // What the chain's textures hold, and whether the adjustments have moved
-    // on since it was rendered. While they have not, a frame that only moves
-    // the view re-runs the encode stage alone.
-    let region: ChainRegion | null = null;
-    let stale = true;
-    let scaleChangedAt = 0;
+
+    // The sharp region, at the scale the view asks for, and the whole image at
+    // whatever scale fits the chain, drawn wherever the sharp region does not
+    // reach. Each goes stale when the adjustments move on.
+    let detail: Held | null = null;
+    let backdrop: Held | null = null;
+    let detailStale = true;
+    let backdropStale = true;
+
+    // When the view last moved, and what the last sharp render cost: a cheap
+    // one is redone mid-gesture, a costly one waits for the view to settle.
+    let movedAt = 0;
+    let lastDetailMs = 0;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let counters = { detailRenders: 0, backdropRenders: 0, deferred: 0 };
 
     // Frame scheduling. A submit costs whatever the chain costs, so issuing them
     // faster than the GPU drains them backs the presentation queue up until
@@ -142,109 +168,115 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     debugStats.supportsPassTimings = frameTimer.available;
     let lastFrameStart = 0;
 
-    // Sized to the region the chain renders, so none exist until one is planned.
-    // The blur textures wait until sharpening is first visible; until then
-    // composite reads the developed texture in their place, at zero amounts.
+    // Scratch for one run of the chain, sized from the canvas so a gesture
+    // never reallocates. The blur textures wait until sharpening is first
+    // visible; until then composite reads the developed texture in their place.
     let capacity = { width: 0, height: 0 };
+    let canvasSize = { width: 0, height: 0 };
     let viewTexture: GPUTexture | null = null;
     let developTexture: GPUTexture | null = null;
-    let compositeTexture: GPUTexture | null = null;
     let sharpHTexture: GPUTexture | null = null;
-    let detailTexture: GPUTexture | null = null;
+    let bandsTexture: GPUTexture | null = null;
     let viewSampleBindGroup: GPUBindGroup | null = null;
     let developBindGroup: GPUBindGroup | null = null;
     let sharpHBindGroup: GPUBindGroup | null = null;
     let sharpVBindGroup: GPUBindGroup | null = null;
     let compositeBindGroup: GPUBindGroup | null = null;
-    let encodeBindGroup: GPUBindGroup | null = null;
-    let viewView: GPUTextureView | null = null;
-    let developView: GPUTextureView | null = null;
-    let compositeView: GPUTextureView | null = null;
-    let sharpHView: GPUTextureView | null = null;
-    let detailView: GPUTextureView | null = null;
 
-    function createIntermediate(label: string, format: GPUTextureFormat): GPUTexture {
+    function createTexture(label: string, size: { width: number; height: number }, format: GPUTextureFormat) {
         return gpu.device.createTexture({
             label,
-            size: capacity,
+            size,
             format,
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
     }
 
-    function destroyIntermediates() {
-        for (const t of [viewTexture, developTexture, compositeTexture, sharpHTexture, detailTexture]) {
-            t?.destroy();
-        }
-        sharpHTexture = detailTexture = null;
-        sharpHView = detailView = null;
+    function releaseHeld(held: Held | null) {
+        held?.texture.destroy();
+        held?.crop.destroy();
     }
 
-    // Sizes the chain to hold `width` × `height` render pixels, reallocating
-    // only when they are outgrown or far too large, and adds the blur textures
-    // the first time sharpening needs them.
-    function fitTextures(width: number, height: number, sharpening: boolean) {
-        const limit = gpu.device.limits.maxTextureDimension2D;
-        const step = (n: number) => Math.min(limit, Math.ceil(Math.max(n, 1) / TEXTURE_STEP) * TEXTURE_STEP);
-        const next = { width: step(width), height: step(height) };
-        const resized =
-            next.width > capacity.width ||
-            next.height > capacity.height ||
-            next.width * next.height * 2 < capacity.width * capacity.height;
+    function destroyScratch() {
+        for (const t of [viewTexture, developTexture, sharpHTexture, bandsTexture]) t?.destroy();
+        viewTexture = developTexture = sharpHTexture = bandsTexture = null;
+    }
 
+    // Room for the canvas, the pan margin and the widest apron on every side.
+    // Grows past that only for a region that needs it, such as a rotated crop.
+    function fitScratch(width: number, height: number, sharpening: boolean) {
+        const limit = gpu.device.limits.maxTextureDimension2D;
+        const next = {
+            width: step(Math.max(width, capacity.width), limit),
+            height: step(Math.max(height, capacity.height), limit),
+        };
+        const resized = next.width !== capacity.width || next.height !== capacity.height;
         if (resized) {
-            destroyIntermediates();
+            destroyScratch();
             capacity = next;
-            viewTexture = createIntermediate("View Sample", VIEW_FORMAT);
-            developTexture = createIntermediate("Developed Image", WORKING_FORMAT);
-            compositeTexture = createIntermediate("Composited Image", WORKING_FORMAT);
-            viewView = viewTexture.createView();
-            developView = developTexture.createView();
-            compositeView = compositeTexture.createView();
+            viewTexture = createTexture("View Sample", capacity, VIEW_FORMAT);
+            developTexture = createTexture("Developed Image", capacity, WORKING_FORMAT);
         }
         const addSharp = sharpening && !sharpHTexture;
         if (addSharp) {
-            sharpHTexture = createIntermediate("Sharp Blur H", SHARP_FORMAT);
-            detailTexture = createIntermediate("Detail Bands", SHARP_FORMAT);
-            sharpHView = sharpHTexture.createView();
-            detailView = detailTexture.createView();
+            sharpHTexture = createTexture("Sharp Blur H", capacity, SHARP_FORMAT);
+            bandsTexture = createTexture("Detail Bands", capacity, SHARP_FORMAT);
         }
-        if (resized || addSharp) bindIntermediates();
+        if (resized || addSharp) bindScratch();
     }
 
-    function bindIntermediates() {
+    function bindScratch() {
+        const viewView = viewTexture!.createView();
+        const developView = developTexture!.createView();
         developBindGroup = createStageBindGroup(gpu, develop, [
-            { binding: 0, resource: viewView! },
+            { binding: 0, resource: viewView },
             { binding: 1, resource: sampler },
             { binding: 2, resource: { buffer: calcParams.paramsBuffer } },
         ]);
 
-        if (sharpHView && detailView) {
+        if (sharpHTexture && bandsTexture) {
             // The horizontal pass never reads binding 1; it is the same developed
             // texture it is already blurring, so the layout can stay shared.
             sharpHBindGroup = createStageBindGroup(gpu, sharpH, [
-                { binding: 0, resource: developView! },
-                { binding: 1, resource: developView! },
+                { binding: 0, resource: developView },
+                { binding: 1, resource: developView },
                 { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
             ]);
             sharpVBindGroup = createStageBindGroup(gpu, sharpV, [
-                { binding: 0, resource: sharpHView },
-                { binding: 1, resource: developView! },
+                { binding: 0, resource: sharpHTexture.createView() },
+                { binding: 1, resource: developView },
                 { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
             ]);
         }
 
         compositeBindGroup = createStageBindGroup(gpu, composite, [
-            { binding: 0, resource: developView! },
-            { binding: 1, resource: detailView ?? developView! },
+            { binding: 0, resource: developView },
+            { binding: 1, resource: bandsTexture?.createView() ?? developView },
             { binding: 2, resource: { buffer: calcParams.sharpBuffer } },
         ]);
+    }
 
-        encodeBindGroup = createStageBindGroup(gpu, colorSpaceEncode, [
-            { binding: 0, resource: compositeView! },
+    // An output texture for `region`, reusing `held`'s when it is large enough.
+    function outputFor(held: Held | null, region: ChainRegion, label: string): Held {
+        const width = region.box[2] - region.box[0];
+        const height = region.box[3] - region.box[1];
+        if (held && held.texture.width >= width && held.texture.height >= height) {
+            return { ...held, region };
+        }
+        releaseHeld(held);
+        const limit = gpu.device.limits.maxTextureDimension2D;
+        const texture = createTexture(label, { width: step(width, limit), height: step(height, limit) }, WORKING_FORMAT);
+        const crop = gpu.device.createBuffer({
+            label: `${label} Crop View`,
+            size: CROP_VIEW_BUFFER_SIZE,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        const encode = createStageBindGroup(gpu, colorSpaceEncode, [
+            { binding: 0, resource: texture.createView() },
             { binding: 1, resource: { buffer: outputSpace.buffer } },
-            { binding: 2, resource: { buffer: cropBuffer } },
+            { binding: 2, resource: { buffer: crop } },
         ]);
+        return { region, texture, encode, crop };
     }
 
     function bindSource(image: GPUImage) {
@@ -254,7 +286,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             { binding: 1, resource: viewSampler },
             { binding: 2, resource: { buffer: viewSampleBuffer } },
         ]);
-        stale = true;
+        detailStale = backdropStale = true;
     }
 
     function loadImage(image: GPUImage, srcToWorking: Float32Array) {
@@ -262,7 +294,9 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         // that ends the darkroom block.
         calcParams.updateSourceSpace(srcToWorking);
         bindSource(image);
-        region = null;
+        releaseHeld(detail);
+        releaseHeld(backdrop);
+        detail = backdrop = null;
     }
 
     function setSource(image: GPUImage) {
@@ -270,64 +304,57 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     }
 
     function setFrame(next: ViewFrame) {
-        if (!frame || next.scale !== frame.scale) scaleChangedAt = performance.now();
+        const moved =
+            !frame ||
+            next.scale !== frame.scale ||
+            next.toImage.origin.some((v, i) => v !== frame!.toImage.origin[i]) ||
+            next.toImage.axisX.some((v, i) => v !== frame!.toImage.axisX[i]);
+        if (moved) movedAt = performance.now();
         frame = next;
+
+        if (next.canvasWidth !== canvasSize.width || next.canvasHeight !== canvasSize.height) {
+            canvasSize = { width: next.canvasWidth, height: next.canvasHeight };
+            const reach = 2 * (PAN_MARGIN + MAX_APRON + 2);
+            capacity = { width: 0, height: 0 };
+            fitScratch(next.canvasWidth + reach, next.canvasHeight + reach, false);
+            // The backdrop is sized to the scratch, so it follows the canvas.
+            releaseHeld(backdrop);
+            backdrop = null;
+            backdropStale = true;
+        }
+    }
+
+    function markStale() {
+        detailStale = backdropStale = true;
     }
 
     // The destination the preview is encoded for, and the export space it is
     // being proofed against. Does not itself request a frame: the caller owns
     // when the preview redraws, as it does for the sliders. Only the encode
-    // stage reads it, so the chain's region stays good.
+    // stage reads it, so what the chain holds stays good.
     function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
         outputSpace.set(destination, proof);
     }
 
     function setToneMap(toneMap: ToneMap) {
         calcParams.updateToneMap(toneMap);
-        stale = true;
+        markStale();
     }
 
     function setCurves(lut: Float32Array | null) {
         calcParams.updateCurves(lut);
-        stale = true;
+        markStale();
     }
 
     function setSliders(sliders: Sliders) {
         currentSliders = sliders;
         calcParams.updateSliders(sliders);
-        stale = true;
+        markStale();
     }
 
-    // The region the next frame has to render, or null if the one the chain
-    // holds can still be drawn from. One rendered at another scale stands in
-    // while a zoom is moving, and is replaced once it settles.
-    function planNext(view: ViewFrame, image: GPUImage, visible: Visible): ChainRegion | null {
-        const { fullWidth, fullHeight } = view;
-        // Never finer than the source, nor than 1:1: past it the encode stage
-        // enlarges.
-        const scale = Math.min(view.scale, 1, image.width / fullWidth);
-
-        if (region && !stale) {
-            const covered = contains(validBox(region), neededBox(visible.image, region.scale));
-            if (covered && region.scale === scale) return null;
-            if (covered && standsIn(region, scale)) {
-                const wait = SETTLE_MS - (performance.now() - scaleChangedAt);
-                if (wait > 0) {
-                    settleTimer ??= setTimeout(() => {
-                        settleTimer = null;
-                        requestRender();
-                    }, wait);
-                    return null;
-                }
-            }
-        }
-
-        const needed = neededBox(visible.image, scale);
-        const whole = neededBox([0, 0, fullWidth, fullHeight], scale);
-        const margin = contains(needed, whole) ? 0 : PAN_MARGIN;
-        const apron = sharpnessReach(currentSliders, scale, fullWidth, fullHeight);
-        const limit = gpu.device.limits.maxTextureDimension2D;
-        return planRegion(needed, scale, apron, margin, fullWidth, fullHeight, limit);
+    function later(timer: ReturnType<typeof setTimeout> | null, ms: number) {
+        if (timer !== null) clearTimeout(timer);
+        return setTimeout(() => requestRender(), Math.max(ms, 0));
     }
 
     // Ask for a frame. Repeated calls between two frames collapse into one, and
@@ -381,115 +408,202 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         debugStats.record({ intervalMs, acquireMs, recordMs, turnaroundMs, passes });
     }
 
-    function recordChain(encoder: GPUCommandEncoder, view: ViewFrame, image: GPUImage, next: ChainRegion) {
+    // One run of the chain over `region`, into `output`. Each run writes the
+    // view uniforms, so two runs need two submits to keep their own.
+    function recordChain(encoder: GPUCommandEncoder, view: ViewFrame, image: GPUImage, region: ChainRegion, output: GPUTexture, timed: boolean) {
         const { fullWidth, fullHeight } = view;
-        const width = next.box[2] - next.box[0];
-        const height = next.box[3] - next.box[1];
-        const sharpening = sharpnessIsVisible(currentSliders, next.scale);
-        fitTextures(width, height, sharpening);
+        const width = region.box[2] - region.box[0];
+        const height = region.box[3] - region.box[1];
+        const sharpening = sharpnessIsVisible(currentSliders, region.scale);
+        fitScratch(width, height, sharpening);
 
         gpu.device.queue.writeBuffer(
             viewSampleBuffer,
             0,
-            viewSampleFloats(chainToSource(next, image.width, image.height, fullWidth, fullHeight)),
+            viewSampleFloats(chainToSource(region, image.width, image.height, fullWidth, fullHeight)),
         );
         // Radii are full-resolution measurements, so the blurs need to know
         // how far this render is from full resolution.
-        calcParams.updateView(next.scale, fullWidth, fullHeight);
-        calcParams.recordCalcParams(
-            encoder,
-            measuring ? frameTimer.passWrites("params") : undefined,
-        );
+        calcParams.updateView(region.scale, fullWidth, fullHeight);
+        const options = (label: string, scissor: [number, number, number, number]) =>
+            timed ? passOptions(label, scissor) : { scissor };
+        calcParams.recordCalcParams(encoder, timed && measuring ? frameTimer.passWrites("params") : undefined);
 
         // Each stage reads the previous one's target, so they cannot be
         // collapsed: a fragment can only read a texture it is not currently
         // writing.
         const scissor: [number, number, number, number] = [0, 0, width, height];
-        recordFullScreenPass(encoder, viewSample, viewView!, viewSampleBindGroup!, passOptions("view", scissor));
-        recordFullScreenPass(encoder, develop, developView!, developBindGroup!, passOptions("develop", scissor));
+        recordFullScreenPass(encoder, viewSample, viewTexture!.createView(), viewSampleBindGroup!, options("view", scissor));
+        recordFullScreenPass(encoder, develop, developTexture!.createView(), developBindGroup!, options("develop", scissor));
 
         // The two halves of the separable blur, skipped whenever the effect
         // cannot reach the screen. Skipping is only ever a saving: calcParams
         // zeroes the amount over the same range, so composite is a no-op.
         if (sharpening) {
-            recordFullScreenPass(encoder, sharpH, sharpHView!, sharpHBindGroup!, passOptions("sharp H", scissor));
-            recordFullScreenPass(encoder, sharpV, detailView!, sharpVBindGroup!, passOptions("sharp V", scissor));
+            recordFullScreenPass(encoder, sharpH, sharpHTexture!.createView(), sharpHBindGroup!, options("sharp H", scissor));
+            recordFullScreenPass(encoder, sharpV, bandsTexture!.createView(), sharpVBindGroup!, options("sharp V", scissor));
         }
 
-        recordFullScreenPass(encoder, composite, compositeView!, compositeBindGroup!, passOptions("composite", scissor));
-
-        region = next;
-        stale = false;
+        recordFullScreenPass(encoder, composite, output.createView(), compositeBindGroup!, options("composite", scissor));
     }
 
-    function recordEncode(encoder: GPUCommandEncoder, target: GPUTexture, view: ViewFrame, visible: Visible | null) {
-        if (!visible || !region || !encodeBindGroup) {
-            const pass = encoder.beginRenderPass({
-                label: "Clear Pass",
-                colorAttachments: [{ view: target.createView(), clearValue: CLEAR, loadOp: "clear", storeOp: "store" }],
-            });
-            pass.end();
-            return;
-        }
+    function renderBackdrop(view: ViewFrame, image: GPUImage) {
+        const { fullWidth, fullHeight } = view;
+        const fit = backdropScale(fullWidth, fullHeight, image.width / fullWidth, capacity.width, capacity.height, MAX_APRON);
+        const apron = sharpnessReach(currentSliders, fit, fullWidth, fullHeight);
+        const region = planRegion(neededBox([0, 0, fullWidth, fullHeight], fit), fit, apron, 0, fullWidth, fullHeight, capacity.width);
+        backdrop = outputFor(backdrop, region, "Backdrop");
+        const encoder = gpu.device.createCommandEncoder({ label: "Render Backdrop" });
+        recordChain(encoder, view, image, region, backdrop.texture, false);
+        gpu.device.queue.submit([encoder.finish()]);
+        backdropStale = false;
+        counters.backdropRenders++;
+    }
 
+    function writeCrop(held: Held, view: ViewFrame, image: Box) {
         gpu.device.queue.writeBuffer(
-            cropBuffer,
+            held.crop,
             0,
             cropViewToFloats(
-                { ...canvasToChain(view, region), width: view.canvasWidth, height: view.canvasHeight },
+                { ...canvasToChain(view, held.region), width: view.canvasWidth, height: view.canvasHeight },
                 view.keep,
-                imageInChain(region, view.fullWidth, view.fullHeight),
+                image,
                 view.clip ?? EVERYWHERE,
             ),
         );
-
-        const drawn = pixelBox(visible.canvas, target.width, target.height);
-        recordFullScreenPass(encoder, colorSpaceEncode, target.createView(), encodeBindGroup, {
-            ...passOptions("encode", drawn),
-            clearValue: CLEAR,
-        });
     }
 
     function drawFrame(): boolean {
-        if (!source || !frame || !viewSampleBindGroup) return false;
+        if (!source || !frame || !viewSampleBindGroup || !developBindGroup) return false;
         const view = frame;
         const image = source;
+        const now = performance.now();
 
         // Measuring is opt-in: timestamp queries are not free, and neither are
         // the clocks around them, so both follow the overlay.
         measuring = debugStats.enabled;
-        const frameStart = measuring ? performance.now() : 0;
+        const frameStart = measuring ? now : 0;
         const intervalMs = measuring && lastFrameStart ? frameStart - lastFrameStart : 0;
         if (measuring) {
             lastFrameStart = frameStart;
             frameTimer.beginFrame();
         }
 
-        // Step 1: Get the current canvas texture to render into.
-        // This changes every frame (it's a swapchain texture).
+        const { fullWidth, fullHeight } = view;
+        const visible = visibleRegion(view);
+        // Never finer than the source, nor than 1:1: past it the encode stage
+        // enlarges.
+        const scale = Math.min(view.scale, 1, image.width / fullWidth);
+        const moving = now - movedAt < SETTLE_MS;
+
+        // Step 1: decide what the sharp region needs, and put it off while the
+        // view is moving and a fresh one would cost more than a frame.
+        let next: ChainRegion | null = null;
+        if (visible) {
+            const action = detailAction(detail?.region ?? null, detailStale, visible.image, scale, moving, lastDetailMs < CHEAP_MS);
+            if (action === "render") {
+                const needed = neededBox(visible.image, scale);
+                const whole = neededBox([0, 0, fullWidth, fullHeight], scale);
+                const margin = contains(needed, whole) ? 0 : PAN_MARGIN;
+                const apron = sharpnessReach(currentSliders, scale, fullWidth, fullHeight);
+                const limit = gpu.device.limits.maxTextureDimension2D;
+                next = planRegion(needed, scale, apron, margin, fullWidth, fullHeight, limit);
+                const same = detail && !detailStale && detail.region.scale === next.scale && next.box.every((v, i) => v === detail!.region.box[i]);
+                if (same) next = null;
+            } else if (action === "defer") {
+                counters.deferred++;
+                settleTimer = later(settleTimer, SETTLE_MS - (now - movedAt));
+            }
+        }
+
+        // Step 2: whether the sharp region, as it will be after this frame,
+        // covers everything on screen. Wherever it does not, the backdrop does.
+        const sharp = next ?? detail?.region ?? null;
+        const drawSharp = !!sharp && !!visible && showsDetail(sharp, scale, backdrop?.region ?? null);
+        const covered = drawSharp && contains(validBox(sharp!), neededBox(visible!.image, sharp!.scale));
+        const needBackdrop = !!visible && !covered;
+        let renderedBackdrop = false;
+        if (needBackdrop && (backdropStale || !backdrop)) {
+            renderBackdrop(view, image);
+            renderedBackdrop = true;
+        }
+
+        // Step 3: the canvas texture, and the sharp region's chain, recorded
+        // after any backdrop run was submitted so each has its own uniforms.
         const targetTexture = canvas.canvasConfig.getCurrentTexture();
         const acquireEnd = measuring ? performance.now() : 0;
+        const encoder = gpu.device.createCommandEncoder({ label: "Render Frame" });
 
-        // Step 2: Create a command encoder — this records GPU commands.
-        // Nothing actually executes until we submit the command buffer.
-        const encoder = gpu.device.createCommandEncoder({
-            label: "Render Frame",
-        });
+        if (next) {
+            detail = outputFor(detail, next, "Sharp Region");
+            recordChain(encoder, view, image, next, detail.texture, true);
+            detailStale = false;
+            counters.detailRenders++;
+        }
 
-        // Step 3: The chain, when the region it holds no longer serves, then
-        // the output transform onto the canvas.
-        const visible = visibleRegion(view);
-        const next = visible ? planNext(view, image, visible) : null;
-        if (next) recordChain(encoder, view, image, next);
-        recordEncode(encoder, targetTexture, view, visible);
+        // Step 4: the output transform onto the canvas — the backdrop first
+        // where it is needed, then the sharp region over it.
+        const drawn = visible ? pixelBox(visible.canvas, targetTexture.width, targetTexture.height) : null;
+        const targetView = targetTexture.createView();
+        let cleared = false;
+        if (drawn && needBackdrop && backdrop) {
+            writeCrop(backdrop, view, imageInChain(backdrop.region, fullWidth, fullHeight));
+            recordFullScreenPass(encoder, colorSpaceEncode, targetView, backdrop.encode, {
+                ...passOptions("backdrop", drawn),
+                clearValue: CLEAR,
+            });
+            cleared = true;
+        }
+        if (drawn && drawSharp && detail) {
+            const imageBox = imageInChain(detail.region, fullWidth, fullHeight);
+            const valid = validBox(detail.region);
+            const kept = covered
+                ? imageBox
+                : intersect(imageBox, [
+                      valid[0] - detail.region.box[0] + 1,
+                      valid[1] - detail.region.box[1] + 1,
+                      valid[2] - detail.region.box[0] - 1,
+                      valid[3] - detail.region.box[1] - 1,
+                  ]);
+            if (kept) {
+                writeCrop(detail, view, kept);
+                recordFullScreenPass(encoder, cleared ? colorSpaceEncodeOver : colorSpaceEncode, targetView, detail.encode, {
+                    ...passOptions("encode", drawn),
+                    clearValue: CLEAR,
+                    load: cleared,
+                });
+                cleared = true;
+            }
+        }
+        if (!cleared) {
+            const pass = encoder.beginRenderPass({
+                label: "Clear Pass",
+                colorAttachments: [{ view: targetView, clearValue: CLEAR, loadOp: "clear", storeOp: "store" }],
+            });
+            pass.end();
+        }
 
         if (measuring) frameTimer.resolve(encoder);
 
-        // Step 4: Submit, and hold the next frame until this one has drained.
+        // Step 5: submit, and hold the next frame until this one has drained.
+        const submitAt = performance.now();
         gpu.device.queue.submit([encoder.finish()]);
 
         inFlight = true;
         const drained = gpu.device.queue.onSubmittedWorkDone();
+        const timedDetail = !!next && !renderedBackdrop;
+        drained.then(() => {
+            if (timedDetail) lastDetailMs = performance.now() - submitAt;
+        });
+
+        // Once idle, the backdrop catches up with the adjustments, so a later
+        // gesture finds it ready.
+        if (backdropStale && !renderedBackdrop) {
+            idleTimer = later(idleTimer, BACKDROP_IDLE_MS);
+            if (!moving && !next && now - movedAt > BACKDROP_IDLE_MS) renderBackdrop(view, image);
+        }
+
+        if (previewDebug.enabled) report(view, visible?.image ?? null, needBackdrop);
 
         // The unmeasured path ends here, on a callback built once at startup.
         if (!measuring) {
@@ -511,6 +625,24 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         return true;
     }
 
+    function report(view: ViewFrame, visible: Box | null, backdropShown: boolean) {
+        previewDebug.state = {
+            fullWidth: view.fullWidth,
+            fullHeight: view.fullHeight,
+            visible,
+            scale: view.scale,
+            detail: detail?.region ?? null,
+            backdrop: backdrop?.region ?? null,
+            backdropShown,
+            source: {
+                width: source!.width,
+                height: source!.height,
+                mipLevels: source!.texture.mipLevelCount,
+            },
+        };
+        previewDebug.counters = { ...counters, lastDetailMs };
+    }
+
     // Releases what the renderer allocated. The source texture is not included:
     // it is created by the caller and handed in, and the caller destroys it —
     // both when swapping images and on teardown.
@@ -519,15 +651,17 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         dirty = false;
         if (frameHandle !== null) cancelAnimationFrame(frameHandle);
         frameHandle = null;
-        if (settleTimer !== null) clearTimeout(settleTimer);
-        settleTimer = null;
+        for (const timer of [settleTimer, idleTimer]) if (timer !== null) clearTimeout(timer);
+        settleTimer = idleTimer = null;
 
         calcParams.destroy();
         outputSpace.destroy();
-        cropBuffer.destroy();
         viewSampleBuffer.destroy();
         frameTimer.destroy();
-        destroyIntermediates();
+        destroyScratch();
+        releaseHeld(detail);
+        releaseHeld(backdrop);
+        detail = backdrop = null;
     }
 
     // Initialize with default sliders, and with the display as the destination

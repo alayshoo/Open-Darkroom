@@ -350,3 +350,47 @@ export function snapToTexels(a: Affine): Affine {
         axisY: [round(a.axisY[0]), round(a.axisY[1])],
     };
 }
+
+// ── When to render ────────────────────────────────────────────────────────────
+
+/**
+ * Keep the sharp region held, put a fresh one off until the view stops, or
+ * render it now. While the view moves, one at another scale stands in, and so
+ * does any while a fresh render would cost more than a frame.
+ */
+export function detailAction(
+    held: ChainRegion | null,
+    stale: boolean,
+    image: Box,
+    scale: number,
+    moving: boolean,
+    cheap: boolean,
+): "keep" | "defer" | "render" {
+    if (!held || stale) return "render";
+    const covered = contains(validBox(held), neededBox(image, held.scale));
+    if (covered && held.scale === scale) return "keep";
+    if (!moving) return "render";
+    return (covered && standsIn(held, scale)) || !cheap ? "defer" : "render";
+}
+
+/**
+ * Whether a held region is worth drawing over the backdrop: never when shrunk
+ * past half, where it would alias, nor when it is enlarged and the backdrop is
+ * finer than it.
+ */
+export function showsDetail(held: ChainRegion, scale: number, backdrop: ChainRegion | null): boolean {
+    if (held.scale > 2 * scale) return false;
+    return held.scale >= scale || !backdrop || held.scale >= backdrop.scale;
+}
+
+/** The scale the whole image is held at to fit `width` × `height` with an apron of `apron`. */
+export function backdropScale(
+    fullWidth: number,
+    fullHeight: number,
+    sourceScale: number,
+    width: number,
+    height: number,
+    apron: number,
+): number {
+    return Math.min(1, sourceScale, (width - 2 * apron - 4) / fullWidth, (height - 2 * apron - 4) / fullHeight);
+}

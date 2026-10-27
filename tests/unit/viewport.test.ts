@@ -9,6 +9,7 @@ import {
     MAX_ZOOM,
     PAN_MARGIN,
     apply,
+    backdropScale,
     canvasToChain,
     canvasToImage,
     canvasToOutput,
@@ -17,11 +18,13 @@ import {
     compose,
     contains,
     cropLayout,
+    detailAction,
     imageInChain,
     invert,
     neededBox,
     planRegion,
     scaleBy,
+    showsDetail,
     standsIn,
     validBox,
     viewFrame,
@@ -208,5 +211,55 @@ describe("mapping the canvas onto the chain", () => {
         const region = planRegion(at(2000), 1, 0, PAN_MARGIN, 4000, 2000, 8192);
         expect(contains(validBox(region), at(2000 + PAN_MARGIN - 2))).toBe(true);
         expect(contains(validBox(region), at(2000 + PAN_MARGIN + 2))).toBe(false);
+    });
+});
+
+describe("detailAction", () => {
+    const held: ChainRegion = { scale: 0.5, box: [0, 0, 1000, 800], apron: 0 };
+    const inside: [number, number, number, number] = [200, 200, 1600, 1200];
+    const outside: [number, number, number, number] = [200, 200, 2600, 1200];
+
+    it("renders when nothing is held or the adjustments moved on", () => {
+        expect(detailAction(null, false, inside, 0.5, true, false)).toBe("render");
+        expect(detailAction(held, true, inside, 0.5, true, false)).toBe("render");
+    });
+
+    it("keeps a region that covers the view at its scale", () => {
+        expect(detailAction(held, false, inside, 0.5, true, false)).toBe("keep");
+    });
+
+    it("lets a region at another scale stand in while the view moves, then renders", () => {
+        expect(detailAction(held, false, inside, 0.6, true, true)).toBe("defer");
+        expect(detailAction(held, false, inside, 0.6, false, true)).toBe("render");
+    });
+
+    it("puts off a costly render while the view moves, but not a cheap one", () => {
+        expect(detailAction(held, false, outside, 0.5, true, false)).toBe("defer");
+        expect(detailAction(held, false, outside, 0.5, true, true)).toBe("render");
+        expect(detailAction(held, false, outside, 0.5, false, false)).toBe("render");
+    });
+});
+
+describe("showsDetail", () => {
+    const at = (scale: number): ChainRegion => ({ scale, box: [0, 0, 10, 10], apron: 0 });
+
+    it("draws a region at or above the view's scale, up to twice it", () => {
+        expect(showsDetail(at(0.5), 0.5, at(0.8))).toBe(true);
+        expect(showsDetail(at(0.9), 0.5, null)).toBe(true);
+        expect(showsDetail(at(1.1), 0.5, null)).toBe(false);
+    });
+
+    it("leaves an enlarged region out where the backdrop is finer", () => {
+        expect(showsDetail(at(0.2), 0.5, at(0.3))).toBe(false);
+        expect(showsDetail(at(0.4), 0.5, at(0.3))).toBe(true);
+    });
+});
+
+describe("backdropScale", () => {
+    it("fits the whole image and its apron into the scratch, never past the source", () => {
+        const scale = backdropScale(4000, 3000, 1, 2048, 1792, 180);
+        expect(4000 * scale + 2 * 180).toBeLessThanOrEqual(2048);
+        expect(3000 * scale + 2 * 180).toBeLessThanOrEqual(1792);
+        expect(backdropScale(1000, 800, 0.5, 8192, 8192, 180)).toBe(0.5);
     });
 });

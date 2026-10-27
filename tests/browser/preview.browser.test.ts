@@ -207,12 +207,16 @@ describe("the preview renderer", () => {
     let target: GPUTexture;
     let renderer: Renderer;
     let passes: string[] = [];
+    let backdropRuns = 0;
 
     beforeAll(async () => {
-        // Record the label of every render pass the renderer begins.
+        // Record the label of every render pass in the frames the renderer
+        // draws, and count its runs of the chain for the backdrop apart.
         const createEncoder = gpu.device.createCommandEncoder.bind(gpu.device);
         gpu.device.createCommandEncoder = (descriptor?: GPUCommandEncoderDescriptor) => {
             const encoder = createEncoder(descriptor);
+            if (descriptor?.label === "Render Backdrop") backdropRuns++;
+            if (descriptor?.label !== "Render Frame") return encoder;
             const begin = encoder.beginRenderPass.bind(encoder);
             encoder.beginRenderPass = (d: GPURenderPassDescriptor) => {
                 passes.push(d.label ?? "");
@@ -290,14 +294,30 @@ describe("the preview renderer", () => {
         expect(worstAt1to1(shown)).toBeLessThanOrEqual(2);
     });
 
-    it("renders a fresh region once a pan runs past it", async () => {
+    it("past the margin, draws the backdrop until the view settles, then a fresh region", async () => {
         // A fresh region about the starting point, which a change of
         // adjustments forces.
         renderer.setSliders({ ...defaultSlidersRGB });
         await show(1, [60, 45]);
-        const shown = await show(1, [60 + PAN_MARGIN + 10, 45]);
-        expect(shown.passes).toContain("View Sample Pass");
-        expect(worstAt1to1(shown)).toBeLessThanOrEqual(2);
+        const moving = await show(1, [60 + PAN_MARGIN + 10, 45]);
+        // Unless the last sharp render was cheap, the moving frame keeps what
+        // it holds and lays it over the backdrop.
+        if (!moving.passes.includes("View Sample Pass")) {
+            expect(moving.passes).toEqual(["Colour Space Encode Pass", "Colour Space Encode Over Pass"]);
+        }
+        // Every pixel is drawn, by one or the other.
+        const [, y0, , y1] = moving.layout.clip!;
+        for (let y = Math.max(0, Math.ceil(y0)); y < Math.min(CANVAS_H, Math.floor(y1)); y += 7) {
+            for (let x = 0; x < CANVAS_W; x += 7) expect(moving.rgba[(y * CANVAS_W + x) * 4 + 3]).toBe(255);
+        }
+
+        passes = [];
+        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => requestAnimationFrame(r));
+        await gpu.device.queue.onSubmittedWorkDone();
+        const settled = await show(1, [60 + PAN_MARGIN + 10, 45]);
+        expect(settled.passes).toEqual(["Colour Space Encode Pass"]);
+        expect(worstAt1to1(settled)).toBeLessThanOrEqual(2);
     });
 
     it("re-runs the chain when the adjustments change", async () => {

@@ -55,6 +55,7 @@ export async function loadFullResolution(
     fullWidth: number,
     fetchRows: FetchRows,
     cancelled: () => boolean,
+    progress?: (rows: number, height: number) => void,
 ): Promise<GPUImage | null> {
     const maxEdge = device.limits.maxTextureDimension2D;
     const rows = bandRows(Math.min(fullWidth, maxEdge));
@@ -83,6 +84,7 @@ export async function loadFullResolution(
                 { bytesPerRow: band.width * BYTES_PER_PIXEL, rowsPerImage: band.rows },
                 { width: band.width, height: band.rows },
             );
+            progress?.(end, band.height);
             if (end >= band.height) break;
         }
     } catch (e) {
