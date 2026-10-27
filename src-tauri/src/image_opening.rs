@@ -70,6 +70,9 @@ pub struct OriginalImage {
     pub space: SourceSpace,
     /// What the preview's full-resolution texture is streamed from.
     pub full_resolution: Arc<FullResolution>,
+    /// The frontend's tag for this open, so a band asked for an image that has
+    /// since been replaced is refused rather than cut from the new one.
+    pub id: u32,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -500,6 +503,7 @@ pub const OPEN_CANCELLED: &str = "open:cancelled";
 pub(crate) async fn open_image_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, ImageState>,
+    image_id: u32,
 ) -> Result<Response, String> {
     println!("open_image_file: started");
 
@@ -557,6 +561,7 @@ pub(crate) async fn open_image_file(
             channels,
             space,
             full_resolution: Arc::default(),
+            id: image_id,
         });
     }
 

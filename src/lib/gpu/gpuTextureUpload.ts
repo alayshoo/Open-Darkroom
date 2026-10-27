@@ -1,6 +1,7 @@
 // src/lib/gpu/gpuTextureUpload.ts
 
 import type { GPUImage } from "$lib/types/gpuTypes";
+import { generateMipmaps, sourceTexture } from "./fullResolution";
 
 // Creates a GPU texture from an ImageBitmap.
 // In your app, the Rust backend will decode the RAW file and send
@@ -35,21 +36,23 @@ export async function uploadImageToGPU(
 }
 
 // Alternative: upload raw pixel data (e.g., from Rust via Tauri).
-// This is what you'll likely use for RAW files.
+// This is what you'll likely use for RAW files. `mipmapped` fills every mip
+// level, for a source the preview may show shrunk.
 export function uploadRawPixelsToGPU(
     device: GPUDevice,
     pixels: Uint8Array, // RGBA pixel data
     width: number,
-    height: number
+    height: number,
+    mipmapped = false,
 ): GPUImage {
-    const texture = device.createTexture({
-        label: "RAW Image Texture",
-        size: { width, height },
-        format: "rgba16float",
-        usage:
-            GPUTextureUsage.TEXTURE_BINDING |
-            GPUTextureUsage.COPY_DST,
-    });
+    const texture = mipmapped
+        ? sourceTexture(device, "Preview Source", width, height)
+        : device.createTexture({
+              label: "RAW Image Texture",
+              size: { width, height },
+              format: "rgba16float",
+              usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+          });
 
     // writeTexture copies a CPU byte array → GPU texture. The view is passed
     // whole rather than as `.buffer`, which would drop its byte offset and
@@ -64,6 +67,7 @@ export function uploadRawPixelsToGPU(
         },
         { width, height }
     );
+    if (mipmapped) generateMipmaps(device, texture);
 
     return { texture, width, height };
 }

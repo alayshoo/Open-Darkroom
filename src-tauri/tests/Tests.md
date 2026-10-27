@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 278 Rust tests, 161 TypeScript, 50 in-browser.
+Nothing is `#[ignore]`d. 281 Rust tests, 162 TypeScript, 51 in-browser.
 
 ---
 
@@ -43,7 +43,7 @@ The two blur passes are skipped whenever no band can reach the screen. That is
 only ever a saving — `calcParams.wgsl` zeroes the amounts over the same condition,
 so composite is a no-op regardless of what the detail texture holds.
 
-## L1 — `shader_contracts.rs` (27)
+## L1 — `shader_contracts.rs` (30)
 
 Reads source files as text. Catches a field added in one language and not the others.
 
@@ -64,6 +64,7 @@ Reads source files as text. Catches a field added in one language and not the ot
 | `develop_and_histogram_apply_the_same_chain` | steps 1-11 have not drifted between the two copies |
 | `develop_and_histogram_share_the_same_tone_maths` | so has the duplicated tone maths they call |
 | `typescript_matches_the_cancelled_open_sentinel` | the string that tells a cancelled open from a failed one |
+| `the_windows_window_differs_from_the_shared_one_only_by_its_own_keys` | the Windows config's copy of the window has not drifted |
 | `the_preview_and_the_histogram_share_one_output_transform` | both see the struct, the transform and the compression, and bind the uniform |
 | `the_develop_stage_measures_saturation_against_a_fixed_reference` | vibrance measures in sRGB; develop never sees the destination |
 | `typescript_declares_the_same_primaries_as_rust` | the one set of chromaticities both sides derive from |
@@ -206,7 +207,7 @@ equality, and it is the test that fails first if the arithmetic drifts.
 | `payload_round_trips_through_the_frontend_layout` | bytes parse as `openImage.ts` reads them |
 | `payload_header_carries_preview_not_source_dimensions` | header sizes the pixel view correctly |
 
-## L1 — `full_resolution.rs` (9)
+## L1 — `full_resolution.rs` (11)
 
 The bands of rows the preview's full-resolution texture is streamed from. Until
 they arrive the view shows the preview, so the two have to agree.
@@ -220,7 +221,9 @@ they arrive the view shows the preview, so the two have to agree.
 | `a_source_without_alpha_is_served_opaque` | RGB and RGBA sources serve the same bytes |
 | `served_size_keeps_an_image_that_fits_and_shrinks_one_that_does_not` | the long edge lands on the GPU's limit |
 | `an_image_past_the_limit_is_resampled_as_the_preview_is` | fitted to the preview's edge, it is the preview |
-| `a_second_texture_limit_for_the_same_image_is_refused` | the fitted copy is built once |
+| `a_profile_converted_on_the_cpu_is_served_as_its_preview_is` | the baked path, whole and fitted, matches the preview |
+| `a_second_texture_limit_is_served_at_its_own_size` | a new limit refits rather than serving the old copy |
+| `a_fitted_image_can_be_streamed_again_after_its_last_band` | the fitted copy is released and rebuilt the same |
 | `the_payload_carries_the_size_and_band_before_the_pixels` | the 16-byte header `fullResolution.ts` reads |
 
 ## L1 — `source_space.rs` (23)

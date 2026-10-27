@@ -24,14 +24,25 @@ fn all_bands(
     max_edge: u32,
     rows: u32,
 ) -> (u32, u32, Vec<u8>) {
+    all_bands_in(&SourceSpace::default(), src, width, height, channels, max_edge, rows)
+}
+
+fn all_bands_in(
+    space: &SourceSpace,
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    max_edge: u32,
+    rows: u32,
+) -> (u32, u32, Vec<u8>) {
     let full = FullResolution::default();
-    let space = SourceSpace::default();
     let mut out = Vec::new();
     let mut y = 0;
     let mut size = (0, 0);
     loop {
         let band = full
-            .rows(src, width, height, channels, &space, max_edge, y, rows)
+            .rows(src, width, height, channels, space, max_edge, y, rows)
             .expect("band");
         assert_eq!(band.y, y);
         size = (band.width, band.height);
@@ -141,18 +152,53 @@ fn an_image_past_the_limit_is_resampled_as_the_preview_is() {
 }
 
 #[test]
-fn a_second_texture_limit_for_the_same_image_is_refused() {
+fn a_profile_converted_on_the_cpu_is_served_as_its_preview_is() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/srgb-lut.icc");
+    let space = SourceSpace::resolve(Some(std::fs::read(path).expect("LUT profile fixture")));
+    assert!(space.baked, "the fixture has to take the baked path");
+
+    for width in [300, PREVIEW_MAX_EDGE + 300] {
+        let img = noise(width, 300, 4);
+        let (w, h) = img.dimensions();
+        let prepared = prepare_image(img.as_raw(), w, h, 4, &space).unwrap();
+        let (sw, sh, pixels) = all_bands_in(&space, img.as_raw(), w, h, 4, PREVIEW_MAX_EDGE, 64);
+        assert_eq!((sw, sh), (prepared.preview_width, prepared.preview_height));
+        assert_eq!(pixels, prepared.preview_pixels);
+    }
+}
+
+#[test]
+fn a_second_texture_limit_is_served_at_its_own_size() {
     let img = rgb_ramp(100, 10);
     let full = FullResolution::default();
     let space = SourceSpace::default();
-    full.rows(img.as_raw(), 100, 10, 4, &space, 50, 0, 1)
-        .unwrap();
-    assert!(full
-        .rows(img.as_raw(), 100, 10, 4, &space, 40, 0, 1)
-        .is_err());
+    let first = full.rows(img.as_raw(), 100, 10, 4, &space, 50, 0, 1).unwrap();
+    let second = full.rows(img.as_raw(), 100, 10, 4, &space, 40, 0, 1).unwrap();
+    assert_eq!((first.width, second.width), (50, 40));
     // Whole-image serving is unaffected.
     full.rows(img.as_raw(), 100, 10, 4, &space, 4096, 0, 1)
         .unwrap();
+}
+
+#[test]
+fn a_fitted_image_can_be_streamed_again_after_its_last_band() {
+    let img = noise(300, 40, 5);
+    let (w, h) = img.dimensions();
+    let first = all_bands(img.as_raw(), w, h, 4, 120, 7);
+    let full = FullResolution::default();
+    let space = SourceSpace::default();
+    for _ in 0..2 {
+        let mut pixels = Vec::new();
+        let mut y = 0;
+        while y < first.1 {
+            let band = full
+                .rows(img.as_raw(), w, h, 4, &space, 120, y, 7)
+                .expect("band");
+            pixels.extend_from_slice(&band.pixels);
+            y += band.rows;
+        }
+        assert_eq!(pixels, first.2);
+    }
 }
 
 #[test]

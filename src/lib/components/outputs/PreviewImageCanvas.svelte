@@ -8,7 +8,8 @@
     } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
     import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
-    import { loadFullResolution, uploadSource } from "$lib/gpu/fullResolution";
+    import { loadFullResolution } from "$lib/gpu/fullResolution";
+    import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
     import { createRenderer } from "$lib/gpu/renderer";
     import { fetchFullResolutionRows } from "$lib/utils/openImage";
     import { type ImagePayload } from "$lib/types/imagePayload";
@@ -35,6 +36,7 @@
         crop,
         showWhole = false,
         zoom = $bindable(null),
+        zoomable = $bindable(false),
         overlay,
     }: {
         sliders: Sliders;
@@ -47,6 +49,8 @@
         showWhole?: boolean;
         // Canvas pixels per image pixel, or null to fit the image to its slot.
         zoom?: number | null;
+        // Whether 1:1 is any closer than the fit.
+        zoomable?: boolean;
         // Drawn over the frame, sized to it.
         overlay?: Snippet;
     } = $props();
@@ -128,6 +132,17 @@
         if (zoom === null) center = null;
     });
 
+    const isFit = (scale: number, fit: number) => scale <= fit * 1.0001;
+
+    // A zoom no closer than the fit is the fit, however it was asked for.
+    $effect(() => {
+        if (zoom !== null && layout && !showWhole && isFit(zoom, layout.fit)) zoom = null;
+    });
+
+    $effect(() => {
+        zoomable = !!layout && !showWhole && !isFit(1, layout.fit);
+    });
+
     // Link the canvas to GPU and create the renderer once canvas is mounted
     $effect(() => {
         if (!canvas) return;
@@ -159,7 +174,7 @@
         const localRenderer = renderer;
         const load = ++loading;
 
-        const preview = uploadSource(gpu.device, payload.pixels, payload.width, payload.height);
+        const preview = uploadRawPixelsToGPU(gpu.device, payload.pixels, payload.width, payload.height, true);
         untrack(() => source)?.texture.destroy();
         source = preview;
         localRenderer.loadImage(preview, payload.srcToWorking);
@@ -176,7 +191,9 @@
         const progress = (rows: number, total: number) => {
             if (load === loading) previewDebug.stream = { rows, total, done: rows >= total };
         };
-        loadFullResolution(gpu.device, payload.fullWidth, fetchFullResolutionRows, () => load !== loading, progress)
+        const fetchRows = (maxEdge: number, y: number, rows: number) =>
+            fetchFullResolutionRows(payload.imageId, maxEdge, y, rows);
+        loadFullResolution(gpu.device, payload.fullWidth, fetchRows, () => load !== loading, progress)
             .then((full) => {
                 if (!full) return;
                 if (load !== loading) {
@@ -191,7 +208,9 @@
                 preview.texture.destroy();
                 source = full;
             })
-            .catch((e) => console.error("Failed to load the full-resolution image:", e));
+            .catch((e) => {
+                if (load === loading) console.error("Failed to load the full-resolution image:", e);
+            });
     });
 
     // Where the image sits on the canvas. Moving or zooming it is cheap: the
@@ -250,7 +269,7 @@
     // Zooming out as far as the fit, or past it, goes back to fitting.
     function zoomTo(scale: number, cursor: Point) {
         if (!layout || !Number.isFinite(scale) || !cursor.every(Number.isFinite)) return;
-        if (scale <= layout.fit * 1.0001) {
+        if (isFit(scale, layout.fit)) {
             zoom = null;
             return;
         }

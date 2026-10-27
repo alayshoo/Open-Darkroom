@@ -97,7 +97,7 @@ export async function loadFullResolution(
     return { texture, width: texture.width, height: texture.height };
 }
 
-function sourceTexture(device: GPUDevice, label: string, width: number, height: number): GPUTexture {
+export function sourceTexture(device: GPUDevice, label: string, width: number, height: number): GPUTexture {
     return device.createTexture({
         label,
         size: { width, height },
@@ -110,19 +110,6 @@ function sourceTexture(device: GPUDevice, label: string, width: number, height: 
             GPUTextureUsage.COPY_SRC |
             GPUTextureUsage.RENDER_ATTACHMENT,
     });
-}
-
-/** Linear RGBA f16 pixels, as the open payload's preview carries them, with mip levels. */
-export function uploadSource(device: GPUDevice, pixels: Uint8Array, width: number, height: number): GPUImage {
-    const texture = sourceTexture(device, "Preview Source", width, height);
-    device.queue.writeTexture(
-        { texture },
-        pixels,
-        { bytesPerRow: width * BYTES_PER_PIXEL, rowsPerImage: height },
-        { width, height },
-    );
-    generateMipmaps(device, texture);
-    return { texture, width, height };
 }
 
 async function createSourceTexture(device: GPUDevice, width: number, height: number) {

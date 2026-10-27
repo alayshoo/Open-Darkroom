@@ -20,4 +20,6 @@ export interface ImagePayload {
     // Set when the backend had to apply the profile itself, so the pixels are
     // already in the working space and srcToWorking is the identity.
     colourBaked: boolean;
+    // Tags this open, so bands streamed for it are refused once it is replaced.
+    imageId: number;
 }

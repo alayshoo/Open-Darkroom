@@ -5,23 +5,29 @@
 // larger than the GPU's texture limit is served resized to fit.
 
 use half::f16;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::ipc::Response;
 
 use crate::color::{linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LUT_SIZE};
-use crate::icc::SourceSpace;
+use crate::icc::{Baker, SourceSpace};
 use crate::image_opening::{downscale_to_max_edge, ImageState};
 
 /// Bytes preceding the pixels of a band: the size of the image being served,
 /// then the band's first row and row count, u32 LE.
 pub const ROWS_HEADER_BYTES: usize = 16;
 
+/// Rows baked and linearised at a time while fitting, so the baked path never
+/// holds a second full-size copy of the source.
+const FIT_CHUNK_ROWS: usize = 256;
+
 /// What serving one image needs beyond the source itself, built on first use.
 #[derive(Default)]
 pub struct FullResolution {
     luts: OnceLock<[Vec<f16>; 3]>,
-    fitted: OnceLock<Result<Fitted, String>>,
+    baker: OnceLock<Result<Option<Baker>, String>>,
+    /// Only held until its last band has been served.
+    fitted: Mutex<Option<Arc<Fitted>>>,
 }
 
 struct Fitted {
@@ -80,21 +86,35 @@ impl FullResolution {
             (y as usize * w as usize * channels)..((y + rows) as usize * w as usize * channels)
         };
 
+        let baker = self
+            .baker
+            .get_or_init(|| space.baker())
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref();
+
         let pixels = if (served_w, served_h) == (width, height) {
             let cut = &src[band(width)];
-            let baked = space.bake(cut, channels)?;
+            let baked = baker.map(|b| b.apply(cut, channels)).transpose()?;
             let luts = self.luts.get_or_init(|| space.luts(f16::from_f32));
             linearize_u16(baked.as_deref().unwrap_or(cut), channels, luts)
         } else {
-            let fitted = self
-                .fitted
-                .get_or_init(|| fit(src, width, height, channels, space, max_edge))
-                .as_ref()
-                .map_err(Clone::clone)?;
-            if fitted.max_edge != max_edge {
-                return Err("The image is already being served for another texture limit".into());
+            let fitted = {
+                let mut held = self.fitted.lock().unwrap();
+                match held.as_ref().filter(|f| f.max_edge == max_edge) {
+                    Some(f) => Arc::clone(f),
+                    None => {
+                        let f = Arc::new(fit(src, width, height, channels, space, baker, max_edge)?);
+                        *held = Some(Arc::clone(&f));
+                        f
+                    }
+                }
+            };
+            let pixels = linear_u16_to_f16_bytes(&fitted.linear[band(fitted.width)], channels);
+            if y + rows == served_h {
+                *self.fitted.lock().unwrap() = None;
             }
-            linear_u16_to_f16_bytes(&fitted.linear[band(fitted.width)], channels)
+            pixels
         };
 
         Ok(Rows {
@@ -115,12 +135,20 @@ fn fit(
     height: u32,
     channels: usize,
     space: &SourceSpace,
+    baker: Option<&Baker>,
     max_edge: u32,
 ) -> Result<Fitted, String> {
-    let baked = space.bake(src, channels)?;
-    let src = baked.as_deref().unwrap_or(src);
     let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
-    let linear = to_linear_u16(src, channels, &luts);
+    let linear = match baker {
+        None => to_linear_u16(src, channels, &luts),
+        Some(baker) => {
+            let mut linear = Vec::with_capacity(src.len());
+            for chunk in src.chunks(FIT_CHUNK_ROWS * width as usize * channels) {
+                linear.extend(to_linear_u16(&baker.apply(chunk, channels)?, channels, &luts));
+            }
+            linear
+        }
+    };
     let (linear, width, _) = downscale_to_max_edge(&linear, width, height, channels, max_edge);
     Ok(Fitted {
         max_edge,
@@ -129,12 +157,8 @@ fn fit(
     })
 }
 
-/// Serialise a band into the layout `fullResolution.ts` parses:
-///
-/// | size      | contents                                   |
-/// |-----------|--------------------------------------------|
-/// | 16        | width, height, first row, row count, u32 LE |
-/// | w × r × 8 | RGBA f16 LE pixels                         |
+/// Serialise a band into the layout `fullResolution.ts` parses: the header
+/// fields as u32 LE, then w × r RGBA f16 LE pixels.
 pub fn build_rows_payload(rows: &Rows) -> Vec<u8> {
     let mut payload = Vec::with_capacity(ROWS_HEADER_BYTES + rows.pixels.len());
     for v in [rows.width, rows.height, rows.y, rows.rows] {
@@ -150,6 +174,7 @@ pub fn build_rows_payload(rows: &Rows) -> Vec<u8> {
 #[tauri::command]
 pub(crate) async fn full_resolution_rows(
     state: tauri::State<'_, ImageState>,
+    image_id: u32,
     max_edge: u32,
     y: u32,
     rows: u32,
@@ -157,6 +182,9 @@ pub(crate) async fn full_resolution_rows(
     let (pixels, width, height, channels, space, full) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
+        if img.id != image_id {
+            return Err("The image has been replaced since this band was asked for".into());
+        }
         (
             Arc::clone(&img.pixels_u16),
             img.width,

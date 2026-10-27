@@ -8,6 +8,8 @@ import { type ImagePayload } from "$lib/types/imagePayload";
 // OPEN_CANCELLED in image_opening.rs.
 const OPEN_CANCELLED = "open:cancelled";
 
+let lastImageId = 0;
+
 // Bytes before the pixel data. Must match PAYLOAD_HEADER_BYTES in
 // image_opening.rs.
 const HEADER_BYTES = 64;
@@ -15,7 +17,7 @@ const HEADER_BYTES = 64;
 // Split the backend payload into its regions. The pixels and histograms are
 // views onto the payload, not copies, so they carry a byte offset — anything
 // handing them to WebGPU has to pass the view rather than its buffer.
-export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
+export function parseImagePayload(buffer: ArrayBuffer, imageId = 0): ImagePayload {
     // Parse the header: preview width and height, the full-resolution width and
     // height, then the overview width and height, u32 little-endian.
     const header = new DataView(buffer);
@@ -60,6 +62,7 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
         histB,
         srcToWorking,
         colourBaked,
+        imageId,
     };
 }
 
@@ -68,7 +71,8 @@ export function parseImagePayload(buffer: ArrayBuffer): ImagePayload {
 // caller has to drop what it is showing rather than keep it.
 export async function openImage(): Promise<ImagePayload | null> {
     try {
-        return parseImagePayload(await invoke<ArrayBuffer>("open_image_file"));
+        const imageId = ++lastImageId;
+        return parseImagePayload(await invoke<ArrayBuffer>("open_image_file", { imageId }), imageId);
     } catch (e) {
         if (e === OPEN_CANCELLED) return null;
         throw e;
@@ -76,6 +80,11 @@ export async function openImage(): Promise<ImagePayload | null> {
 }
 
 // A band of rows of the open image at full resolution. See full_resolution.rs.
-export function fetchFullResolutionRows(maxEdge: number, y: number, rows: number): Promise<ArrayBuffer> {
-    return invoke<ArrayBuffer>("full_resolution_rows", { maxEdge, y, rows });
+export function fetchFullResolutionRows(
+    imageId: number,
+    maxEdge: number,
+    y: number,
+    rows: number,
+): Promise<ArrayBuffer> {
+    return invoke<ArrayBuffer>("full_resolution_rows", { imageId, maxEdge, y, rows });
 }

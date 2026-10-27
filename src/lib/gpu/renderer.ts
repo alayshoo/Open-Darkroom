@@ -20,6 +20,7 @@ import {
 } from "./pipelines/renderStagePipeline";
 import {
     createCompositeStage,
+    createDevelopSampler,
     createDevelopStage,
     createEncodeStage,
     createSharpHorizontalStage,
@@ -110,15 +111,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     const colorSpaceEncode: RenderStage = createEncodeStage(gpu);
     const colorSpaceEncodeOver: RenderStage = createEncodeStage(gpu, true);
 
-    // Develop reads the view texture texel for texel, so nearest copies it
-    // exactly wherever the region sits, as the export's sampler does.
-    const sampler = gpu.device.createSampler({
-        label: "Develop Sampler",
-        magFilter: "nearest",
-        minFilter: "nearest",
-        addressModeU: "clamp-to-edge",
-        addressModeV: "clamp-to-edge",
-    });
+    const sampler = createDevelopSampler(gpu);
     const viewSampler = createViewSampler(gpu);
 
     // Where the chain is rendering to. The buffer outlives every image, so the
@@ -315,12 +308,19 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         if (next.canvasWidth !== canvasSize.width || next.canvasHeight !== canvasSize.height) {
             canvasSize = { width: next.canvasWidth, height: next.canvasHeight };
             const reach = 2 * (PAN_MARGIN + MAX_APRON + 2);
-            capacity = { width: 0, height: 0 };
-            fitScratch(next.canvasWidth + reach, next.canvasHeight + reach, false);
+            const width = next.canvasWidth + reach;
+            const height = next.canvasHeight + reach;
+            const previous = capacity;
+            // Shrinks only once the scratch is well past what the canvas needs,
+            // so dragging a window edge does not reallocate on every frame.
+            if (2 * width * height < capacity.width * capacity.height) capacity = { width: 0, height: 0 };
+            fitScratch(width, height, !!sharpHTexture);
             // The backdrop is sized to the scratch, so it follows the canvas.
-            releaseHeld(backdrop);
-            backdrop = null;
-            backdropStale = true;
+            if (capacity.width !== previous.width || capacity.height !== previous.height) {
+                releaseHeld(backdrop);
+                backdrop = null;
+                backdropStale = true;
+            }
         }
     }
 

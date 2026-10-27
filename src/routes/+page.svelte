@@ -325,6 +325,7 @@
     // Canvas pixels per image pixel, or null while the image is fitted to its
     // slot. The crop tool always shows the image fitted.
     let zoom: number | null = $state(null);
+    let zoomable = $state(false);
 
     function toggleZoom() {
         zoom = zoom === null ? 1 : null;
@@ -682,7 +683,11 @@
             class:dimmed={!imagePayload}
             inert={!imagePayload}
         >
-            <ZoomButton fitted={zoom === null} disabled={isCropping} ontoggle={toggleZoom} />
+            <ZoomButton
+                fitted={zoom === null}
+                disabled={isCropping || (zoom === null && !zoomable)}
+                ontoggle={toggleZoom}
+            />
         </div>
     </div>
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
@@ -700,6 +705,7 @@
                 crop={isCropping ? draftCrop : crop}
                 showWhole={isCropping}
                 bind:zoom
+                bind:zoomable
             >
                 {#snippet overlay()}
                     {#if isCropping && imagePayload}

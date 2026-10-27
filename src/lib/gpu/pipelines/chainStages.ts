@@ -145,13 +145,13 @@ export function createEncodeStage(gpu: GPUSession, over = false): RenderStage {
     });
 }
 
-// The source image is sampled rather than loaded, so the develop stage needs
-// this alongside its textures.
-export function createSourceSampler(gpu: GPUSession): GPUSampler {
+// Develop reads the view texture texel for texel, so nearest copies it
+// exactly wherever the region sits, as the export's sampler does.
+export function createDevelopSampler(gpu: GPUSession): GPUSampler {
     return gpu.device.createSampler({
-        label: "Source Image Sampler",
-        magFilter: "linear",
-        minFilter: "linear",
+        label: "Develop Sampler",
+        magFilter: "nearest",
+        minFilter: "nearest",
         addressModeU: "clamp-to-edge",
         addressModeV: "clamp-to-edge",
     });

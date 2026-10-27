@@ -13,7 +13,8 @@ import { defaultSlidersRGB } from "$lib/types/imgParameters";
 import { FULL_FRAME, type Crop } from "$lib/types/crop";
 import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
 import { createRenderer } from "$lib/gpu/renderer";
-import { ROWS_HEADER_BYTES, loadFullResolution, uploadSource } from "$lib/gpu/fullResolution";
+import { ROWS_HEADER_BYTES, loadFullResolution } from "$lib/gpu/fullResolution";
+import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
 import {
     PAN_MARGIN,
     apply,
@@ -232,7 +233,7 @@ describe("the preview renderer", () => {
         });
         const link = { canvasConfig: { getCurrentTexture: () => target } } as unknown as GPUCanvasLink;
         renderer = createRenderer(gpu, link);
-        renderer.loadImage(uploadSource(gpu.device, linearise(source), WIDTH, HEIGHT), SRGB_TO_WORKING);
+        renderer.loadImage(uploadRawPixelsToGPU(gpu.device, linearise(source), WIDTH, HEIGHT, true), SRGB_TO_WORKING);
     });
 
     /** Show the image at `zoom` about `center`, and return what reached the canvas. */
@@ -382,11 +383,28 @@ describe("the preview renderer", () => {
         for (let y = 0; y < HEIGHT; y++) {
             for (let x = 0; x < WIDTH; x++) checker.fill((x + y) % 2 ? 255 : 0, (y * WIDTH + x) * 3, (y * WIDTH + x) * 3 + 3);
         }
-        renderer.loadImage(uploadSource(gpu.device, linearise(checker), WIDTH, HEIGHT), SRGB_TO_WORKING);
+        renderer.loadImage(uploadRawPixelsToGPU(gpu.device, linearise(checker), WIDTH, HEIGHT, true), SRGB_TO_WORKING);
         const shown = await show(0.5, [300, 80]);
         // Linear 0.5 is sRGB 188.
         const centre = shown.rgba[(45 * CANVAS_W + 60) * 4];
         expect(Math.abs(centre - 188)).toBeLessThanOrEqual(3);
-        renderer.loadImage(uploadSource(gpu.device, linearise(source), WIDTH, HEIGHT), SRGB_TO_WORKING);
+        renderer.loadImage(uploadRawPixelsToGPU(gpu.device, linearise(source), WIDTH, HEIGHT, true), SRGB_TO_WORKING);
+    });
+
+    it("keeps its scratch textures through a small change of canvas size", () => {
+        const created: string[] = [];
+        const createTexture = gpu.device.createTexture.bind(gpu.device);
+        gpu.device.createTexture = (d: GPUTextureDescriptor) => {
+            created.push(d.label ?? "");
+            return createTexture(d);
+        };
+        try {
+            const layout = cropLayout(FULL_FRAME, WIDTH, HEIGHT, slot, null, null);
+            renderer.setFrame(viewFrame(layout, CANVAS_W - 10, CANVAS_H - 10, WIDTH, HEIGHT));
+            renderer.setFrame(viewFrame(layout, CANVAS_W, CANVAS_H, WIDTH, HEIGHT));
+        } finally {
+            gpu.device.createTexture = createTexture;
+        }
+        expect(created).toEqual([]);
     });
 });

@@ -17,11 +17,11 @@ import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
 import { parseImagePayload } from "$lib/utils/openImage";
 import {
   createCompositeStage,
+  createDevelopSampler,
   createDevelopStage,
   createEncodeStage,
   createSharpHorizontalStage,
   createSharpVerticalStage,
-  createSourceSampler,
 } from "$lib/gpu/pipelines/chainStages";
 import {
   createStageBindGroup,
@@ -181,7 +181,7 @@ async function develop(
   const colorSpaceEncode = createEncodeStage(gpu);
   const outputSpace = createOutputSpaceBuffer(gpu);
   outputSpace.set(options.output ?? "srgb", options.proof ?? null);
-  const sampler = createSourceSampler(gpu);
+  const sampler = createDevelopSampler(gpu);
 
   const image = uploadRawPixelsToGPU(
     gpu.device,
@@ -431,7 +431,7 @@ describe("pipeline construction", () => {
   it("accepts a params bind group built the way renderer.ts builds it", () => {
     const calcParams = createCalcParamsPipeline(gpu);
     const develop = createDevelopStage(gpu);
-    const sampler = createSourceSampler(gpu);
+    const sampler = createDevelopSampler(gpu);
     const image = uploadRawPixelsToGPU(
       gpu.device,
       linearisePixels(new Uint8Array(WIDTH * HEIGHT * 3)),
