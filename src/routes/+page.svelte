@@ -1547,18 +1547,18 @@
        multiples of 4px so the seams land on whole device pixels at every
        common display scale. */
     .chrome-scrim::before {
-        --top: 44px;
-        --left: 55px;
-        --reach-x: 80px;
-        --reach-y: 64px;
+        --top: 55px;
+        --left: 68.75px;
+        --reach-x: 100px;
+        --reach-y: 80px;
         opacity: var(--scrimStrength);
     }
 
     .chrome-scrim::after {
-        --top: 110px;
-        --left: 137.5px;
-        --reach-x: 200px;
-        --reach-y: 160px;
+        --top: 143px;
+        --left: 178.75px;
+        --reach-x: 260px;
+        --reach-y: 208px;
         opacity: calc(var(--scrimStrength) * 0.35);
     }
 
@@ -1584,12 +1584,12 @@
         z-index: 1;
     }
 
-    /* At the foot of the icon column, clear of the window's bottom edge the
-       toolbar bleeds down to. */
+    /* At the foot of the icon column, its label as far from the window's bottom
+       edge as from its left. */
     .toolbar-zoom {
         left: 0;
         right: 6px;
-        bottom: 24px;
+        bottom: -3px;
         z-index: 1;
         transition: opacity 0.2s ease;
     }
