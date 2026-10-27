@@ -77,13 +77,9 @@
         data-tauri-drag-region
         class="chrome chrome-leading flex items-center gap-2.5"
     >
-        <img
-            data-tauri-drag-region
-            class="app-icon h-5.5 w-5.5"
-            src="favicon.png"
-            alt=""
-            aria-hidden="true"
-        />
+        <span data-tauri-drag-region class="app-icon flex" aria-hidden="true">
+            <span data-tauri-drag-region class="app-icon-glyph h-5.5 w-5.5"></span>
+        </span>
         <div class="menu-buttons flex gap-1">
             <MenuButton
                 label="File"
@@ -300,9 +296,17 @@
     }
 
     .app-icon {
-        /* The artwork is its own silhouette; a plain shadow separates it from
-           bright pixels the way the text-shadows do for everything else. */
+        /* On a wrapper, since the glyph's own mask would clip the shadow. */
         filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+    }
+
+    /* The artwork used as a silhouette, inked like the menus so it follows the
+       theme. */
+    .app-icon-glyph {
+        display: block;
+        background-color: var(--color2);
+        -webkit-mask: url("/favicon.png") center / contain no-repeat;
+        mask: url("/favicon.png") center / contain no-repeat;
     }
 
     .chrome-trailing button {
