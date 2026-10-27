@@ -1612,6 +1612,8 @@
 
     .side-bar {
         min-width: 300px;
+        /* A faint lift so labels and values hold up over a bright image. */
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
         position: relative;
         z-index: 10;
         pointer-events: auto;

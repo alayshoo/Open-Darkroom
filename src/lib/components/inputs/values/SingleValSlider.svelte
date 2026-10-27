@@ -181,7 +181,7 @@
 <style>
     .slider-container {
         user-select: none;
-        filter: drop-shadow(0 0 12px #00000040);
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3)) drop-shadow(0 0 12px #00000040);
     }
 
     .slider {
