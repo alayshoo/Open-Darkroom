@@ -60,6 +60,7 @@
     } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
+    import { holdPageZoom } from "$lib/utils/pageZoomGuard";
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
     import { exportImage } from "$lib/utils/exportImage";
     import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
@@ -99,6 +100,8 @@
     $effect(() => {
         document.documentElement.dataset.theme = isDarkroom ? "darkroom" : "";
     });
+
+    $effect(() => holdPageZoom());
 
     /* Both pager masks are suspended while the strip is in transit. Each
        mask-image forces its own offscreen render surface — .controls-page's
