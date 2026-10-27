@@ -112,7 +112,7 @@
 
 <style>
     .overlay {
-        padding: 52px 12px 12px;
+        padding: 44px 12px 12px;
     }
 
     /* Everything the background gets: one dim, one blur, under the dialog

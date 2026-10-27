@@ -1437,9 +1437,8 @@
     }
 
     .app-shell {
-        /* 40px of title bar controls + the same 12px inset used on the other
-           three sides */
-        top: 52px;
+        /* 32px title bar + the same 12px inset used on the other three sides */
+        top: 44px;
         bottom: 12px;
         left: 12px;
         right: 12px;
@@ -1462,7 +1461,7 @@
         /* Breathing room so a fitted image never touches the panels. The left
            is shorter because the toolbar's buttons sit inside its column, so
            this leaves the same gap to them as to the side bar. */
-        inset: 36px 36px 36px 26px;
+        inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
     }
@@ -1548,18 +1547,18 @@
        multiples of 4px so the seams land on whole device pixels at every
        common display scale. */
     .chrome-scrim::before {
-        --top: 60.5px;
-        --left: 79.75px;
-        --reach-x: 116px;
-        --reach-y: 88px;
+        --top: 55px;
+        --left: 68.75px;
+        --reach-x: 100px;
+        --reach-y: 80px;
         opacity: var(--scrimStrength);
     }
 
     .chrome-scrim::after {
-        --top: 154px;
-        --left: 192.5px;
-        --reach-x: 280px;
-        --reach-y: 224px;
+        --top: 143px;
+        --left: 178.75px;
+        --reach-x: 260px;
+        --reach-y: 208px;
         opacity: calc(var(--scrimStrength) * 0.35);
     }
 
@@ -1567,8 +1566,8 @@
        top and bottom edges so its buttons sit on the scrim's left band. */
     .toolbar {
         position: relative;
-        margin: -52px 0 -12px -12px;
-        min-width: 60px;
+        margin: -44px 0 -12px -12px;
+        min-width: 48px;
         z-index: 10;
         pointer-events: auto;
     }
@@ -1579,17 +1578,18 @@
 
     .toolbar-tools {
         transition: opacity 0.2s ease;
-        padding-top: 49px;
+        padding-top: 50px;
+        padding-right: 6px;
         gap: 4px;
         z-index: 1;
     }
 
-    /* At the foot of the icon column. The button's chip is inset 3px inside its
-       box, so this puts the chip 12px from the window's bottom edge. */
+    /* At the foot of the icon column. The button's chip, inset 3px inside its
+       box, sits as far from the window's bottom edge as from its left. */
     .toolbar-zoom {
         left: 0;
-        right: 0;
-        bottom: 9px;
+        right: 6px;
+        bottom: 0;
         z-index: 1;
         transition: opacity 0.2s ease;
     }

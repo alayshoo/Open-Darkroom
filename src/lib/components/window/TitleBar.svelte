@@ -68,7 +68,8 @@
 >
     <div data-tauri-drag-region class="drag absolute inset-0"></div>
 
-    <!-- Leading group, 12px in from the window's top and left edges. The groups sit above the drag layer, so the gaps
+    <!-- Leading group. Left edge on 12px, the same column the toolbar strip
+         below it occupies. The groups sit above the drag layer, so the gaps
          between their elements and the icon opt back into dragging; Tauri
          matches the attribute on the event target itself, so the buttons
          inside are unaffected. -->
@@ -158,7 +159,8 @@
         style="pointer-events: {editable && !settings.open ? 'auto' : 'none'}"
     />
 
-    <!-- Trailing group, 12px in from the window's top and right edges. -->
+    <!-- Trailing group. The buttons sit 5px in from the window's right edge,
+         the same as from its top. -->
     <div
         data-tauri-drag-region
         class="chrome chrome-trailing flex items-center gap-0.5"
@@ -252,7 +254,7 @@
         top: 0;
         left: 0;
         right: 0;
-        height: 52px;
+        height: 38px;
         z-index: 1001;
 
         font-family: "Figtree", sans-serif;
@@ -280,11 +282,12 @@
         pointer-events: auto;
     }
 
-    /* 28px controls 12px down, centred in the 52px band, so they clear the
-       panel line at 52px by the same 12px the panels keep everywhere else. */
+    /* 28px controls centred in the 38px band, so they end on 33px and clear
+       the panel line at 44px by 11px — near enough the 12px rhythm the panels
+       keep between themselves. */
     .chrome {
         position: absolute;
-        top: 12px;
+        top: 5px;
         pointer-events: auto;
     }
 
@@ -293,7 +296,7 @@
     }
 
     .chrome-trailing {
-        right: 12px;
+        right: 5px;
     }
 
     .app-icon {
