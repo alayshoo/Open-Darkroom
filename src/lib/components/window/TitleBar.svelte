@@ -159,14 +159,14 @@
         style="pointer-events: {editable && !settings.open ? 'auto' : 'none'}"
     />
 
-    <!-- Trailing group. Square buttons 5px in from the top and right edges, so
-         the close glyph sits as far from the window's right edge as its top. -->
+    <!-- Trailing group. The buttons sit 5px in from the window's right edge,
+         the same as from its top. -->
     <div
         data-tauri-drag-region
         class="chrome chrome-trailing flex items-center gap-0.5"
     >
         <button
-            class="inline-flex justify-center items-center h-7 w-7 rounded-[7px] border-0 cursor-auto"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={() => appWindow.minimize()}
             title="Minimize"
         >
@@ -184,7 +184,7 @@
             </svg>
         </button>
         <button
-            class="inline-flex justify-center items-center h-7 w-7 rounded-[7px] border-0 cursor-auto"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={handleToggleMaximize}
             title={isMaximized ? "Restore" : "Maximize"}
         >
@@ -225,7 +225,7 @@
             {/if}
         </button>
         <button
-            class="inline-flex justify-center items-center h-7 w-7 rounded-[7px] border-0 cursor-auto"
+            class="inline-flex justify-center items-center h-7 w-9 rounded-[7px] border-0 cursor-auto"
             onclick={() => appWindow.close()}
             title="Close"
         >

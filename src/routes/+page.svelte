@@ -1584,12 +1584,12 @@
         z-index: 1;
     }
 
-    /* At the foot of the icon column, its label as far from the window's bottom
-       edge as from its left. */
+    /* At the foot of the icon column. The button's chip, inset 3px inside its
+       box, sits as far from the window's bottom edge as from its left. */
     .toolbar-zoom {
         left: 0;
         right: 6px;
-        bottom: -3px;
+        bottom: 0;
         z-index: 1;
         transition: opacity 0.2s ease;
     }
