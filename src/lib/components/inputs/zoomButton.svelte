@@ -29,7 +29,7 @@
 <style>
 	/* Same ink as the crop button. */
 	.face-label {
-		color: var(--color2);
+		color: var(--chromeInk);
 		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 0.02em;

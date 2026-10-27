@@ -33,9 +33,8 @@
 </div>
 
 <style>
-	/* Same ink as the reset button, so it swings to red with the theme. */
 	.crop-button :global(svg) {
-		color: var(--color2);
+		color: var(--chromeInk);
 		position: relative;
 		/* Matches the title bar's glyphs, which sit on the same scrim. */
 		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));

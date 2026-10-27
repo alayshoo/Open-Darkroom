@@ -1500,48 +1500,66 @@
 
     /* The one gradient the window chrome sits on: down the left edge under the
        toolbar and across the top under the title bar, turning the corner
-       between them on a rounded inner edge. The top band fades to nothing at
-       44px, the panel line, so the panels' top rims are never dimmed. */
+       between them on a rounded inner edge. Two copies are stacked, a dense
+       band and a wide faint tail, and both ramp in on an eased curve, so
+       neither has a visible line where it starts. */
     .chrome-scrim {
-        --top: 44px;
-        --left: 55px;
-        /* Where the corner tile hands over to each band: each band's depth plus
-           an inner radius in proportion to it (20px and 25px). Kept on
-           multiples of 4px so the seams land on whole device pixels at every
-           common display scale. */
-        --reach-x: 80px;
-        --reach-y: 64px;
-        --scrim-edge: rgba(0, 0, 0, 0.55);
-        --scrim-mid: rgba(0, 0, 0, 0.34);
         position: fixed;
         inset: 0;
         z-index: 5;
         pointer-events: none;
+    }
+
+    .chrome-scrim::before,
+    .chrome-scrim::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        /* Smoothstep, from each band's inner edge out to the window edge. */
+        --ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
+            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
+            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
+        /* The corner tile runs the same ramp, pushed out past the inner radius
+           (the first 31.25% of the tile), so it meets both bands exactly. */
         background:
             radial-gradient(
                     var(--reach-x) var(--reach-y) at var(--reach-x)
                         var(--reach-y),
                     transparent 31.25%,
-                    var(--scrim-mid) 62.2%,
-                    var(--scrim-edge)
+                    rgba(0, 0, 0, 0.06) 41.56%,
+                    rgba(0, 0, 0, 0.22) 51.88%,
+                    rgba(0, 0, 0, 0.42) 62.19%,
+                    rgba(0, 0, 0, 0.65) 72.5%,
+                    rgba(0, 0, 0, 0.84) 82.81%,
+                    rgba(0, 0, 0, 0.97) 93.13%,
+                    black
                 )
                 0 0 / var(--reach-x) var(--reach-y) no-repeat,
-            linear-gradient(
-                    to bottom,
-                    var(--scrim-edge),
-                    var(--scrim-mid) 55%,
-                    transparent
-                )
-                var(--reach-x) 0 / calc(100% - var(--reach-x)) var(--top)
-                no-repeat,
-            linear-gradient(
-                    to right,
-                    var(--scrim-edge),
-                    var(--scrim-mid) 55%,
-                    transparent
-                )
-                0 var(--reach-y) / var(--left) calc(100% - var(--reach-y))
-                no-repeat;
+            linear-gradient(to top, var(--ramp)) var(--reach-x) 0 /
+                calc(100% - var(--reach-x)) var(--top) no-repeat,
+            linear-gradient(to left, var(--ramp)) 0 var(--reach-y) /
+                var(--left) calc(100% - var(--reach-y)) no-repeat;
+        transition: opacity 0.5s ease;
+    }
+
+    /* Each band's depth, and where the corner tile hands over to it: the depth
+       plus an inner radius in proportion to it. The hand-overs stay on
+       multiples of 4px so the seams land on whole device pixels at every
+       common display scale. */
+    .chrome-scrim::before {
+        --top: 44px;
+        --left: 55px;
+        --reach-x: 80px;
+        --reach-y: 64px;
+        opacity: var(--scrimStrength);
+    }
+
+    .chrome-scrim::after {
+        --top: 110px;
+        --left: 137.5px;
+        --reach-x: 200px;
+        --reach-y: 160px;
+        opacity: calc(var(--scrimStrength) * 0.35);
     }
 
     /* The icon column. It bleeds past the shell's insets to the window's left,

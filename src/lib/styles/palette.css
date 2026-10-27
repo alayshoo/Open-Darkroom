@@ -15,6 +15,12 @@
 
     --sliderTrack: #636363;
 
+    /* Glyphs that sit straight on the image, on the window-edge scrim, rather
+       than on a panel. */
+    --chromeInk: #ffffff;
+    /* Opacity of that scrim. Theme swaps animate it as plain opacity. */
+    --scrimStrength: 0.6;
+
     /* The field the image is centred on. Stays neutral grey in both themes —
        it is what the eye reads colour against, so a cast here would throw off
        every judgement made on the image. Darkroom only takes it down a step. */
@@ -63,6 +69,9 @@
     --panelInnerShadowSpread: 16px;
 
     --sliderTrack: #430000;
+
+    --chromeInk: #FF0A0A;
+    --scrimStrength: 0.88;
 
     --canvasBackdrop: #1f1f1f;
 
