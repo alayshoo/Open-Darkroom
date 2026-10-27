@@ -407,4 +407,27 @@ describe("the preview renderer", () => {
         }
         expect(created).toEqual([]);
     });
+
+    it("sizes its scratch to the image on screen until a zoom starts", () => {
+        const developed: number[] = [];
+        const createTexture = gpu.device.createTexture.bind(gpu.device);
+        gpu.device.createTexture = (d: GPUTextureDescriptor) => {
+            if (d.label === "Developed Image") developed.push((d.size as GPUExtent3DDict).width);
+            return createTexture(d);
+        };
+        const [w, h] = [3000, 2000];
+        const small: Slot = { center: [w / 2, h / 2], width: 600, height: 400 };
+        const at = (zoom: number | null) =>
+            viewFrame(cropLayout(FULL_FRAME, WIDTH, HEIGHT, small, zoom, null), w, h, WIDTH, HEIGHT);
+        try {
+            renderer.loadImage(uploadRawPixelsToGPU(gpu.device, linearise(source), WIDTH, HEIGHT, true), SRGB_TO_WORKING);
+            renderer.setFrame(at(null));
+            expect(developed.at(-1)).toBeLessThan(w);
+            renderer.setFrame(at(1));
+            expect(developed.at(-1)).toBeGreaterThanOrEqual(w);
+        } finally {
+            gpu.device.createTexture = createTexture;
+            renderer.setFrame(viewFrame(cropLayout(FULL_FRAME, WIDTH, HEIGHT, slot, null, null), CANVAS_W, CANVAS_H, WIDTH, HEIGHT));
+        }
+    });
 });

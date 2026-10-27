@@ -22,9 +22,9 @@ pub use crate::shaders::{
     DEVELOP_WGSL,
 };
 
-/// Format the render chain hands between its stages. Must match
-/// `WORKING_FORMAT` in `src/lib/types/gpuTypes.ts` — see the note there on why
-/// the intermediates are 32-bit float rather than 16.
+/// Format the render chain hands between its stages. 32-bit float rather than
+/// 16: a large-radius band is the difference of two similar averages, which a
+/// narrower mantissa quantises. The preview trades this for memory.
 pub const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Format the export uploads the source image in.
@@ -36,8 +36,7 @@ pub const WORKING_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float
 /// it renders to an 8-bit display, so there is nothing there to lose.
 pub const INPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
-/// Format of the sharpness textures. Must match `SHARP_FORMAT` in
-/// `src/lib/types/gpuTypes.ts`.
+/// Format of the sharpness textures, 32-bit for the same reason.
 pub const SHARP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Size of the `SharpParams` struct written by calcParams.wgsl and read by

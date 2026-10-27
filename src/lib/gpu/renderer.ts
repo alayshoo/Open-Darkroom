@@ -161,11 +161,13 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     debugStats.supportsPassTimings = frameTimer.available;
     let lastFrameStart = 0;
 
-    // Scratch for one run of the chain, sized from the canvas so a gesture
-    // never reallocates. The blur textures wait until sharpening is first
+    // Scratch for one run of the chain, sized from what the image covers on
+    // the canvas, and from the whole canvas once a zoom starts, so a gesture
+    // reallocates at most once. The blur textures wait until sharpening is first
     // visible; until then composite reads the developed texture in their place.
     let capacity = { width: 0, height: 0 };
     let canvasSize = { width: 0, height: 0 };
+    let freshImage = true;
     let viewTexture: GPUTexture | null = null;
     let developTexture: GPUTexture | null = null;
     let sharpHTexture: GPUTexture | null = null;
@@ -290,6 +292,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         releaseHeld(detail);
         releaseHeld(backdrop);
         detail = backdrop = null;
+        freshImage = true;
     }
 
     function setSource(image: GPUImage) {
@@ -303,25 +306,31 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             next.toImage.origin.some((v, i) => v !== frame!.toImage.origin[i]) ||
             next.toImage.axisX.some((v, i) => v !== frame!.toImage.axisX[i]);
         if (moved) movedAt = performance.now();
+        const resized = next.canvasWidth !== canvasSize.width || next.canvasHeight !== canvasSize.height;
+        const zoomingIn = !resized && !freshImage && !!frame && next.scale > frame.scale;
         frame = next;
 
-        if (next.canvasWidth !== canvasSize.width || next.canvasHeight !== canvasSize.height) {
+        if (resized) {
             canvasSize = { width: next.canvasWidth, height: next.canvasHeight };
-            const reach = 2 * (PAN_MARGIN + MAX_APRON + 2);
-            const width = next.canvasWidth + reach;
-            const height = next.canvasHeight + reach;
-            const previous = capacity;
-            // Shrinks only once the scratch is well past what the canvas needs,
-            // so dragging a window edge does not reallocate on every frame.
-            if (2 * width * height < capacity.width * capacity.height) capacity = { width: 0, height: 0 };
-            fitScratch(width, height, !!sharpHTexture);
-            // The backdrop is sized to the scratch, so it follows the canvas.
-            if (capacity.width !== previous.width || capacity.height !== previous.height) {
-                releaseHeld(backdrop);
-                backdrop = null;
-                backdropStale = true;
-            }
+            // The backdrop is sized from the canvas.
+            backdropStale = true;
         }
+        if (!resized && !zoomingIn && !freshImage) return;
+
+        const reach = 2 * (PAN_MARGIN + MAX_APRON + 2);
+        const shown = zoomingIn ? [0, 0, next.canvasWidth, next.canvasHeight] : visibleRegion(next)?.canvas;
+        const width = Math.ceil(shown ? shown[2] - shown[0] : 0) + reach;
+        const height = Math.ceil(shown ? shown[3] - shown[1] : 0) + reach;
+        // Shrinks only once the scratch is well past what is needed, so
+        // dragging a window edge does not reallocate on every frame.
+        if (!zoomingIn && 2 * width * height < capacity.width * capacity.height) {
+            capacity = { width: 0, height: 0 };
+            releaseHeld(backdrop);
+            backdrop = null;
+            backdropStale = true;
+        }
+        fitScratch(width, height, !!sharpHTexture);
+        freshImage = false;
     }
 
     function markStale() {
@@ -447,11 +456,15 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         recordFullScreenPass(encoder, composite, output.createView(), compositeBindGroup!, options("composite", scissor));
     }
 
+    // The whole image at about half the canvas's resolution: it only fills in
+    // until the sharp region catches up.
     function renderBackdrop(view: ViewFrame, image: GPUImage) {
         const { fullWidth, fullHeight } = view;
-        const fit = backdropScale(fullWidth, fullHeight, image.width / fullWidth, capacity.width, capacity.height, MAX_APRON);
+        const width = Math.ceil(view.canvasWidth / 2) + 2 * MAX_APRON + 4;
+        const height = Math.ceil(view.canvasHeight / 2) + 2 * MAX_APRON + 4;
+        const fit = backdropScale(fullWidth, fullHeight, image.width / fullWidth, width, height, MAX_APRON);
         const apron = sharpnessReach(currentSliders, fit, fullWidth, fullHeight);
-        const region = planRegion(neededBox([0, 0, fullWidth, fullHeight], fit), fit, apron, 0, fullWidth, fullHeight, capacity.width);
+        const region = planRegion(neededBox([0, 0, fullWidth, fullHeight], fit), fit, apron, 0, fullWidth, fullHeight, Math.max(width, height));
         backdrop = outputFor(backdrop, region, "Backdrop");
         const encoder = gpu.device.createCommandEncoder({ label: "Render Backdrop" });
         recordChain(encoder, view, image, region, backdrop.texture, false);

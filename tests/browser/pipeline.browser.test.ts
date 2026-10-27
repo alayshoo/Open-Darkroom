@@ -457,8 +457,9 @@ describe("develop chain through the frontend pipelines", () => {
     const source = rampChart();
     const out = await develop(source, defaultSlidersRGB);
 
+    // Half-float intermediates cost a level near black in saturated colours.
     for (let i = 0; i < source.length; i++) {
-      expect(Math.abs(out[i] - source[i])).toBeLessThanOrEqual(2);
+      expect(Math.abs(out[i] - source[i])).toBeLessThanOrEqual(3);
     }
   });
 

@@ -12,7 +12,7 @@ a real browser, only to prove the TypeScript wiring agrees with L2.
 
 L2 and L3 need a GPU. L3 runs **headed** — headless Chromium returns no WebGPU adapter.
 
-Nothing is `#[ignore]`d. 281 Rust tests, 162 TypeScript, 51 in-browser.
+Nothing is `#[ignore]`d. 281 Rust tests, 162 TypeScript, 52 in-browser.
 
 ---
 
