@@ -94,6 +94,7 @@
 	/* Same ink as the reset button, so it swings to red with the theme. */
 	.crop-tools :global(svg) {
 		color: var(--color2);
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
 		position: relative;
 		margin: auto;
 	}

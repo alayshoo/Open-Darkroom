@@ -44,7 +44,7 @@
      * literal white for the same reason — see the note there.
      */
     --glassRim: #ffffff;
-    --glassTint: rgba(0, 0, 0, 0.3);
+    --glassTint: rgba(0, 0, 0, 0.58);
     --glassSaturate: 80%;
     --glassBrightness: 108%;
 }
@@ -66,11 +66,9 @@
 
     --canvasBackdrop: #1f1f1f;
 
-    /* Alpha only — same black, more of it. Over the darkroom backdrop this
-       takes the panels from about #171717 to #0c0c0c. The red in this mode
-       comes from the text and the --bg* fills; the glass just gets out of
-       the way. */
-    --glassTint: rgba(0, 0, 0, 0.65);
+    /* Alpha only — same black, more of it. The red in this mode comes from
+       the text and the --bg* fills; the glass just gets out of the way. */
+    --glassTint: rgba(0, 0, 0, 0.78);
 }
 
 /* Smooth theme transition (matches pager blur duration).

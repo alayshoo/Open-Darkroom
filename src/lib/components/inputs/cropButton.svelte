@@ -37,5 +37,7 @@
 	.crop-button :global(svg) {
 		color: var(--color2);
 		position: relative;
+		/* Matches the title bar's glyphs, which sit on the same scrim. */
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
 	}
 </style>
