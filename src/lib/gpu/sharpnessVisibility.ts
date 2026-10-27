@@ -37,3 +37,33 @@ export function sharpnessIsVisible(sliders: Sliders, renderScale: number): boole
     if (sliders.usmAmount !== 0 && resolvable(sliders.usmRadius)) return true;
     return false;
 }
+
+// Must match TEXTURE_SIGMA_HI, CLARITY_SIGMA_FRACTION, MAX_CLARITY_SIGMA and
+// MIN_SIGMA in calcParams.wgsl, and MAX_RADIUS in calcSharpTexture.wgsl.
+const TEXTURE_SIGMA_HI = 5.0;
+const CLARITY_SIGMA_FRACTION = 0.01;
+const MAX_CLARITY_SIGMA = 60.0;
+const MIN_SIGMA = 0.7;
+const MAX_RADIUS = 180;
+
+/**
+ * How many render pixels the blurs read on either side of a pixel, or 0 when
+ * the sharpness stage is skipped. Mirrors `sharp_margin_rows` in
+ * export_rendering.rs, brought down to the render scale, and errs wide.
+ */
+export function sharpnessReach(
+    sliders: Sliders,
+    renderScale: number,
+    fullWidth: number,
+    fullHeight: number,
+): number {
+    if (!sharpnessIsVisible(sliders, renderScale)) return 0;
+    let sigma = 0;
+    if (sliders.usmAmount !== 0) sigma = Math.max(sigma, sliders.usmRadius);
+    if (sliders.texture !== 0) sigma = Math.max(sigma, TEXTURE_SIGMA_HI);
+    if (sliders.clarity !== 0) {
+        const clarity = Math.min(fullWidth, fullHeight) * CLARITY_SIGMA_FRACTION;
+        sigma = Math.max(sigma, Math.min(Math.max(clarity, MIN_CLARITY_SIGMA), MAX_CLARITY_SIGMA));
+    }
+    return Math.min(MAX_RADIUS, Math.ceil(3 * Math.max(sigma * renderScale, 2 * MIN_SIGMA)));
+}

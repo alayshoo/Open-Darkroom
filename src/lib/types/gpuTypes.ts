@@ -37,22 +37,20 @@ export interface GPUImage {
 }
 
 
-// Format of the textures the render chain hands between its stages.
-//
-// 32-bit float rather than 16: the stages after develop work on differences
-// between neighbouring pixels, and a large-radius band is the difference of two
-// similar averages. At f16's 11-bit mantissa a band of 0.001 taken from values
-// around 0.5 has barely two bits left, which shows up as quantised local
-// contrast on smooth gradients. It also keeps the split exact — the develop
-// output reaches the final clamp bit for bit.
-export const WORKING_FORMAT: GPUTextureFormat = "rgba32float";
+// Format of the textures the preview's render chain hands between its stages.
+// Half float to halve the GPU memory of window-sized textures; against 32-bit it
+// moves an 8-bit display by at most one level. The export keeps 32-bit.
+export const WORKING_FORMAT: GPUTextureFormat = "rgba16float";
+
+// Format of the texture the view sample stage resamples the source into. Half
+// float like the source itself, and filterable, which develop needs since it
+// samples rather than loads.
+export const VIEW_FORMAT: GPUTextureFormat = "rgba16float";
 
 // Format of the sharpness textures — four blurred lumas in the intermediate,
 // three bands and a blurred luma in the output. Same precision as the working
-// format, and the precision is the point: a band is the difference of two nearly
-// equal averages, which is exactly where a narrower mantissa shows up as
-// quantised local contrast on smooth gradients.
-export const SHARP_FORMAT: GPUTextureFormat = "rgba32float";
+// format, for the same reason.
+export const SHARP_FORMAT: GPUTextureFormat = "rgba16float";
 
 
 // One stage of the render chain: a full-screen quad reading bound resources and
@@ -69,25 +67,25 @@ export interface RenderStage {
 import type { Sliders } from "./imgParameters";
 import type { ToneMap } from "./toneMap";
 import type { CurveChannel } from "./curves";
-import type { Crop, CropView } from "./crop";
+import type { Crop } from "./crop";
+import type { ViewFrame } from "$lib/utils/viewport";
 
 export interface Renderer {
     // `srcToWorking` is passed alongside the texture rather than set separately
     // so the two cannot disagree: a new image with a previous image's primaries
     // would render wrong colours with nothing to indicate why.
     loadImage: (image: GPUImage, srcToWorking: Float32Array) => void;
+    // Swaps in a finer copy of the same image, once it has arrived.
+    setSource: (image: GPUImage) => void;
     setSliders: (sliders: Sliders) => void;
     // Where the preview is being encoded to, and the export space it is being
     // proofed against — `null` for a preview showing the display's own gamut.
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
-    setView: (renderScale: number, fullWidth: number, fullHeight: number) => void;
     setToneMap: (toneMap: ToneMap) => void;
     // The baked point curves, or null while every curve is the identity.
     setCurves: (lut: Float32Array | null) => void;
-    // Which part of the image reaches the canvas, in preview pixels. The canvas
-    // has to be sized to match.
-    // `keep` is the box, in canvas pixels, outside which the image is shaded.
-    setCrop: (view: CropView, keep?: [number, number, number, number]) => void;
+    // Where the image sits on the canvas, and what of it is drawn.
+    setFrame: (frame: ViewFrame) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
     requestRender: () => void;

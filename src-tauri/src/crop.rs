@@ -4,7 +4,7 @@
 // the source that colorSpaceEncode.wgsl samples through.
 
 /// Size of the `CropView` uniform declared in chunks/cropView.wgsl.
-pub const CROP_VIEW_BYTES: usize = 48;
+pub const CROP_VIEW_BYTES: usize = 80;
 
 #[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -176,7 +176,16 @@ pub fn crop_view_to_bytes(view: &CropView) -> [u8; CROP_VIEW_BYTES] {
         view.axis_y[1],
         view.width as f64,
         view.height as f64,
-        // The shade box covers everything: only the crop tool's preview draws one.
+        // The shade, image and clip boxes cover everything: only the preview
+        // draws past the edges of what it renders.
+        -1e30,
+        -1e30,
+        1e30,
+        1e30,
+        -1e30,
+        -1e30,
+        1e30,
+        1e30,
         -1e30,
         -1e30,
         1e30,

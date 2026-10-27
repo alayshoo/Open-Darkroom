@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "Open Darkroom",
+        "width": 1000,
+        "minWidth": 700,
+        "height": 800,
+        "minHeight": 500,
+        "backgroundColor": "#000000",
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-webgpu-developer-features",
+        "zoomHotkeysEnabled": true
+      }
+    ]
+  }
+}

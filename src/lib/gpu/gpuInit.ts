@@ -25,8 +25,11 @@ export async function initializeGPU(): Promise<GPUSession> {
 
     // Request a device — logical handle
     // All GPU objects (buffers, textures, pipelines) belong to a device.
+    // The largest texture the adapter allows, rather than the default 8192, so
+    // most full-resolution images fit in one texture.
     const device = await adapter.requestDevice({
         requiredFeatures: canTimestamp ? ["timestamp-query"] : [],
+        requiredLimits: { maxTextureDimension2D: adapter.limits.maxTextureDimension2D },
     });
 
     // Format is the pixel format the display expects.

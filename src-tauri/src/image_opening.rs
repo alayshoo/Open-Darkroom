@@ -15,6 +15,7 @@ use crate::color::{
     linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
 };
 use crate::crop::{crop_view, CropPayload, CropView};
+use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
@@ -67,6 +68,11 @@ pub struct OriginalImage {
     /// because export has to decode the same buffer the same way, at its own
     /// table width.
     pub space: SourceSpace,
+    /// What the preview's full-resolution texture is streamed from.
+    pub full_resolution: Arc<FullResolution>,
+    /// The frontend's tag for this open, so a band asked for an image that has
+    /// since been replaced is refused rather than cut from the new one.
+    pub id: u32,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -497,6 +503,7 @@ pub const OPEN_CANCELLED: &str = "open:cancelled";
 pub(crate) async fn open_image_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, ImageState>,
+    image_id: u32,
 ) -> Result<Response, String> {
     println!("open_image_file: started");
 
@@ -553,6 +560,8 @@ pub(crate) async fn open_image_file(
             height: full_height,
             channels,
             space,
+            full_resolution: Arc::default(),
+            id: image_id,
         });
     }
 

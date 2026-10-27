@@ -80,9 +80,19 @@ describe("openImage", () => {
 
     const image = await open();
 
-    expect(invoke).toHaveBeenCalledWith("open_image_file");
+    expect(invoke).toHaveBeenCalledWith("open_image_file", { imageId: image.imageId });
     expect(image.width).toBe(9);
     expect(image.height).toBe(5);
+  });
+
+  it("tags each open with a new image id", async () => {
+    invoke.mockResolvedValue(payload(9, 5, () => 0));
+
+    const first = await open();
+    const second = await open();
+
+    expect(second.imageId).not.toBe(first.imageId);
+    expect(invoke).toHaveBeenLastCalledWith("open_image_file", { imageId: second.imageId });
   });
 
   it("reads the full resolution the preview was downscaled from", async () => {

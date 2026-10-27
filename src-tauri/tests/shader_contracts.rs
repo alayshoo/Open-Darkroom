@@ -41,6 +41,21 @@ fn typescript_matches_the_cancelled_open_sentinel() {
     );
 }
 
+/// Tauri replaces the window list outright when it merges a platform config, so
+/// the Windows one repeats the whole window. Past the keys it exists to add, it
+/// has to stay what every other platform gets.
+#[test]
+fn the_windows_window_differs_from_the_shared_one_only_by_its_own_keys() {
+    let window = |config: &str| {
+        let json: serde_json::Value = serde_json::from_str(config).expect("valid JSON");
+        json["app"]["windows"][0].as_object().expect("one window").clone()
+    };
+    let shared = window(include_str!("../tauri.conf.json"));
+    let mut windows = window(include_str!("../tauri.windows.conf.json"));
+    windows.remove("zoomHotkeysEnabled");
+    assert_eq!(windows, shared, "tauri.windows.conf.json has drifted from tauri.conf.json");
+}
+
 /// The in-browser suite keeps its own copy of the untagged-file matrix so it can
 /// drive the chain the way the Rust suite does. A copy that drifts would leave
 /// those tests asserting a conversion the app no longer performs — and they are

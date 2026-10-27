@@ -10,4 +10,11 @@ struct CropView {
   // draws a box; everything else passes one that covers the whole output.
   keep_min: vec2f,
   keep_max: vec2f,
+  // Output pixels that land outside this box of source texels, or outside the
+  // clip box of output pixels, are left clear. Only the preview passes boxes
+  // that bind: it renders a region of the image onto a canvas larger than it.
+  image_min: vec2f,
+  image_max: vec2f,
+  clip_min: vec2f,
+  clip_max: vec2f,
 }

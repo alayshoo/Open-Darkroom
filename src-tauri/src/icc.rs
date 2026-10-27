@@ -11,8 +11,8 @@
 // them — a third of Rec.2020's red comes from sRGB's green.
 
 use lcms2::{
-    CIExyY, CIExyYTRIPLE, ColorSpaceSignature, Intent, PixelFormat, Profile, Tag, TagSignature,
-    ToneCurve, Transform,
+    CIExyY, CIExyYTRIPLE, ColorSpaceSignature, DisallowCache, Flags, Intent, PixelFormat, Profile,
+    Tag, TagSignature, ThreadContext, ToneCurve, Transform,
 };
 
 use crate::color::{srgb_to_linear, LUT_SIZE};
@@ -131,7 +131,7 @@ impl SourceSpace {
                 // neither decomposable nor convertible is no more use than an
                 // unreadable one, and gets the same answer rather than failing
                 // the open later, once the pixels have been committed to.
-                None if bake_transform(&profile).is_ok() => Self {
+                None if bake_transform(&bytes).is_ok() => Self {
                     icc: Some(bytes),
                     to_working: IDENTITY,
                     baked: true,
@@ -229,23 +229,33 @@ impl SourceSpace {
     /// profile maps into a bounded gamut to begin with, and because the
     /// alternative is a second resampling path for the rarest input.
     pub fn bake(&self, src: &[u16], channels: usize) -> Result<Option<Vec<u16>>, String> {
+        self.baker()?.map(|b| b.apply(src, channels)).transpose()
+    }
+
+    /// The conversion [`Self::bake`] runs, built once for a caller that bakes
+    /// many slices of the same image. `Ok(None)` off the baked path.
+    pub fn baker(&self) -> Result<Option<Baker>, String> {
         if !self.baked {
             return Ok(None);
         }
+        let icc = self
+            .icc
+            .as_deref()
+            .ok_or("colour profile missing from a baked source space")?;
+        bake_transform(icc).map(|t| Some(Baker(t)))
+    }
+}
 
+/// A built baked-path conversion, shareable between threads.
+pub struct Baker(Transform<[u16; 3], [u16; 3], ThreadContext, DisallowCache>);
+
+impl Baker {
+    pub fn apply(&self, src: &[u16], channels: usize) -> Result<Vec<u16>, String> {
         // Reading three channels per pixel below, so a narrower stride would
         // index past the end rather than return the caller's own error.
         if channels < 3 {
             return Err(format!("channels must be 3 (RGB) or 4 (RGBA), got {channels}"));
         }
-
-        let icc = self
-            .icc
-            .as_deref()
-            .ok_or("colour profile missing from a baked source space")?;
-        let profile =
-            Profile::new_icc(icc).map_err(|e| format!("Failed to read colour profile: {e}"))?;
-        let transform = bake_transform(&profile)?;
 
         // Transformed three-wide and rewoven afterwards: lcms2 does not carry
         // an extra channel through unless told to, and alpha has no business in
@@ -254,7 +264,7 @@ impl SourceSpace {
             .chunks_exact(channels)
             .map(|px| [px[0], px[1], px[2]])
             .collect();
-        transform.transform_in_place(&mut rgb);
+        self.0.transform_in_place(&mut rgb);
 
         let mut out = vec![0u16; src.len()];
         for (i, px) in rgb.iter().enumerate() {
@@ -264,16 +274,21 @@ impl SourceSpace {
                 out[at + 3] = src[at + 3];
             }
         }
-        Ok(Some(out))
+        Ok(out)
     }
 }
 
 /// The source → linear working space conversion the baked path runs, built
 /// once here so that [`SourceSpace::resolve`] can ask whether it exists before
 /// committing a file to that path.
-fn bake_transform(profile: &Profile) -> Result<Transform<[u16; 3], [u16; 3]>, String> {
+fn bake_transform(
+    icc: &[u8],
+) -> Result<Transform<[u16; 3], [u16; 3], ThreadContext, DisallowCache>, String> {
+    let profile = Profile::new_icc_context(ThreadContext::new(), icc)
+        .map_err(|e| format!("Failed to read colour profile: {e}"))?;
     let linear = ToneCurve::new(1.0);
-    let working = Profile::new_rgb(
+    let working = Profile::new_rgb_context(
+        ThreadContext::new(),
         &CIExyY {
             x: D65[0],
             y: D65[1],
@@ -291,12 +306,14 @@ fn bake_transform(profile: &Profile) -> Result<Transform<[u16; 3], [u16; 3]>, St
     // The pixel type has to be three wide, not one: lcms2 checks it against the
     // format's bytes per pixel and panics on a mismatch, so a `u16` element
     // type against RGB_16 never reaches the conversion at all.
-    Transform::new(
-        profile,
+    Transform::new_flags_context(
+        ThreadContext::new(),
+        &profile,
         PixelFormat::RGB_16,
         &working,
         PixelFormat::RGB_16,
         Intent::RelativeColorimetric,
+        Flags::NO_CACHE,
     )
     .map_err(|e| format!("Failed to build the colour conversion: {e}"))
 }

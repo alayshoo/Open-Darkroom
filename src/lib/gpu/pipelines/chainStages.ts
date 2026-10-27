@@ -8,15 +8,22 @@
 
 import {
     SHARP_FORMAT,
+    VIEW_FORMAT,
     WORKING_FORMAT,
     type GPUSession,
     type RenderStage,
 } from "$lib/types/gpuTypes";
 import { createRenderStage, intermediateBinding } from "./renderStagePipeline";
+import viewSampleSource from "../shaders/viewSample.wgsl?raw";
 import developSource from "../shaders/develop.wgsl?raw";
 import calcSharpTextureSource from "../shaders/calcSharpTexture.wgsl?raw";
 import compositeSource from "../shaders/composite.wgsl?raw";
 import colorSpaceEncodeSource from "../shaders/colorSpaceEncode.wgsl?raw";
+
+const PREMULTIPLIED_OVER: GPUBlendState = {
+    color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+    alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+};
 
 // A read-only storage buffer of computed values, as calcParams.wgsl writes them.
 function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
@@ -25,6 +32,32 @@ function paramsBinding(binding: number): GPUBindGroupLayoutEntry {
         visibility: GPUShaderStage.FRAGMENT,
         buffer: { type: "read-only-storage" },
     };
+}
+
+// The source, resampled into the region of the image the chain is rendering.
+export function createViewSampleStage(gpu: GPUSession): RenderStage {
+    return createRenderStage(gpu, {
+        label: "View Sample",
+        code: viewSampleSource,
+        format: VIEW_FORMAT,
+        bindings: [
+            {
+                binding: 0, // sourceTexture
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+            {
+                binding: 1, // sourceSampler
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                binding: 2, // view
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+        ],
+    });
 }
 
 // Steps 1-12, from the source image into the perceptual working space.
@@ -88,10 +121,12 @@ export function createCompositeStage(gpu: GPUSession): RenderStage {
 
 // The output transform — the only stage that knows what it is rendering for, so
 // the only one targeting the destination format and the only one bound to the
-// uniform naming that destination. It also applies the crop.
-export function createEncodeStage(gpu: GPUSession): RenderStage {
+// uniform naming that destination. It also applies the crop. `over` blends
+// onto what the target holds, to lay the sharp region over the backdrop.
+export function createEncodeStage(gpu: GPUSession, over = false): RenderStage {
     return createRenderStage(gpu, {
-        label: "Colour Space Encode",
+        label: over ? "Colour Space Encode Over" : "Colour Space Encode",
+        blend: over ? PREMULTIPLIED_OVER : undefined,
         code: colorSpaceEncodeSource,
         format: gpu.format,
         bindings: [
@@ -110,13 +145,26 @@ export function createEncodeStage(gpu: GPUSession): RenderStage {
     });
 }
 
-// The source image is sampled rather than loaded, so the develop stage needs
-// this alongside its textures.
-export function createSourceSampler(gpu: GPUSession): GPUSampler {
+// Develop reads the view texture texel for texel, so nearest copies it
+// exactly wherever the region sits, as the export's sampler does.
+export function createDevelopSampler(gpu: GPUSession): GPUSampler {
     return gpu.device.createSampler({
-        label: "Source Image Sampler",
+        label: "Develop Sampler",
+        magFilter: "nearest",
+        minFilter: "nearest",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+    });
+}
+
+// The view sample stage's sampler: trilinear, so a source shrunk on screen is
+// read from the mip levels nearest its size rather than aliased from the top.
+export function createViewSampler(gpu: GPUSession): GPUSampler {
+    return gpu.device.createSampler({
+        label: "View Sampler",
         magFilter: "linear",
         minFilter: "linear",
+        mipmapFilter: "linear",
         addressModeU: "clamp-to-edge",
         addressModeV: "clamp-to-edge",
     });

@@ -169,16 +169,20 @@ export function fitCrop(c: Crop, width: number, height: number): Crop {
     return { ...c, cx, cy, w: c.w * scale, h: c.h * scale };
 }
 
+/** A point (x, y) mapped to `origin + x * axisX + y * axisY`. */
+export interface Affine {
+    origin: [number, number];
+    axisX: [number, number];
+    axisY: [number, number];
+}
+
 /**
  * Output pixels mapped back into a source of a given size: the source texel
  * coordinate of output point (x, y) is `origin + x * axisX + y * axisY`.
  */
-export interface CropView {
+export interface CropView extends Affine {
     width: number;
     height: number;
-    origin: [number, number];
-    axisX: [number, number];
-    axisY: [number, number];
 }
 
 /**
@@ -232,18 +236,21 @@ export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropV
 }
 
 /** The `CropView` uniform, as chunks/cropView.wgsl declares it. */
-export const CROP_VIEW_BUFFER_SIZE = 48;
+export const CROP_VIEW_BUFFER_SIZE = 80;
 
-/** A box no output pixel falls outside, so nothing is shaded. */
-const KEEP_ALL: [number, number, number, number] = [-1e30, -1e30, 1e30, 1e30];
+/** A box nothing falls outside, so it shades or clips nothing. */
+export const EVERYWHERE: [number, number, number, number] = [-1e30, -1e30, 1e30, 1e30];
 
 /**
  * `keep` is the box, in output pixels, outside which the output is shaded, as
- * [x0, y0, x1, y1].
+ * [x0, y0, x1, y1]. Outside `image`, in source texels, and outside `clip`, in
+ * output pixels, the output is left clear.
  */
 export function cropViewToFloats(
     view: CropView,
-    keep: [number, number, number, number] = KEEP_ALL,
+    keep: [number, number, number, number] = EVERYWHERE,
+    image: [number, number, number, number] = EVERYWHERE,
+    clip: [number, number, number, number] = EVERYWHERE,
 ): Float32Array {
     return new Float32Array([
         ...view.origin,
@@ -252,5 +259,7 @@ export function cropViewToFloats(
         view.width,
         view.height,
         ...keep,
+        ...image,
+        ...clip,
     ]);
 }

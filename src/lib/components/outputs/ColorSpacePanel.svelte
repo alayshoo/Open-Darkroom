@@ -17,6 +17,7 @@
     import { OUTPUT_SPACE_LABELS, WORKING_SPACE } from "$lib/gpu/outputSpace";
     import { type ImagePayload } from "$lib/types/imagePayload";
     import type { RolloffMode } from "$lib/types/toneMap";
+    import PreviewDebugCard from "./PreviewDebugCard.svelte";
 
     let {
         sliders,
@@ -447,6 +448,8 @@
             <span>{colorSpaceDebug.volume ? "drag to turn" : ""}</span>
         </p>
     </div>
+
+    <PreviewDebugCard />
 </div>
 
 <style>
