@@ -239,7 +239,6 @@ pub struct App {
     pub menu_switching: bool,
     pub title: String,
     pub editing: Editing,
-    pub error: Option<String>,
 
     // What the GPU was last told, so only changes are uploaded.
     sent_payload: Option<crate::export_rendering::SlidersPayload>,
@@ -249,7 +248,6 @@ pub struct App {
     pub histogram_dirty: bool,
     pub colour_space_dirty: bool,
     pub colour_space_view_dirty: bool,
-    pub canvas_dirty: bool,
 }
 
 impl App {
@@ -360,7 +358,6 @@ impl App {
             menu_switching: false,
             title: "Open Darkroom".into(),
             editing: Editing::default(),
-            error: None,
             sent_payload: None,
             sent_curves: None,
             sent_tone: None,
@@ -368,7 +365,6 @@ impl App {
             histogram_dirty: true,
             colour_space_dirty: true,
             colour_space_view_dirty: false,
-            canvas_dirty: true,
             gpu,
         };
         if let Some(path) = startup_path {

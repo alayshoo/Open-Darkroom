@@ -63,12 +63,12 @@ pub fn curve_editor(cx: &mut Cx, ui: &mut Ui, app: &mut App, x: f32, y: f32, wid
     }
 
     let at = |p: &Point| pos2(plot.left() + p.x as f32 * width, plot.top() + (1.0 - p.y as f32) * width);
-    let grid = Stroke::new(1.0, white(0.08));
+    let grid = Stroke::new(1.0_f32, white(0.08));
     for g in GRID {
         painter.line_segment([pos2(plot.left() + g * width, plot.top()), pos2(plot.left() + g * width, plot.bottom())], grid);
         painter.line_segment([pos2(plot.left(), plot.top() + g * width), pos2(plot.right(), plot.top() + g * width)], grid);
     }
-    let dashes = Shape::dashed_line(&[plot.left_bottom(), plot.right_top()], Stroke::new(1.0, white(0.12)), 3.0, 3.0);
+    let dashes = Shape::dashed_line(&[plot.left_bottom(), plot.right_top()], Stroke::new(1.0_f32, white(0.12)), 3.0, 3.0);
     painter.extend(dashes);
 
     // Inactive curves first, so the one being edited is drawn on top.
@@ -82,12 +82,12 @@ pub fn curve_editor(cx: &mut Cx, ui: &mut Ui, app: &mut App, x: f32, y: f32, wid
                 at(&Point { x: t, y: f.eval(t) })
             })
             .collect();
-        let (w, a) = if c == active { (1.75, 1.0) } else { (1.25, 0.3) };
+        let (w, a): (f32, f32) = if c == active { (1.75, 1.0) } else { (1.25, 0.3) };
         painter.add(Shape::line(points, Stroke::new(w, fade(colour(c), a))));
     }
     for p in &app.curves.0[active] {
         let c = at(p);
-        painter.circle(c, 4.0, Color32::BLACK, Stroke::new(1.5, colour(active)));
+        painter.circle(c, 4.0, Color32::BLACK, Stroke::new(1.5_f32, colour(active)));
     }
 
     // Editing.

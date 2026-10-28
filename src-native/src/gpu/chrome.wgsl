@@ -27,7 +27,6 @@ const INSET: u32 = 3u;
 const GLASS: u32 = 4u;
 const SCRIM: u32 = 5u;
 const RING: u32 = 6u;
-const RADIAL: u32 = 7u;
 
 struct Prim {
   @location(0) bounds: vec4f,
@@ -206,11 +205,6 @@ fn fs_main(in: VOut) -> @location(0) vec4f {
       // p0.xy to p0.zw is the gradient line; color to color2 along it.
       let line = in.p0.zw - in.p0.xy;
       let t = clamp(dot(p - in.p0.xy, line) / max(dot(line, line), 1e-6), 0.0, 1.0);
-      return mix(in.color, in.color2, t) * coverage(p, in.rect, in.radii);
-    }
-    case RADIAL: {
-      // p0.xy the centre, p0.zw the radii, color at the centre to color2 at the rim.
-      let t = clamp(length((p - in.p0.xy) / in.p0.zw), 0.0, 1.0);
       return mix(in.color, in.color2, t) * coverage(p, in.rect, in.radii);
     }
     case SHADOW: {

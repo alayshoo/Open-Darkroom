@@ -11,7 +11,7 @@ use super::anim::{EASE, EASE_OUT_EMPH};
 use super::cx::{text_width, Cx};
 use super::path::Placed;
 use super::theme::{black, fade, font, mix, outfit, white, Weight};
-use super::widgets::{chip, glass_button, glass_toggle, int_slider, pill, Stop};
+use super::widgets::{glass_button, glass_toggle, int_slider, pill, Stop};
 use crate::app::{default_output_space, App};
 use crate::export_encoding::ExportFormat;
 use crate::gpu::chrome::{shadow, GlassStyle};
@@ -289,8 +289,8 @@ fn group(
         cursor += h;
     }
     if let Some(n) = note {
-        painter.text(pos2(x + 12.0, cursor + 6.0 + 8.0), Align2::LEFT_CENTER, n, font(11.5, Weight::Regular), cx.pal.color3);
-        cursor += 6.0 + 16.0;
+        painter.text(pos2(x + 12.0, cursor + 6.0 + 12.0), Align2::LEFT_CENTER, n, font(11.5, Weight::Regular), cx.pal.color3);
+        cursor += 6.0 + 24.0;
     }
     cursor - y
 }
@@ -378,7 +378,9 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
             let desc_h = if a.description.is_empty() { 0.0 } else { wrap(&cx.ctx, a.description, font(11.5, Weight::Regular), cx.pal.color3, w * 0.45).size().y };
             let notice_h = if notice.is_some() { 15.5 } else { 0.0 };
             let text_h = 19.5 + desc_h + notice_h;
-            layouts.push((bindings, notice, text_h.max(24.0) + 16.0));
+            // The chips inherit the page's 24px line, so a row is never under 26.
+            let border = if layouts.is_empty() { 0.0 } else { 1.0 };
+            layouts.push((bindings, notice, text_h.max(26.0) + 16.0 + border));
         }
         let total: f32 = layouts.iter().map(|l| l.2).sum();
         let table = Rect::from_min_size(pos2(x, y), vec2(w, total));
@@ -391,6 +393,7 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
             if i > 0 {
                 painter.rect_filled(Rect::from_min_size(pos2(x, top), vec2(w, 1.0)), 0.0, cx.pal.bg5);
             }
+            let top = top + if i > 0 { 1.0 } else { 0.0 };
             let mut ty = top + 8.0;
             painter.text(pos2(x + 12.0, ty + 9.75), Align2::LEFT_CENTER, a.label, font(13.0, Weight::Regular), cx.pal.color2);
             ty += 19.5;
@@ -406,7 +409,7 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
 
             // Keys, right to left: the revert, the add button, then the chips.
             let mut right = x + w - 12.0;
-            let cy = top + 8.0 + 12.0;
+            let cy = top + 8.0 + 13.0;
             let custom = app.shortcuts.is_custom(a.id);
             let shown = cx.anim.flag(Id::new(("sc-revert", a.key)), custom, 0.25, EASE);
             let saved = (cx.opacity, cx.enabled);
@@ -416,7 +419,7 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
             let r = Rect::from_min_size(pos2(right - 24.0, cy - 12.0), vec2(24.0, 24.0));
             let resp = glass_button(cx, ui, Id::new(("sc-reset", a.key)), r, false, false, |p, r, s| {
                 let placed = Placed::new(r.center() - vec2(12.0, 12.0) * s, s);
-                placed.stroke(p, SMALL_REVERT_ARC, Stroke::new(1.2 * s, ink));
+                placed.stroke(p, SMALL_REVERT_ARC, Stroke::new(1.2_f32 * s, ink));
                 placed.fill(p, SMALL_REVERT_HEAD, ink);
             });
             if resp.clicked() && custom {
@@ -426,7 +429,7 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
             right -= 24.0 + 6.0;
             let r = Rect::from_min_size(pos2(right - 24.0, cy - 12.0), vec2(24.0, 24.0));
             let resp = glass_button(cx, ui, Id::new(("sc-add", a.key)), r, false, false, |p, r, s| {
-                Placed::new(r.center() - vec2(12.0, 12.0) * s, s).stroke(p, PLUS, Stroke::new(1.4 * s, ink));
+                Placed::new(r.center() - vec2(12.0, 12.0) * s, s).stroke(p, PLUS, Stroke::new(1.4_f32 * s, ink));
             });
             if resp.clicked() {
                 app.shortcuts.recording = Some(a.id);
@@ -468,8 +471,8 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
                 }
                 let ink = mix(cx.pal.color3, cx.pal.color1, lit);
                 let c = clear.center();
-                painter.line_segment([c - vec2(3.0, 3.0), c + vec2(3.0, 3.0)], Stroke::new(1.4, ink));
-                painter.line_segment([c + vec2(3.0, -3.0), c + vec2(-3.0, 3.0)], Stroke::new(1.4, ink));
+                painter.line_segment([c - vec2(3.0, 3.0), c + vec2(3.0, 3.0)], Stroke::new(1.4_f32, ink));
+                painter.line_segment([c + vec2(3.0, -3.0), c + vec2(-3.0, 3.0)], Stroke::new(1.4_f32, ink));
                 if resp.clicked() {
                     app.shortcuts.remove(a.id, b);
                 }
@@ -478,8 +481,8 @@ fn shortcuts_section(app: &mut App, cx: &mut Cx, ui: &Ui, x: f32, mut y: f32, w:
             y += h;
         }
         if !g.note.is_empty() {
-            painter.text(pos2(x + 12.0, y + 6.0 + 8.0), Align2::LEFT_CENTER, g.note, font(11.5, Weight::Regular), cx.pal.color3);
-            y += 6.0 + 16.0;
+            painter.text(pos2(x + 12.0, y + 6.0 + 12.0), Align2::LEFT_CENTER, g.note, font(11.5, Weight::Regular), cx.pal.color3);
+            y += 6.0 + 24.0;
         }
         y += 16.0;
     }
@@ -571,7 +574,7 @@ pub fn settings_modal(app: &mut App, cx: &mut Cx, ui: &mut Ui) {
         }
         cx.fx.flush(&painter, mark);
         let ink = if active { cx.pal.color1 } else { mix(cx.pal.color2, cx.pal.color1, hover) };
-        Placed::new(pos2(r.left() + 8.0, r.center().y - 8.0), 16.0 / 24.0).stroke(&painter, icon, Stroke::new(2.0 * 16.0 / 24.0, ink));
+        Placed::new(pos2(r.left() + 8.0, r.center().y - 8.0), 16.0 / 24.0).stroke(&painter, icon, Stroke::new(2.0_f32 * 16.0 / 24.0, ink));
         painter.text(pos2(r.left() + 8.0 + 16.0 + 10.0, r.center().y), Align2::LEFT_CENTER, *label, font(13.0, Weight::Regular), ink);
         if resp.clicked() {
             app.settings_section = i;
@@ -623,7 +626,7 @@ pub fn settings_modal(app: &mut App, cx: &mut Cx, ui: &mut Ui) {
     let close = Rect::from_min_size(pos2(panel.right() - 10.0 - 28.0, panel.top() + 10.0), vec2(28.0, 28.0));
     let resp = glass_button(cx, ui, Id::new("settings-close"), close, false, false, |p, r, s| {
         let placed = Placed::new(r.center() - vec2(14.0, 14.0) * s, 28.0 / 24.0 * s);
-        placed.stroke(p, "M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8", Stroke::new(1.4 * 28.0 / 24.0 * s, ink));
+        placed.stroke(p, "M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8", Stroke::new(1.4_f32 * 28.0 / 24.0 * s, ink));
     });
     if resp.clicked() {
         app.settings_open = false;
@@ -631,5 +634,4 @@ pub fn settings_modal(app: &mut App, cx: &mut Cx, ui: &mut Ui) {
     if resp.hovered() {
         cx.ctx.set_cursor_icon(CursorIcon::Default);
     }
-    let _ = chip;
-}
+    }

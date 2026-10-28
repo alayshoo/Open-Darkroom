@@ -4,11 +4,11 @@
 // title in the middle, the window controls on the right, all straight on the
 // scrim, with the band itself dragging the window.
 
-use egui::{pos2, vec2, Align2, Color32, CursorIcon, Id, Pos2, Rect, Sense, Stroke, Ui, ViewportCommand};
+use egui::{pos2, vec2, Align2, Color32, Id, Pos2, Rect, Sense, Stroke, Ui, ViewportCommand};
 
 use super::anim::{EASE, EASE_OUT_EMPH};
 use super::cx::{text_width, Cx};
-use super::path::{capped_line, Placed};
+use super::path::capped_line;
 use super::theme::{black, fade, font, mix, Weight};
 use crate::app::App;
 use crate::model::shortcuts::ShortcutId;
@@ -164,19 +164,19 @@ pub fn titlebar(app: &mut App, cx: &mut Cx, ui: &mut Ui) -> Option<MenuAction> {
         for (offset, colour) in [(vec2(0.0, 1.0), black(0.5)), (vec2(0.0, 0.0), ink)] {
             let c = r.center() + offset;
             match kind {
-                "min" => capped_line(&painter, c - vec2(8.2, 0.0), c + vec2(8.2, 0.0), 1.6, colour),
+                "min" => capped_line(&painter, c - vec2(4.0, 0.0), c + vec2(4.0, 0.0), 1.6, colour),
                 "max" if !maximized => {
                     let s = 17.0 / 24.0;
                     let rr = Rect::from_min_size(c + vec2(-7.5, -6.5) * s * 1.0 + vec2(0.0, 0.5), vec2(15.0, 13.0) * s);
-                    painter.rect_stroke(rr, 1.5 * s, Stroke::new(2.0 * s, colour), egui::StrokeKind::Middle);
+                    painter.rect_stroke(rr, 1.5 * s, Stroke::new(2.0_f32 * s, colour), egui::StrokeKind::Middle);
                 }
                 "max" => {
                     let s = 20.0 / 24.0;
                     let o = c - vec2(12.0, 12.0) * s;
                     let back = Rect::from_min_max(o + vec2(8.5, 5.25) * s, o + vec2(20.25, 15.3) * s);
                     let front = Rect::from_min_max(o + vec2(4.85, 8.8) * s, o + vec2(16.65, 18.75) * s);
-                    painter.rect_stroke(front, 1.2 * s, Stroke::new(1.6 * s, colour), egui::StrokeKind::Middle);
-                    let edge = Stroke::new(1.5 * s, colour);
+                    painter.rect_stroke(front, 1.2 * s, Stroke::new(1.6_f32 * s, colour), egui::StrokeKind::Middle);
+                    let edge = Stroke::new(1.5_f32 * s, colour);
                     painter.line_segment([pos2(back.left(), front.top()), pos2(back.left(), back.top())], edge);
                     painter.line_segment([back.left_top(), back.right_top()], edge);
                     painter.line_segment([back.right_top(), back.right_bottom()], edge);
@@ -267,6 +267,5 @@ pub fn titlebar(app: &mut App, cx: &mut Cx, ui: &mut Ui) -> Option<MenuAction> {
         }
     }
 
-    let _ = (CursorIcon::Default, Placed::new(Pos2::ZERO, 1.0));
     action
 }

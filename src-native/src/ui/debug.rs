@@ -155,7 +155,7 @@ pub fn stats_overlay(app: &mut App, cx: &mut Cx, ui: &Ui, slot: Rect) {
         cx.fx.fill(Rect::from_min_max(pos2(graph.left() + i as f32 * bar_w, gy(t)), pos2(graph.left() + i as f32 * bar_w + (bar_w - 0.5).max(0.5), graph.bottom())), [0.0; 4], c);
     }
     cx.fx.flush(&painter, mark);
-    let dash = egui::Shape::dashed_line(&[pos2(graph.left(), gy(BUDGET_MS)), pos2(graph.right(), gy(BUDGET_MS))], Stroke::new(1.0, white(0.22)), 2.0, 3.0);
+    let dash = egui::Shape::dashed_line(&[pos2(graph.left(), gy(BUDGET_MS)), pos2(graph.right(), gy(BUDGET_MS))], Stroke::new(1.0_f32, white(0.22)), 2.0, 3.0);
     painter.extend(dash);
 
     let fps_colour = if headline.0 == "idle" { white(0.4) } else { good };
@@ -206,10 +206,10 @@ fn tick(cx: &mut Cx, ui: &Ui, id: Id, at: Pos2, checked: bool, round: bool) -> e
         if round {
             painter.circle_filled(r.center(), 2.5, Color32::BLACK);
         } else {
-            painter.add(egui::Shape::line(vec![r.min + vec2(2.5, 5.5), r.min + vec2(4.6, 7.8), r.min + vec2(8.6, 3.2)], Stroke::new(1.5, Color32::BLACK)));
+            painter.add(egui::Shape::line(vec![r.min + vec2(2.5, 5.5), r.min + vec2(4.6, 7.8), r.min + vec2(8.6, 3.2)], Stroke::new(1.5_f32, Color32::BLACK)));
         }
     } else {
-        painter.rect_stroke(r, radius, Stroke::new(1.0, white(0.5)), egui::StrokeKind::Inside);
+        painter.rect_stroke(r, radius, Stroke::new(1.0_f32, white(0.5)), egui::StrokeKind::Inside);
     }
     resp
 }
@@ -448,7 +448,7 @@ fn preview_card(cx: &mut Cx, ui: &mut Ui, x: f32, y: f32, w: f32, info: Option<&
     let k = (map.width() as f64 / vw).min(map.height() as f64 / vh);
     let off = pos2(map.center().x - (vw * k) as f32 / 2.0, map.center().y - (vh * k) as f32 / 2.0);
     let to_map = |b: BoxF| Rect::from_min_max(off + vec2(((b[0] + pad) * k) as f32, ((b[1] + pad) * k) as f32), off + vec2(((b[2] + pad) * k) as f32, ((b[3] + pad) * k) as f32));
-    let stroke = 1.0;
+    let stroke = 1.0_f32;
     painter.rect_filled(to_map([0.0, 0.0, info.full_width, info.full_height]), 0.0, white(0.06));
     let in_image = |r: &ChainRegion, b: BoxF| [b[0] / r.scale, b[1] / r.scale, b[2] / r.scale, b[3] / r.scale];
     if let Some(b) = &info.backdrop {
@@ -466,7 +466,7 @@ fn preview_card(cx: &mut Cx, ui: &mut Ui, x: f32, y: f32, w: f32, info: Option<&
         painter.rect_stroke(valid, 0.0, Stroke::new(stroke, rgba(110, 210, 200, 0.9)), egui::StrokeKind::Middle);
     }
     if let Some(v) = info.visible {
-        painter.rect_stroke(to_map(v), 0.0, Stroke::new(1.5, white(0.9)), egui::StrokeKind::Middle);
+        painter.rect_stroke(to_map(v), 0.0, Stroke::new(1.5_f32, white(0.9)), egui::StrokeKind::Middle);
     }
     cy = map.bottom() + 8.8;
     painter.rect_filled(Rect::from_min_size(pos2(x, cy - 1.0), vec2(w, 1.0)), 0.0, white(0.1));
@@ -478,7 +478,7 @@ fn preview_card(cx: &mut Cx, ui: &mut Ui, x: f32, y: f32, w: f32, info: Option<&
         let s = Rect::from_min_size(pos2(x, cy + 3.0), vec2(9.0, 9.0));
         match swatch {
             0 => {
-                painter.rect_stroke(s, 2.0, Stroke::new(1.5, white(0.9)), egui::StrokeKind::Inside);
+                painter.rect_stroke(s, 2.0, Stroke::new(1.5_f32, white(0.9)), egui::StrokeKind::Inside);
             }
             1 => {
                 painter.rect_filled(s, 2.0, rgba(110, 210, 200, 0.6));
@@ -487,7 +487,7 @@ fn preview_card(cx: &mut Cx, ui: &mut Ui, x: f32, y: f32, w: f32, info: Option<&
                 if info.backdrop_shown {
                     painter.rect_filled(s, 2.0, rgba(240, 180, 90, 0.4));
                 }
-                painter.rect_stroke(s, 2.0, Stroke::new(1.5, rgba(240, 180, 90, 0.7)), egui::StrokeKind::Inside);
+                painter.rect_stroke(s, 2.0, Stroke::new(1.5_f32, rgba(240, 180, 90, 0.7)), egui::StrokeKind::Inside);
             }
         }
         painter.text(pos2(x + 16.2, cy + 7.6), Align2::LEFT_CENTER, label, mono(SIZE), white(0.78));

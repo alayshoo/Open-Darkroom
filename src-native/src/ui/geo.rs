@@ -9,12 +9,10 @@ use egui::{pos2, Rect};
 #[derive(Clone, Copy, Debug)]
 pub struct Geo {
     pub screen: Rect,
-    pub toolbar: Rect,
     pub colour_bar: Option<Rect>,
     pub slot: Rect,
     /// The box a fitted image is centred and fitted in.
     pub center: Rect,
-    pub sidebar: Rect,
     pub histogram: Rect,
     pub tools: Rect,
     pub footer: Rect,
@@ -25,7 +23,6 @@ impl Geo {
         let shell = Rect::from_min_max(pos2(12.0, 44.0), pos2(screen.right() - 12.0, screen.bottom() - 12.0));
         let sbw = (0.23 * shell.width()).max(300.0);
         let sidebar = Rect::from_min_max(pos2(shell.right() - sbw, shell.top()), shell.max);
-        let toolbar = Rect::from_min_max(pos2(0.0, 0.0), pos2(48.0, screen.bottom()));
         let mut x = 60.0;
         let colour_bar = colour_bar.then(|| {
             let r = Rect::from_min_max(pos2(60.0, shell.top()), pos2(360.0, shell.bottom()));
@@ -40,6 +37,6 @@ impl Geo {
         let histogram = Rect::from_min_size(sidebar.min, egui::vec2(sbw, 10.0 + (sbw - 10.0) / 2.0));
         let footer = Rect::from_min_max(pos2(sidebar.left(), sidebar.bottom() - 48.0), sidebar.max);
         let tools = Rect::from_min_max(pos2(sidebar.left(), histogram.bottom() + 12.0), pos2(sidebar.right(), footer.top() - 12.0));
-        Self { screen, toolbar, colour_bar, slot, center, sidebar, histogram, tools, footer }
+        Self { screen, colour_bar, slot, center, histogram, tools, footer }
     }
 }

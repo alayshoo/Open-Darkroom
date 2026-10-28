@@ -10,10 +10,6 @@ pub fn hex(v: u32) -> Color32 {
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
-pub fn hexa(v: u32) -> Color32 {
-    Color32::from_rgba_unmultiplied((v >> 24) as u8, (v >> 16) as u8, (v >> 8) as u8, v as u8)
-}
-
 pub fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (a * 255.0).round() as u8)
 }
@@ -129,7 +125,6 @@ pub enum Weight {
     Regular,
     Medium,
     SemiBold,
-    Bold,
 }
 
 pub fn font(size: f32, weight: Weight) -> FontId {
@@ -137,7 +132,6 @@ pub fn font(size: f32, weight: Weight) -> FontId {
         Weight::Regular => "fig400",
         Weight::Medium => "fig500",
         Weight::SemiBold => "fig600",
-        Weight::Bold => "fig700",
     };
     FontId::new(size, FontFamily::Name(name.into()))
 }
@@ -159,20 +153,18 @@ pub fn install_fonts(ctx: &egui::Context) {
     add("Figtree-400", include_bytes!("../../assets/fonts/Figtree-400.ttf"));
     add("Figtree-500", include_bytes!("../../assets/fonts/Figtree-500.ttf"));
     add("Figtree-600", include_bytes!("../../assets/fonts/Figtree-600.ttf"));
-    add("Figtree-700", include_bytes!("../../assets/fonts/Figtree-700.ttf"));
     add("Figtree-ext-400", include_bytes!("../../assets/fonts/Figtree-ext-400.ttf"));
     add("Figtree-ext-500", include_bytes!("../../assets/fonts/Figtree-ext-500.ttf"));
     add("Figtree-ext-600", include_bytes!("../../assets/fonts/Figtree-ext-600.ttf"));
-    add("Figtree-ext-700", include_bytes!("../../assets/fonts/Figtree-ext-700.ttf"));
     add("Outfit-700", include_bytes!("../../assets/fonts/Outfit-700.ttf"));
 
     let fallback: Vec<String> = fonts.families[&FontFamily::Proportional].clone();
-    for w in [400, 500, 600, 700] {
+    for w in [400, 500, 600] {
         let mut list = vec![format!("Figtree-{w}"), format!("Figtree-ext-{w}")];
         list.extend(fallback.iter().cloned());
         fonts.families.insert(FontFamily::Name(format!("fig{w}").into()), list);
     }
-    let mut outfit = vec!["Outfit-700".to_string(), "Figtree-700".to_string()];
+    let mut outfit = vec!["Outfit-700".to_string(), "Figtree-600".to_string()];
     outfit.extend(fallback.iter().cloned());
     fonts.families.insert(FontFamily::Name("outfit700".into()), outfit);
     fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "Figtree-400".into());

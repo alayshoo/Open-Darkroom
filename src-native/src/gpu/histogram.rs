@@ -149,10 +149,6 @@ impl Histogram {
         self.source.is_some()
     }
 
-    pub fn source(&self) -> Option<&SourceImage> {
-        self.source.as_ref()
-    }
-
     pub fn set_output_space(&self, gpu: &Gpu, destination: OutputSpace, proof: Option<OutputSpace>) {
         gpu.queue.write_buffer(&self.output_space, 0, &output_space_to_bytes(destination, proof));
     }

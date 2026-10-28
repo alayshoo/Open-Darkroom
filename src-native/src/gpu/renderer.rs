@@ -106,8 +106,6 @@ struct Held {
 }
 
 struct Scratch {
-    width: u32,
-    height: u32,
     view: wgpu::Texture,
     develop: wgpu::Texture,
     sharp_h: Option<wgpu::Texture>,
@@ -337,18 +335,17 @@ impl Renderer {
             } else {
                 (None, None)
             };
-            self.scratch = Some(self.bind_scratch(next, view, develop, sharp_h, bands));
+            self.scratch = Some(self.bind_scratch(view, develop, sharp_h, bands));
         } else if sharpening && self.scratch.as_ref().is_some_and(|s| s.sharp_h.is_none()) {
             let s = self.scratch.take().unwrap();
             let sharp_h = self.create_texture("Sharp Blur H", next.0, next.1, SHARP_FORMAT);
             let bands = self.create_texture("Detail Bands", next.0, next.1, SHARP_FORMAT);
-            self.scratch = Some(self.bind_scratch(next, s.view, s.develop, Some(sharp_h), Some(bands)));
+            self.scratch = Some(self.bind_scratch(s.view, s.develop, Some(sharp_h), Some(bands)));
         }
     }
 
     fn bind_scratch(
         &self,
-        size: (u32, u32),
         view: wgpu::Texture,
         develop: wgpu::Texture,
         sharp_h: Option<wgpu::Texture>,
@@ -395,8 +392,6 @@ impl Renderer {
         );
         let view_sample = self.source.as_ref().map(|s| self.view_sample_group(s));
         Scratch {
-            width: size.0,
-            height: size.1,
             view,
             develop,
             sharp_h,
@@ -464,10 +459,6 @@ impl Renderer {
     /// Swaps in a finer copy of the same image, once it has arrived.
     pub fn set_source(&mut self, image: SourceImage) {
         self.bind_source(image);
-    }
-
-    pub fn source_size(&self) -> Option<(u32, u32)> {
-        self.source.as_ref().map(|s| (s.width, s.height))
     }
 
     pub fn clear_image(&mut self) {

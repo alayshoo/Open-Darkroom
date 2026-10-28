@@ -34,7 +34,6 @@ pub mod mode {
     pub const GLASS: u32 = 4;
     pub const SCRIM: u32 = 5;
     pub const RING: u32 = 6;
-    pub const RADIAL: u32 = 7;
 }
 
 #[repr(C)]
@@ -154,14 +153,6 @@ impl Fx {
         p.color = premul(from);
         p.color2 = premul(to);
         p.p0 = [a.x * self.ppp, a.y * self.ppp, b.x * self.ppp, b.y * self.ppp];
-        self.push(p)
-    }
-
-    pub fn radial(&mut self, rect: Rect, center: egui::Pos2, radius: egui::Vec2, inner: Color32, outer: Color32) -> usize {
-        let mut p = self.base(rect, [0.0; 4], mode::RADIAL);
-        p.color = premul(inner);
-        p.color2 = premul(outer);
-        p.p0 = [center.x * self.ppp, center.y * self.ppp, radius.x * self.ppp, radius.y * self.ppp];
         self.push(p)
     }
 

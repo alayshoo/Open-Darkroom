@@ -93,6 +93,8 @@ pub fn preview_input(app: &mut App, cx: &mut Cx, ui: &Ui, layout: Option<&Layout
     }
     let cursor = cx.ctx.input(|i| i.pointer.hover_pos()).map(|p| [p.x as f64 * ppp, p.y as f64 * ppp]).unwrap_or(l.placement.anchor);
     let events = cx.ctx.input(|i| i.events.clone());
+    let mut stops = 0.0;
+    let mut pinch = 1.0;
     for e in events {
         match e {
             // A notch of a mouse wheel with Ctrl, or a trackpad pinch, is a
@@ -100,18 +102,18 @@ pub fn preview_input(app: &mut App, cx: &mut Cx, ui: &Ui, layout: Option<&Layout
             egui::Event::MouseWheel { unit, delta, modifiers, .. } => {
                 let lines = if unit == egui::MouseWheelUnit::Line { 100.0 } else if unit == egui::MouseWheelUnit::Page { 800.0 } else { 1.0 };
                 if modifiers.ctrl || modifiers.mac_cmd {
-                    let stops = (delta.y as f64 * lines).clamp(-100.0, 100.0) / 100.0;
-                    zoom_to(app, l.placement.scale * 2f64.powf(stops), cursor);
+                    stops += (delta.y as f64 * lines).clamp(-100.0, 100.0) / 100.0;
                 } else if panning {
                     let factor = if unit == egui::MouseWheelUnit::Line { 33.0 } else { 1.0 };
                     pan_by(app, delta.x as f64 * factor * ppp, delta.y as f64 * factor * ppp);
                 }
             }
-            egui::Event::Zoom(factor) => {
-                zoom_to(app, l.placement.scale * factor as f64, cursor);
-            }
+            egui::Event::Zoom(factor) => pinch *= factor as f64,
             _ => {}
         }
+    }
+    if stops != 0.0 || pinch != 1.0 {
+        zoom_to(app, l.placement.scale * 2f64.powf(stops) * pinch, cursor);
     }
 }
 
@@ -145,7 +147,7 @@ pub fn toolbar(app: &mut App, cx: &mut Cx, ui: &mut Ui, geo: &Geo) {
         glyph(p, r, 40.0, 30.0, s, ink, |p, placed, c, k| {
             let mut placed = Placed::new(placed.origin, placed.scale);
             placed.view_origin = vec2(-3.0, -3.0);
-            placed.stroke(p, CROP_ICON, Stroke::new(1.05 * k, c));
+            placed.stroke(p, CROP_ICON, Stroke::new(1.05_f32 * k, c));
         });
     });
     if resp.clicked() {
@@ -166,8 +168,8 @@ pub fn toolbar(app: &mut App, cx: &mut Cx, ui: &mut Ui, geo: &Geo) {
                     if clockwise {
                         placed.mirror_width = Some(24.0);
                     }
-                    placed.stroke(p, &rect_path(4.5, 11.0, 10.0, 8.5, 1.2), Stroke::new(1.2 * k, c));
-                    placed.stroke(p, TURN_ARROW, Stroke::new(1.2 * k, c));
+                    placed.stroke(p, &rect_path(4.5, 11.0, 10.0, 8.5, 1.2), Stroke::new(1.2_f32 * k, c));
+                    placed.stroke(p, TURN_ARROW, Stroke::new(1.2_f32 * k, c));
                 });
             });
             if resp.clicked() {
@@ -178,8 +180,8 @@ pub fn toolbar(app: &mut App, cx: &mut Cx, ui: &mut Ui, geo: &Geo) {
             glyph(p, r, 28.0, 24.0, s, ink, |p, placed, c, k| {
                 let mut placed = Placed::new(placed.origin, placed.scale);
                 placed.rotate = Some((-24.0, pos2(12.0, 12.0)));
-                placed.stroke(p, &rect_path(2.5, 9.5, 19.0, 5.0, 1.0), Stroke::new(1.2 * k, c));
-                placed.stroke(p, RULER_TICKS, Stroke::new(1.0 * k, c));
+                placed.stroke(p, &rect_path(2.5, 9.5, 19.0, 5.0, 1.0), Stroke::new(1.2_f32 * k, c));
+                placed.stroke(p, RULER_TICKS, Stroke::new(1.0_f32 * k, c));
             });
         });
         if resp.clicked() {
@@ -188,7 +190,7 @@ pub fn toolbar(app: &mut App, cx: &mut Cx, ui: &mut Ui, geo: &Geo) {
         let can_reset = !is_full_frame(&app.draft_crop);
         let resp = glass_button(cx, ui, Id::new("crop-reset"), at(3), false, !can_reset, |p, r, s| {
             glyph(p, r, 28.0, 24.0, s, ink, |p, placed, c, k| {
-                placed.stroke(p, REVERT_ARC, Stroke::new(1.2 * k, c));
+                placed.stroke(p, REVERT_ARC, Stroke::new(1.2_f32 * k, c));
                 placed.fill(p, REVERT_HEAD, c);
             });
         });
@@ -488,8 +490,7 @@ pub fn crop_overlay(app: &mut App, cx: &mut Cx, ui: &Ui, layout: &Layout) {
     if let Some(Drag::Line { from, to }) = drag {
         let a = pos2(frame.left() + from[0] * size.x, frame.top() + from[1] * size.y);
         let z = pos2(frame.left() + to[0] * size.x, frame.top() + to[1] * size.y);
-        painter.line_segment([a, z], Stroke::new(3.0, black(0.35)));
-        painter.line_segment([a, z], Stroke::new(1.5, ink));
+        painter.line_segment([a, z], Stroke::new(3.0_f32, black(0.35)));
+        painter.line_segment([a, z], Stroke::new(1.5_f32, ink));
     }
-    let _ = Color32::TRANSPARENT;
 }

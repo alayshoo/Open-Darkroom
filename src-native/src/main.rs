@@ -1,26 +1,36 @@
 // src-native/src/main.rs
 //
 // Open Darkroom as a single Rust process: egui for the interface, wgpu for the
-// image, and the Tauri app's backend compiled in from its own sources.
+// image, and the Tauri app's backend compiled in from its own sources. Those
+// modules serve both apps, so what only the Tauri one calls is allowed here.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/color.rs"]
 mod color;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/crop.rs"]
 mod crop;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/export_encoding.rs"]
 mod export_encoding;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/export_rendering.rs"]
 mod export_rendering;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/full_resolution.rs"]
 mod full_resolution;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/icc.rs"]
 mod icc;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/image_opening.rs"]
 mod image_opening;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/output_space.rs"]
 mod output_space;
+#[allow(dead_code)]
 #[path = "../../src-tauri/src/raw.rs"]
 mod raw;
 

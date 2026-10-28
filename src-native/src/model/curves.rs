@@ -14,8 +14,6 @@ pub const COLOURS: [[u8; 3]; CHANNELS] = [
     [0x3f, 0x6f, 0xf0],
 ];
 
-pub const LABELS: [&str; CHANNELS] = ["RGB", "Red", "Green", "Blue"];
-
 /// What the clipboard calls each curve.
 pub const NAMES: [&str; CHANNELS] = ["master", "red", "green", "blue"];
 

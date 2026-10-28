@@ -101,9 +101,6 @@ pub mod n {
 
 pub const COUNT: usize = NAMES.len();
 
-/// The per-colour HSL bands, in hue order.
-pub const HSL_BANDS: [&str; 8] = ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"];
-
 /// Hue, Sat or Lum of one band.
 pub fn hsl_key(band: usize, channel: usize) -> usize {
     n::hsl + band * 3 + channel
@@ -129,13 +126,6 @@ impl Key {
             Key::Invert => "invert",
             Key::N(i) => NAMES[i],
         }
-    }
-
-    pub fn from_name(name: &str) -> Option<Key> {
-        if name == "invert" {
-            return Some(Key::Invert);
-        }
-        NAMES.iter().position(|&k| k == name).map(Key::N)
     }
 
     /// Every key, in `defaultSlidersRGB` order.

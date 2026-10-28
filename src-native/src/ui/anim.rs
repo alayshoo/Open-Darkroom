@@ -13,7 +13,6 @@ pub struct Ease(pub f32, pub f32, pub f32, pub f32);
 pub const EASE: Ease = Ease(0.25, 0.1, 0.25, 1.0);
 pub const LINEAR: Ease = Ease(0.0, 0.0, 1.0, 1.0);
 pub const EASE_OUT_EMPH: Ease = Ease(0.2, 0.0, 0.0, 1.0);
-pub const CUBIC_IN_OUT: Ease = Ease(0.645, 0.045, 0.355, 1.0);
 pub const SPRING: Ease = Ease(0.34, 1.56, 0.64, 1.0);
 pub const EASE_IN_OUT: Ease = Ease(0.42, 0.0, 0.58, 1.0);
 

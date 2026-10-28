@@ -13,7 +13,7 @@ eframe = { version = "0.32", default-features = false, features = ["wgpu", "x11"
 egui = "0.32"
 egui-wgpu = "0.32"
 wgpu = "25"
-rfd = "0.16"
+rfd = { version = "0.16", default-features = false }
 arboard = { version = "3", default-features = false }
 dirs = "6"
 pollster = "0.4"
@@ -28,6 +28,12 @@ rayon = "1.11"
 fast_image_resize = "6.0"
 lcms2 = { version = "6.2.0", features = ["static"] }
 rawler = "0.8"
+
+[features]
+# Linux file dialog backend: the XDG desktop portal, or GTK with --no-default-features --features gtk3.
+default = ["xdg-portal"]
+xdg-portal = ["rfd/xdg-portal", "rfd/async-std", "rfd/wayland"]
+gtk3 = ["rfd/gtk3"]
 
 [profile.dev]
 opt-level = 2

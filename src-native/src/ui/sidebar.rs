@@ -13,7 +13,7 @@ use super::theme::{black, fade, font, hex, white, Weight};
 use super::widgets::{self, glass_button, glass_toggle, single_group, Editing, SingleSpec, Stop};
 use crate::app::App;
 use crate::gpu::chrome::{shadow, GlassStyle, Shadow};
-use crate::model::sliders::{hsl_key, n, Sliders, HSL_BANDS, SLIDER_TOLERANCE};
+use crate::model::sliders::{hsl_key, n, Sliders, SLIDER_TOLERANCE};
 
 pub const SMALL_SHADOWS: [Shadow; 2] = [
     shadow(6.0, 10.0, 22.0, -2.0, Color32::from_rgba_premultiplied(0, 0, 0, 120)),
@@ -392,7 +392,7 @@ pub fn revert_button(cx: &mut Cx, ui: &Ui, id: Id, at: Pos2, visible: bool) -> b
     let ink = cx.pal.color2;
     let resp = glass_button(cx, ui, id, Rect::from_min_size(at, vec2(28.0, 28.0)), false, false, |p, r, s| {
         let placed = Placed::new(r.min + (r.size() - vec2(28.0, 28.0) * s) / 2.0, 28.0 / 24.0 * s);
-        placed.stroke(p, REVERT_ARC, egui::Stroke::new(1.2 * 28.0 / 24.0 * s, ink));
+        placed.stroke(p, REVERT_ARC, egui::Stroke::new(1.2_f32 * 28.0 / 24.0 * s, ink));
         placed.fill(p, REVERT_HEAD, ink);
     });
     (cx.opacity, cx.enabled) = saved;
@@ -460,7 +460,7 @@ pub fn sidebar(app: &mut App, cx: &mut Cx, ui: &mut Ui, geo: &super::geo::Geo) {
         cx.enabled &= app.is_darkroom;
         let resp = glass_toggle(cx, ui, Id::new("invert"), row.min + vec2(62.0, 0.0), 54.0, app.sliders.invert, Stop { x: 3.0, w: 24.0 }, Stop { x: 27.0, w: 24.0 }, |p, o, s| {
             p.circle_filled(o + vec2(15.0, 14.0) * s, 6.0 * s, Color32::WHITE);
-            p.circle_stroke(o + vec2(39.0, 14.0) * s, 6.0 * s, egui::Stroke::new(2.0 * s, Color32::WHITE));
+            p.circle_stroke(o + vec2(39.0, 14.0) * s, 6.0 * s, egui::Stroke::new(2.0_f32 * s, Color32::WHITE));
         });
         if resp.clicked() {
             app.toggle_invert();
@@ -530,7 +530,7 @@ fn pager_view(app: &mut App, cx: &mut Cx, ui: &mut Ui, pager: Rect, ctx: &egui::
     let side_mask = Mask { rect: pager, top: 0.0, bottom: 0.0, left: 16.0, right: 12.0 };
     let page_mask = |r: Rect| Mask { rect: r, top: 20.0, bottom: 24.0, left: 0.0, right: 0.0 };
 
-    let mut draw_page = |app: &mut App, cx: &mut Cx, child: &mut Ui, index: usize, x: f32, commits: &mut Commits| {
+    let draw_page = |app: &mut App, cx: &mut Cx, child: &mut Ui, index: usize, x: f32, commits: &mut Commits| {
         let page_rect = Rect::from_min_size(pos2(x, pager.top()), pager.size());
         if page_rect.intersect(pager).width() < 0.5 {
             return;
@@ -625,7 +625,7 @@ fn footer(app: &mut App, cx: &mut Cx, ui: &mut Ui, f: Rect, inactive: bool) {
         [pos2(-5.5, 3.0), pos2(0.0, -3.0), pos2(5.5, 3.0)].map(|p| center + vec2(p.x * c - p.y * s, p.x * s + p.y * c))
     };
     let pts = chevron(turn);
-    let stroke = egui::Stroke::new(1.6, cx.pal.color2);
+    let stroke = egui::Stroke::new(1.6_f32, cx.pal.color2);
     super::path::capped_line(&painter, pts[0], pts[1], 1.6, cx.pal.color2);
     super::path::capped_line(&painter, pts[1], pts[2], 1.6, cx.pal.color2);
     let _ = stroke;
