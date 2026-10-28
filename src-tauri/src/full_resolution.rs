@@ -7,11 +7,9 @@
 use half::f16;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use tauri::ipc::Response;
-
 use crate::color::{linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LUT_SIZE};
 use crate::icc::{Baker, SourceSpace};
-use crate::image_opening::{downscale_to_max_edge, ImageState};
+use crate::image_opening::downscale_to_max_edge;
 
 /// Bytes preceding the pixels of a band: the size of the image being served,
 /// then the band's first row and row count, u32 LE.
@@ -166,43 +164,4 @@ pub fn build_rows_payload(rows: &Rows) -> Vec<u8> {
     }
     payload.extend_from_slice(&rows.pixels);
     payload
-}
-
-// ── Tauri command ─────────────────────────────────────────────────────────────
-
-/// A band of rows of the open image, for a GPU whose textures reach `max_edge`.
-#[tauri::command]
-pub(crate) async fn full_resolution_rows(
-    state: tauri::State<'_, ImageState>,
-    image_id: u32,
-    max_edge: u32,
-    y: u32,
-    rows: u32,
-) -> Result<Response, String> {
-    let (pixels, width, height, channels, space, full) = {
-        let guard = state.lock().unwrap();
-        let img = guard.as_ref().ok_or("No image loaded")?;
-        if img.id != image_id {
-            return Err("The image has been replaced since this band was asked for".into());
-        }
-        (
-            Arc::clone(&img.pixels_u16),
-            img.width,
-            img.height,
-            img.channels,
-            img.space.clone(),
-            Arc::clone(&img.full_resolution),
-        )
-    };
-
-    // Off the async runtime: converting a band, and above all resizing the
-    // whole image the first time a fitted one is asked for, would stall it.
-    let payload = tauri::async_runtime::spawn_blocking(move || {
-        full.rows(&pixels, width, height, channels, &space, max_edge, y, rows)
-            .map(|r| build_rows_payload(&r))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    Ok(Response::new(payload))
 }

@@ -1,0 +1,37 @@
+[package]
+name = "open-darkroom-native"
+version = "0.1.0"
+description = "Open Darkroom, as a pure Rust app"
+edition = "2021"
+
+[[bin]]
+name = "open-darkroom-native"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.32", default-features = false, features = ["wgpu", "x11", "wayland"] }
+egui = "0.32"
+egui-wgpu = "0.32"
+wgpu = "25"
+rfd = "0.16"
+arboard = { version = "3", default-features = false }
+dirs = "6"
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = "0.25.9"
+bytemuck = { version = "1", features = ["derive"] }
+tiff = "0.10"
+webp = "0.3"
+half = "2"
+rayon = "1.11"
+fast_image_resize = "6.0"
+lcms2 = { version = "6.2.0", features = ["static"] }
+rawler = "0.8"
+
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

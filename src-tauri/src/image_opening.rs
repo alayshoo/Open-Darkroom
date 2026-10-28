@@ -4,9 +4,6 @@ use fast_image_resize as fir;
 use fast_image_resize::images::{Image, ImageRef};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use tauri::ipc::Response;
-use tauri_plugin_dialog::DialogExt;
 
 use half::f16;
 use image::{ImageBuffer, ImageDecoder, Rgba};
@@ -14,7 +11,7 @@ use image::{ImageBuffer, ImageDecoder, Rgba};
 use crate::color::{
     linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
 };
-use crate::crop::{crop_view, CropPayload, CropView};
+use crate::crop::CropView;
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
 
@@ -490,7 +487,32 @@ fn decode_encoded(
     Ok((samples, channels, width, height, space))
 }
 
-// ── Tauri command ─────────────────────────────────────────────────────────────
+/// Extensions the open dialog offers: the encoded formats, then every raw one.
+pub fn open_extensions() -> Vec<String> {
+    let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
+    extensions.extend(crate::raw::dialog_extensions());
+    extensions
+}
+
+/// Decode any supported file into its samples, channel count, dimensions and
+/// source space. Sensor data takes its own decoder, and arrives already linear
+/// and in the camera's primaries rather than carrying a profile to be read.
+pub fn decode_file(
+    path: &std::path::Path,
+) -> Result<(Vec<u16>, usize, u32, u32, SourceSpace), String> {
+    if crate::raw::is_raw_extension(path) {
+        let decoded = crate::raw::decode(path)?;
+        Ok((
+            decoded.pixels_u16,
+            crate::raw::RAW_CHANNELS,
+            decoded.width,
+            decoded.height,
+            decoded.space,
+        ))
+    } else {
+        decode_encoded(path)
+    }
+}
 
 /// Error returned when the user dismisses the file picker.
 ///
@@ -498,99 +520,3 @@ fn decode_encoded(
 /// failure that leaves the current image intact — `openImage.ts` matches on this
 /// exact string to tell it apart from an open that got far enough to purge.
 pub const OPEN_CANCELLED: &str = "open:cancelled";
-
-#[tauri::command]
-pub(crate) async fn open_image_file(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, ImageState>,
-    image_id: u32,
-) -> Result<Response, String> {
-    println!("open_image_file: started");
-
-    let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
-    extensions.extend(crate::raw::dialog_extensions());
-    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
-
-    let path = app
-        .dialog()
-        .file()
-        .add_filter("Images", &extensions)
-        .blocking_pick_file()
-        .ok_or(OPEN_CANCELLED)?
-        .into_path()
-        .map_err(|e| e.to_string())?;
-
-    // Release the previous image before decoding the next one. Held any longer
-    // and two full-resolution buffers are resident at once, which for large
-    // files roughly doubles the peak. The dialog has already returned a path, so
-    // a cancelled open never reaches here and leaves the current image alone.
-    {
-        let mut guard = state.lock().unwrap();
-        *guard = None;
-    }
-
-    let overall_start = Instant::now();
-
-    // Sensor data takes its own decoder, and arrives already linear and in the
-    // camera's primaries rather than carrying a profile to be read.
-    let (samples, channels, full_width, full_height, space) = if crate::raw::is_raw_extension(&path)
-    {
-        let decoded = crate::raw::decode(&path)?;
-        (
-            decoded.pixels_u16,
-            crate::raw::RAW_CHANNELS,
-            decoded.width,
-            decoded.height,
-            decoded.space,
-        )
-    } else {
-        decode_encoded(&path)?
-    };
-
-    let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
-
-    // Store the original full-resolution image for export. This happens after
-    // `prepare_image` so the buffer can be moved into the state rather than
-    // cloned — preparation only needed to borrow it.
-    {
-        let mut guard = state.lock().unwrap();
-        *guard = Some(OriginalImage {
-            pixels_u16: Arc::new(samples),
-            width: full_width,
-            height: full_height,
-            channels,
-            space,
-            full_resolution: Arc::default(),
-            id: image_id,
-        });
-    }
-
-    let payload = build_payload(&prepared);
-
-    println!(
-        "open_image_file: total backend time = {} ms, payload size = {} bytes, \
-         colour converted on {}",
-        overall_start.elapsed().as_millis(),
-        payload.len(),
-        if prepared.baked { "CPU" } else { "GPU" }
-    );
-
-    Ok(Response::new(payload))
-}
-
-/// The open image's per-channel histograms, binned over only what a crop keeps.
-#[tauri::command]
-pub(crate) async fn crop_histograms(
-    state: tauri::State<'_, ImageState>,
-    crop: CropPayload,
-) -> Result<Response, String> {
-    let (pixels_u16, width, height, channels) = {
-        let guard = state.lock().unwrap();
-        let img = guard.as_ref().ok_or("No image loaded")?;
-        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels)
-    };
-
-    let view = crop_view(&crop, width, height);
-    let histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view);
-    Ok(Response::new(histogram_bytes(&histograms)))
-}

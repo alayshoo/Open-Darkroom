@@ -12,6 +12,7 @@ pub mod full_resolution;
 pub mod export_rendering;
 pub mod shaders;
 pub mod export_encoding;
+mod commands;
 mod export;
 
 use image_opening::ImageState;
@@ -27,9 +28,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             wrap_cursor,
             grab_cursor,
-            image_opening::open_image_file,
-            image_opening::crop_histograms,
-            full_resolution::full_resolution_rows,
+            commands::open_image_file,
+            commands::crop_histograms,
+            commands::full_resolution_rows,
             export::export_image,
         ])
         .run(tauri::generate_context!())
