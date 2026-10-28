@@ -663,6 +663,7 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
+    <div class="chrome-scrim"></div>
     <div class="toolbar shrink-0">
         <div
             class="toolbar-tools relative flex flex-col items-center"
@@ -1497,12 +1498,72 @@
             inset 20px 30px 60px -42px rgba(255, 255, 255, 0.17);
     }
 
-    /* Not a panel: a band of the backdrop colour fading out to the right, so a
-       zoomed image runs under it and dies away into the grey instead of meeting
-       an edge. It bleeds past the shell's insets to the window's left and bottom
-       and up behind the title bar scrim, since a soft falloff with a hard seam
-       around it would defeat the point. The box itself is the icon column; the
-       falloff is painted past its right edge. */
+    /* The one gradient the window chrome sits on: down the left edge under the
+       toolbar and across the top under the title bar, turning the corner
+       between them on a rounded inner edge. Two copies are stacked, a dense
+       band and a wide faint tail, and both ramp in on an eased curve, so
+       neither has a visible line where it starts. */
+    .chrome-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        pointer-events: none;
+    }
+
+    .chrome-scrim::before,
+    .chrome-scrim::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        /* Smoothstep, from each band's inner edge out to the window edge. */
+        --ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
+            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
+            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
+        /* The corner tile runs the same ramp, pushed out past the inner radius
+           (the first 31.25% of the tile), so it meets both bands exactly. */
+        background:
+            radial-gradient(
+                    var(--reach-x) var(--reach-y) at var(--reach-x)
+                        var(--reach-y),
+                    transparent 31.25%,
+                    rgba(0, 0, 0, 0.06) 41.56%,
+                    rgba(0, 0, 0, 0.22) 51.88%,
+                    rgba(0, 0, 0, 0.42) 62.19%,
+                    rgba(0, 0, 0, 0.65) 72.5%,
+                    rgba(0, 0, 0, 0.84) 82.81%,
+                    rgba(0, 0, 0, 0.97) 93.13%,
+                    black
+                )
+                0 0 / var(--reach-x) var(--reach-y) no-repeat,
+            linear-gradient(to top, var(--ramp)) var(--reach-x) 0 /
+                calc(100% - var(--reach-x)) var(--top) no-repeat,
+            linear-gradient(to left, var(--ramp)) 0 var(--reach-y) /
+                var(--left) calc(100% - var(--reach-y)) no-repeat;
+        transition: opacity 0.5s ease;
+    }
+
+    /* Each band's depth, and where the corner tile hands over to it: the depth
+       plus an inner radius in proportion to it. The hand-overs stay on
+       multiples of 4px so the seams land on whole device pixels at every
+       common display scale. */
+    .chrome-scrim::before {
+        --top: 55px;
+        --left: 68.75px;
+        --reach-x: 100px;
+        --reach-y: 80px;
+        opacity: var(--scrimStrength);
+    }
+
+    .chrome-scrim::after {
+        --top: 143px;
+        --left: 178.75px;
+        --reach-x: 260px;
+        --reach-y: 208px;
+        opacity: calc(var(--scrimStrength) * 0.35);
+    }
+
+    /* The icon column. It bleeds past the shell's insets to the window's left,
+       top and bottom edges so its buttons sit on the scrim's left band. */
     .toolbar {
         position: relative;
         margin: -44px 0 -12px -12px;
@@ -1511,8 +1572,6 @@
         pointer-events: auto;
     }
 
-    /* Clears the title bar the toolbar bleeds up behind, and sits above the
-       falloff painted by ::before. */
     .footer-item {
         transition: opacity 0.2s ease;
     }
@@ -1525,29 +1584,14 @@
         z-index: 1;
     }
 
-    /* At the foot of the icon column, clear of the window's bottom edge the
-       toolbar bleeds down to. */
+    /* At the foot of the icon column. The button's chip, inset 3px inside its
+       box, sits as far from the window's bottom edge as from its left. */
     .toolbar-zoom {
         left: 0;
         right: 6px;
-        bottom: 24px;
+        bottom: 0;
         z-index: 1;
         transition: opacity 0.2s ease;
-    }
-
-    .toolbar::before {
-        content: "";
-        position: absolute;
-        inset: 0 -40px 0 0;
-        background: linear-gradient(
-            to right,
-            var(--canvasBackdrop) 0%,
-            var(--canvasBackdrop) 42%,
-            color-mix(in srgb, var(--canvasBackdrop) 55%, transparent) 68%,
-            color-mix(in srgb, var(--canvasBackdrop) 18%, transparent) 85%,
-            transparent 100%
-        );
-        pointer-events: none;
     }
 
     /* Lifted above the canvas like the side bar. The padding leaves room for
@@ -1568,6 +1612,8 @@
 
     .side-bar {
         min-width: 300px;
+        /* A faint lift so labels and values hold up over a bright image. */
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
         position: relative;
         z-index: 10;
         pointer-events: auto;

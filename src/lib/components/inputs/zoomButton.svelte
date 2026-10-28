@@ -29,10 +29,13 @@
 <style>
 	/* Same ink as the crop button. */
 	.face-label {
-		color: var(--color2);
+		color: var(--chromeInk);
 		font-size: 12px;
 		font-weight: 600;
 		letter-spacing: 0.02em;
 		pointer-events: none;
+		text-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.75),
+			0 0 10px rgba(0, 0, 0, 0.45);
 	}
 </style>

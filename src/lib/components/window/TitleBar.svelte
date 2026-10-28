@@ -59,16 +59,9 @@
     });
 </script>
 
-<!-- The only thing the bar paints. Every control sits directly on this
-     gradient, so it carries all of the legibility once an image is zoomed far
-     enough to spill up here. It ends exactly on the panel line (44px, matching
-     .app-shell's top inset) and is fully transparent there, so it never dims
-     the panels' top rim. -->
-<div class="titlebar-scrim"></div>
-
-<!-- The bar itself is a drag region and a positioning context, nothing more:
-     no fill, no border, no boxes around the controls. Without a bounding box
-     to sit in, everything here runs a size up from the panel controls below. -->
+<!-- A drag region and a positioning context, nothing more: no fill, no
+     border, no boxes around the controls. The gradient the controls sit on is
+     the page's .chrome-scrim, which runs on down the left edge. -->
 <div
     class="titlebar flex items-center justify-center"
     class:modal-open={settings.open}
@@ -84,13 +77,9 @@
         data-tauri-drag-region
         class="chrome chrome-leading flex items-center gap-2.5"
     >
-        <img
-            data-tauri-drag-region
-            class="app-icon h-5.5 w-5.5"
-            src="favicon.png"
-            alt=""
-            aria-hidden="true"
-        />
+        <span data-tauri-drag-region class="app-icon flex" aria-hidden="true">
+            <span data-tauri-drag-region class="app-icon-glyph h-5.5 w-5.5"></span>
+        </span>
         <div class="menu-buttons flex gap-1">
             <MenuButton
                 label="File"
@@ -166,8 +155,8 @@
         style="pointer-events: {editable && !settings.open ? 'auto' : 'none'}"
     />
 
-    <!-- Trailing group. The buttons' hover fills end on 12px, matching the
-         side bar's right edge. -->
+    <!-- Trailing group. The buttons sit 5px in from the window's right edge,
+         the same as from its top. -->
     <div
         data-tauri-drag-region
         class="chrome chrome-trailing flex items-center gap-0.5"
@@ -253,33 +242,9 @@
 </div>
 
 <style>
-    .titlebar-scrim {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 44px;
-        /* Stronger than it needs to be over the #262626 backdrop, where it is
-           all but invisible; this is sized for a blown-out sky sitting under
-           the controls. The midpoint is pushed past halfway so the band stays
-           dense across the controls themselves and does the fading below
-           them, rather than thinning out where the glyphs are. */
-        background: linear-gradient(
-            to bottom,
-            rgba(0, 0, 0, 0.55),
-            rgba(0, 0, 0, 0.34) 55%,
-            rgba(0, 0, 0, 0)
-        );
-        pointer-events: none;
-        /* Above .app-shell (z-index 1) so it covers image overflow, below the
-           bar itself. */
-        z-index: 998;
-    }
-
     /* Above the modal overlay, not below it: moving, maximising and closing the
        window belong to the window rather than to whatever is on top of it, so
-       they stay sharp and live while a modal dims the app. The scrim below
-       stays under the overlay and dims with everything else. */
+       they stay sharp and live while a modal dims the app. */
     .titlebar {
         position: fixed;
         top: 0;
@@ -327,13 +292,21 @@
     }
 
     .chrome-trailing {
-        right: 12px;
+        right: 5px;
     }
 
     .app-icon {
-        /* The artwork is its own silhouette; a plain shadow separates it from
-           bright pixels the way the text-shadows do for everything else. */
+        /* On a wrapper, since the glyph's own mask would clip the shadow. */
         filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+    }
+
+    /* The artwork used as a silhouette, inked like the menus so it follows the
+       theme. */
+    .app-icon-glyph {
+        display: block;
+        background-color: var(--color2);
+        -webkit-mask: url("/favicon.png") center / contain no-repeat;
+        mask: url("/favicon.png") center / contain no-repeat;
     }
 
     .chrome-trailing button {
