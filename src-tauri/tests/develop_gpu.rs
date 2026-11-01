@@ -11,12 +11,13 @@ mod common;
 
 use common::{
     develop, develop16, develop_patch, gray_ramp, primaries, rgb_ramp, run_calc_params,
-    run_histogram, solid, through_linear, u8_to_u16, weighted_mean_bin, HIST_VOTE,
+    run_histogram, run_histogram_with, solid, through_linear, u8_to_u16, weighted_mean_bin,
+    HIST_VOTE,
 };
 
 use open_darkroom_lib::export_rendering::SlidersPayload;
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
-use open_darkroom_lib::icc::SRGB_TO_WORKING;
+use open_darkroom_lib::icc::{Matrix3, SourceSpace, SRGB_TO_WORKING};
 
 // ── calcParams: matrix construction ───────────────────────────────────────────
 
@@ -602,5 +603,50 @@ fn histogram_agrees_with_the_developed_image() {
                  developed image mean {cpu_mean:.2} — the two chains disagree"
             );
         }
+    }
+}
+
+// ── histogram.wgsl, darkroom stage ────────────────────────────────────────────
+
+/// A strongly non-diagonal source matrix with rows summing to one, the shape a
+/// camera's colour matrix takes. Column-major.
+const CAMERA_LIKE: Matrix3 = [1.6, -0.15, 0.0, -0.4, 1.55, -0.4, -0.2, -0.4, 1.4];
+
+/// While bracketing, the bins stop before the source matrix mixes the channels,
+/// so one channel's sliders move only that channel's bins.
+#[test]
+fn the_darkroom_histogram_keeps_the_channels_apart() {
+    let space = SourceSpace::linear_with_matrix(CAMERA_LIKE);
+    let img = rgb_ramp(64, 64);
+    let moved = SlidersPayload { green_black_point: 60.0, green_gamma: 1.4, ..Default::default() };
+
+    let before = run_histogram_with(&img, &SlidersPayload::default(), &space, true);
+    let after = run_histogram_with(&img, &moved, &space, true);
+    assert_ne!(before[1], after[1], "the green sliders did not move green");
+    assert_eq!(before[0], after[0], "the green sliders moved red");
+    assert_eq!(before[2], after[2], "the green sliders moved blue");
+
+    // On screen the matrix does carry green into red, which is the point of
+    // measuring before it.
+    let before = run_histogram_with(&img, &SlidersPayload::default(), &space, false);
+    let after = run_histogram_with(&img, &moved, &space, false);
+    assert_ne!(before[0], after[0], "the fixture no longer exercises the matrix");
+}
+
+/// The darkroom bins sit on the sliders' scale: a patch at slider value `v`
+/// lands in bin `v`, and a black point set on it sends it to bin 0.
+#[test]
+fn the_darkroom_histogram_reads_on_the_slider_scale() {
+    for value in [32u8, 128, 200] {
+        let img = solid(16, 16, [u8_to_u16(value); 4]);
+        let space = SourceSpace::default();
+
+        let bins = run_histogram_with(&img, &SlidersPayload::default(), &space, true);
+        let mean = weighted_mean_bin(&bins[0]);
+        assert!((mean - value as f64).abs() < 1.0, "patch {value} measured at bin {mean:.2}");
+
+        let black = SlidersPayload { red_black_point: value as f32, ..Default::default() };
+        let bins = run_histogram_with(&img, &black, &space, true);
+        assert!(weighted_mean_bin(&bins[0]) < 0.5, "black point {value} did not reach bin 0");
     }
 }

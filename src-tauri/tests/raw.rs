@@ -145,13 +145,13 @@ fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
 // ── White balance ─────────────────────────────────────────────────────────────
 
 #[test]
-fn white_balance_is_scaled_by_its_largest_coefficient() {
-    let wb = white_balance([2.0, 1.0, 1.5, f32::NAN]);
+fn white_balance_is_scaled_by_its_smallest_coefficient() {
+    let wb = white_balance([4.0, 2.0, 3.0, f32::NAN]);
 
-    assert_eq!(wb, [1.0, 0.5, 0.75]);
+    assert_eq!(wb, [2.0, 1.0, 1.5]);
     assert!(
-        wb.iter().all(|&c| c <= 1.0),
-        "no coefficient may push a sample past unity"
+        wb.iter().all(|&c| c >= 1.0),
+        "no coefficient may darken a channel below its exposure"
     );
 }
 

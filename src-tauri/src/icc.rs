@@ -15,7 +15,7 @@ use lcms2::{
     Tag, TagSignature, ThreadContext, ToneCurve, Transform,
 };
 
-use crate::color::{srgb_to_linear, LUT_SIZE};
+use crate::color::{linear_to_srgb, srgb_to_linear, LUT_SIZE};
 
 /// Column-major 3×3, the layout a WGSL `mat3x3<f32>` expects.
 pub type Matrix3 = [f32; 9];
@@ -214,6 +214,21 @@ impl SourceSpace {
                 (0..LUT_SIZE).map(|i| map(srgb_to_linear(unit(i)))).collect()
             }),
         }
+    }
+
+    /// The input histogram bin, 0–255, of every u16 code value.
+    ///
+    /// Bins sit on the scale the darkroom sliders read, sRGB code values, so a
+    /// slider handle lines up with the data under it. An encoded source is
+    /// already on that scale; a linear one is encoded first.
+    pub fn histogram_bins(&self) -> Vec<u8> {
+        if !self.linear {
+            return (0..LUT_SIZE).map(|i| (i >> 8) as u8).collect();
+        }
+        let unit = |i: usize| i as f32 / (LUT_SIZE - 1) as f32;
+        (0..LUT_SIZE)
+            .map(|i| (linear_to_srgb(unit(i)) * 256.0).min(255.0) as u8)
+            .collect()
     }
 
     /// Convert interleaved u16 source pixels into interleaved *linear Rec.2020*

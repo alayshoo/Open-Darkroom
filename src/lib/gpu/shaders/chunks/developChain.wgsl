@@ -78,7 +78,9 @@ fn curve_channel(x: f32, ch: u32) -> f32 {
   return mix(params.curve_lut[i][ch], params.curve_lut[i + 1u][ch], t - f32(i));
 }
 
-fn develop(source: vec3f) -> vec3f {
+// Steps 1-3, the darkroom block, in the source's own channels. Each output
+// channel depends only on the same input channel and its own sliders.
+fn darkroom(source: vec3f) -> vec3f {
   var rgb = source;
 
   // 1. Darkroom matrix — black/white point remap + optional inversion,
@@ -99,7 +101,11 @@ fn develop(source: vec3f) -> vec3f {
   // they were not: output black 80 with gamma 2.2 put pure black at sRGB 153,
   // and output white 200 put pure white at 228. Input remap → gamma → output
   // remap is the order a Levels dialog and a scanner both use.
-  rgb = rgb * params.out_scale + params.out_black;
+  return rgb * params.out_scale + params.out_black;
+}
+
+fn develop(source: vec3f) -> vec3f {
+  var rgb = darkroom(source);
 
   // 4. Source → working space, composed with white balance (Bradford CAT).
   //

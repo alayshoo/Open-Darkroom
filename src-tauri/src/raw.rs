@@ -143,15 +143,15 @@ fn reject_unsupported_sensor(raw: &RawImage) -> Result<(), String> {
     Ok(())
 }
 
-/// As-shot white balance multipliers for R, G and B, scaled so the largest is
+/// As-shot white balance multipliers for R, G and B, scaled so the smallest is
 /// exactly one.
 ///
-/// Scaling by the largest rather than by green is what keeps the result inside
-/// the unit interval, so nothing clips on the way into u16. The image lands
-/// darker by roughly the largest coefficient, which the black and white points
-/// recover. No precision goes with it: a 14-bit source spreads over the u16
-/// range four codes apart, so scaling it down by anything above a quarter
-/// still leaves every input code its own output code.
+/// The smallest is green in practice, so green keeps its exposure and the other
+/// two are lifted to meet it. Whatever a multiplier pushes past one clips on the
+/// way into u16. That only touches a channel brighter than the point where the
+/// sensor saturates, and it is what turns a blown highlight white: a sensor
+/// clipped in every channel stays clipped in every channel rather than taking
+/// on the tint of the balance.
 pub fn white_balance(wb_coeffs: [f32; 4]) -> [f32; RAW_CHANNELS] {
     let coeffs: [f32; RAW_CHANNELS] = std::array::from_fn(|c| wb_coeffs[c]);
 
@@ -160,8 +160,8 @@ pub fn white_balance(wb_coeffs: [f32; 4]) -> [f32; RAW_CHANNELS] {
         return [1.0; RAW_CHANNELS];
     }
 
-    let max = coeffs.iter().copied().fold(f32::MIN, f32::max);
-    coeffs.map(|c| c / max)
+    let min = coeffs.iter().copied().fold(f32::MAX, f32::min);
+    coeffs.map(|c| c / min)
 }
 
 /// Camera RGB → linear Rec.2020, column-major for WGSL.
