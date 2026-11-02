@@ -241,6 +241,8 @@
         } else if (t || b) {
             w = (h * th * held) / tw;
         }
+        // A pointer dragged past the far side leaves the box at its smallest.
+        w = Math.max(w, 1e-9);
         h = (w * tw) / (held * th);
 
         const grow = Math.max(1, MIN_EXTENT / w, MIN_EXTENT / h);
