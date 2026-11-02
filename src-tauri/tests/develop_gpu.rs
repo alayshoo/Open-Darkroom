@@ -124,16 +124,25 @@ fn inversion_flips_the_darkroom_matrix_slope() {
     let normal = run_calc_params(&SlidersPayload::default());
     let inverted = run_calc_params(&SlidersPayload {
         invert: true,
+        red_black_point: 40.0,
+        red_white_point: 130.0,
         ..Default::default()
     });
 
     // Column-major: lane 0 is the red scale, lane 12 the red offset.
     assert!(normal.dr_matrix()[0] > 0.0, "normal slope is positive");
     assert!(inverted.dr_matrix()[0] < 0.0, "inverted slope is negative");
-    assert!(
-        (inverted.dr_matrix()[12] - 1.0).abs() < 1e-5,
-        "inverted red channel should start at the output white point"
-    );
+    assert_eq!(normal.dr_density(), 0.0, "a positive is remapped in linear light");
+    assert_eq!(inverted.dr_density(), 1.0, "a negative is remapped in density");
+
+    // Inverted, the matrix acts on log2 transmittance: the black point must
+    // land on white and the white point on black.
+    let red = |slider: f64| {
+        let density = common::srgb_to_linear(slider / 255.0).log2() as f32;
+        inverted.dr_matrix()[0] * density + inverted.dr_matrix()[12]
+    };
+    assert!((red(40.0) - 1.0).abs() < 1e-4, "black point should land on 1, got {}", red(40.0));
+    assert!(red(130.0).abs() < 1e-4, "white point should land on 0, got {}", red(130.0));
 }
 
 /// The parameters must stay finite for every slider position the UI can reach.
@@ -332,52 +341,41 @@ fn per_channel_gamma_lifts_midtones() {
     );
 }
 
-/// Inverting twice must return the original image — the core guarantee of the
-/// negative workflow.
-///
-/// The round trip runs at 16 bits deliberately. Inversion happens in linear
-/// light, so shadow detail lands in the top few sRGB code values: an 8-bit
-/// intermediate collapses input 4 onto 255, and inverting 255 gives 0 rather
-/// than 4. That is a real property of the pipeline, and the reason inverting a
-/// negative is worth doing at 16-bit depth.
+/// A negative's density is linear in scene stops, so tones spaced evenly in
+/// log transmittance between the points must come out evenly spaced in sRGB,
+/// with their geometric middle on mid-grey.
 #[test]
-fn inversion_is_its_own_inverse() {
+fn inversion_spaces_negative_stops_evenly() {
+    const BLACK: f64 = 40.0;
+    const WHITE: f64 = 130.0;
+    const STEPS: u32 = 9;
     let sliders = SlidersPayload {
         invert: true,
+        red_black_point: BLACK as f32,
+        green_black_point: BLACK as f32,
+        blue_black_point: BLACK as f32,
+        red_white_point: WHITE as f32,
+        green_white_point: WHITE as f32,
+        blue_white_point: WHITE as f32,
         ..Default::default()
     };
 
-    let original = rgb_ramp(64, 4);
-    let once = develop16(&original, &sliders);
-
-    // Feed the inverted result back in as a 16-bit source.
-    let round_two = Rgba16Image::from_fn(64, 4, |x, y| {
-        let i = (y * 64 + x) as usize * 3;
-        image::Rgba([once[i], once[i + 1], once[i + 2], u16::MAX])
+    let lo = common::srgb_to_linear(BLACK / 255.0).log2();
+    let hi = common::srgb_to_linear(WHITE / 255.0).log2();
+    let img = Rgba16Image::from_fn(STEPS, 1, |x, _| {
+        let t = (lo + (hi - lo) * x as f64 / (STEPS - 1) as f64).exp2();
+        let v = (common::linear_to_srgb(t) * 65535.0).round() as u16;
+        image::Rgba([v, v, v, u16::MAX])
     });
-    let twice = develop16(&round_two, &sliders);
+    let out = develop16(&img, &sliders);
 
-    // Compare in linear light, which is where the inversion actually happens;
-    // in sRGB code values the error near black looks enormous because the
-    // transfer curve has a slope of ~13 there.
-    //
-    // The budget is the 16-bit intermediate, now that nothing narrower sits in
-    // the export path: one u16 sRGB step near white is 1/65535, and converting
-    // it to linear multiplies it by d(linear)/d(sRGB) = 2.4/1.055 ≈ 2.3, giving
-    // ~3.5e-5. Inversion is a subtraction in linear light, so that lands
-    // unchanged wherever the tone came from.
-    const TOLERANCE: f64 = 1.0e-4;
-
-    for i in 0..(64 * 4) {
-        for c in 0..3 {
-            let expected = common::srgb_to_linear(original.as_raw()[i * 4 + c] as f64 / 65535.0);
-            let actual = common::srgb_to_linear(twice[i * 3 + c] as f64 / 65535.0);
-            assert!(
-                (expected - actual).abs() < TOLERANCE,
-                "pixel {i} channel {c}: double inversion gave linear {actual:.6}, \
-                 expected {expected:.6}"
-            );
-        }
+    for x in 0..STEPS as usize {
+        let expected = 1.0 - x as f64 / (STEPS - 1) as f64;
+        let actual = out[x * 3] as f64 / 65535.0;
+        assert!(
+            (actual - expected).abs() < 2e-3,
+            "step {x}: expected sRGB {expected:.4}, got {actual:.4}"
+        );
     }
 }
 

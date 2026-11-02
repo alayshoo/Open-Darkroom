@@ -412,6 +412,10 @@ impl Params {
     pub fn blacks(&self) -> f32 {
         self.0[42]
     }
+    /// 1 while `dr_matrix` acts on log2 transmittance, as it does when inverting.
+    pub fn dr_density(&self) -> f32 {
+        self.0[43]
+    }
     pub fn hue_sat_matrix(&self) -> &[f32] {
         &self.0[44..60]
     }
@@ -427,7 +431,7 @@ impl Params {
 
     /// Every meaningful lane, skipping the explicit padding slots.
     pub fn significant_values(&self) -> Vec<(usize, f32)> {
-        const PADDING: [usize; 7] = [21, 22, 23, 27, 31, 35, 43];
+        const PADDING: [usize; 6] = [21, 22, 23, 27, 31, 35];
         self.0
             .iter()
             .enumerate()
