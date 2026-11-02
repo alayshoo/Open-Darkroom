@@ -134,9 +134,9 @@ export const defaultSlidersBW: Sliders = {
     ...HSL_NEUTRAL,
 };
 
-/* The two control modes own disjoint halves of the slider set — the darkroom
-   pager drives these, every other page drives the rest. Copy, paste and reset
-   only ever touch the half belonging to the mode the user is in. */
+/* The darkroom pager drives these, every other page drives the rest, and the
+   shared keys appear in both. Copy, paste and reset only ever touch the keys
+   belonging to the mode the user is in. */
 const darkroomKeys = new Set<keyof Sliders>([
     "invert",
     "redBlackPoint",
@@ -155,9 +155,16 @@ const darkroomKeys = new Set<keyof Sliders>([
     "rgbOutputWhite",
 ]);
 
+export const sharedModeKeys = new Set<keyof Sliders>([
+    "usmAmount",
+    "usmRadius",
+    "usmLumaThreshold",
+    "usmDetailThreshold",
+]);
+
 export function modeKeys(isDarkroom: boolean): (keyof Sliders)[] {
     return (Object.keys(defaultSlidersRGB) as (keyof Sliders)[]).filter(
-        (key) => darkroomKeys.has(key) === isDarkroom,
+        (key) => sharedModeKeys.has(key) || darkroomKeys.has(key) === isDarkroom,
     );
 }
 

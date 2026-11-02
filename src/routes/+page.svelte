@@ -536,8 +536,8 @@
         if (curvesChange.newCurves) stateAccessors.setCurves(curvesChange.newCurves);
     }
 
-    // All three act on the mode the user is looking at, and never reach across
-    // into the other mode's half of the sliders.
+    // All three act on the sliders of the mode the user is looking at, which
+    // includes the ones both modes share.
     let activeKeys = $derived(modeKeys(isDarkroom));
 
     async function handleCopyAdjustments() {

@@ -5,7 +5,12 @@
 // so the round trip and the leniency it promises are pinned here.
 
 import { describe, expect, it, vi } from "vitest";
-import { defaultSlidersRGB, modeKeys, type Sliders } from "$lib/types/imgParameters";
+import {
+  defaultSlidersRGB,
+  modeKeys,
+  sharedModeKeys,
+  type Sliders,
+} from "$lib/types/imgParameters";
 import { defaultCurves } from "$lib/types/curves";
 
 const writeText = vi.hoisted(() => vi.fn());
@@ -42,11 +47,20 @@ function distinctSliders(): Sliders {
 }
 
 describe("every attribute", () => {
-  it("belongs to exactly one mode", () => {
-    expect([...normalKeys, ...darkroomKeys].sort()).toEqual(
+  it("belongs to exactly one mode, unless it is shared by both", () => {
+    expect([...new Set([...normalKeys, ...darkroomKeys])].sort()).toEqual(
       Object.keys(defaultSlidersRGB).sort(),
     );
-    expect(normalKeys.filter((key) => darkroomKeys.includes(key))).toEqual([]);
+    expect(normalKeys.filter((key) => darkroomKeys.includes(key)).sort()).toEqual(
+      [...sharedModeKeys].sort(),
+    );
+  });
+
+  it("includes the unsharp mask in both modes", () => {
+    for (const key of ["usmAmount", "usmRadius", "usmLumaThreshold", "usmDetailThreshold"] as const) {
+      expect(normalKeys, key).toContain(key);
+      expect(darkroomKeys, key).toContain(key);
+    }
   });
 
   it("is written, each with its own value and nothing else alongside", async () => {
