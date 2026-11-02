@@ -231,10 +231,8 @@
 
 	.label,
 	.column-title {
-		font-size: 12px;
+		font-size: 13px;
 		font-weight: 600;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
 		color: var(--color3);
 	}
 
