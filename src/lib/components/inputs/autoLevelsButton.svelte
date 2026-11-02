@@ -17,6 +17,16 @@
 </div>
 
 <style>
+	/* The same flat black well the toggles beside it sit in. */
+	.auto-levels {
+		display: flex;
+		border-radius: 10px;
+		background: var(--bg1);
+		box-shadow:
+			inset 0 1px 2px rgba(0, 0, 0, 0.9),
+			inset 0 0 0 1px color-mix(in srgb, var(--glassRim) 4%, transparent);
+	}
+
 	.glyph {
 		inset: 0;
 		display: flex;
