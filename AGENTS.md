@@ -15,4 +15,4 @@ Comments should be generic, not based on your reasoning when solving a specific 
 
 ## Branches and releases
 
-`night-build` is the default branch. All work branches off it and merges back into it. `main` only receives `night-build` through the `release` skill, and every push to `main` builds the Windows `.msi` and publishes it as a GitHub release. Never merge or push anything else into `main`.
+`main` is the default branch and the nightly build. All work branches off it and merges back into it. The `release` branch only receives `main` through the `release` skill, and every push to `release` builds the Windows `.msi` and publishes it as a GitHub release. Never merge or push anything else into `release`.

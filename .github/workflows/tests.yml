@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, night-build]
+    branches: [main]
   pull_request:
 
 # A second push to a branch makes the first run's answer worthless.
