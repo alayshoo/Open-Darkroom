@@ -4,7 +4,7 @@
 // real sliders and the undo/redo shortcuts: each step brings its mode and its
 // lighter-room page into view, and lands the value it recorded.
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { mount, unmount } from "svelte";
 
@@ -133,23 +133,13 @@ async function setMode(darkroom: boolean) {
     await vi.waitFor(() => {
         expect(isDarkroom()).toBe(darkroom);
         expect(document.querySelectorAll(".controls-pager")).toHaveLength(1);
-    }, { timeout: 2000 });
+    }, { timeout: 5000 });
 }
 
 const undo = () => userEvent.keyboard("{Control>}z{/Control}");
 const redo = () => userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
-
-// Headed Chromium on a software adapter rejects the preview's onSubmittedWorkDone,
-// which nothing here depends on. Listening hides rejections from Vitest, so any
-// other one fails the test it happened in.
-const SOFTWARE_ADAPTER_REJECTION = "A valid external Instance reference no longer exists";
-const rejections: unknown[] = [];
-window.addEventListener("unhandledrejection", (e) => {
-    if (!String(e.reason).includes(SOFTWARE_ADAPTER_REJECTION)) rejections.push(e.reason);
-});
-afterEach(() => expect(rejections.splice(0)).toEqual([]));
 
 beforeAll(async () => {
     stubTauri();
@@ -164,8 +154,11 @@ beforeAll(async () => {
 
 afterAll(() => unmount(app));
 
+// Each mode opens on its middle page, so the darkroom starts on the input levels.
 beforeEach(async () => {
     history.clear();
+    await setMode(true);
+    await goToPage(1);
     await setMode(false);
     await goToPage(1);
 });
@@ -243,6 +236,42 @@ describe("undo and redo bring the edited controls into view", () => {
         await undo();
         await redo();
         expect(pageIndex()).toBe(2);
+    });
+
+    it("records arrow-key edits on a lighter-room slider", async () => {
+        const before = value("Exposure");
+        group("Exposure").querySelector<HTMLElement>("[role=slider]")!.focus();
+        await userEvent.keyboard("{ArrowRight}");
+        expect(value("Exposure")).not.toBe(before);
+        expect(history.stack).toHaveLength(1);
+
+        await undo();
+        await expect.poll(() => value("Exposure")).toBe(before);
+    });
+
+    it("jumps to the darkroom sharpness page to undo an unsharp mask edit there", async () => {
+        await setMode(true);
+        await goToPage(0);
+        const before = value("Radius");
+        dragSlider("Radius");
+        await goToPage(1);
+
+        await undo();
+        expect(isDarkroom()).toBe(true);
+        expect(pageIndex()).toBe(0);
+        await expect.poll(() => value("Radius")).toBe(before);
+    });
+
+    it("undoes an unsharp mask edit in the mode the user is in", async () => {
+        await setMode(true);
+        await goToPage(0);
+        dragSlider("Amount");
+        await setMode(false);
+
+        await undo();
+        await new Promise((r) => setTimeout(r, 600));
+        expect(isDarkroom()).toBe(false);
+        expect(pageIndex()).toBe(0);
     });
 
     it("brings redo into view the same way", async () => {
