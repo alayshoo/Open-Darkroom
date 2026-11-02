@@ -22,6 +22,6 @@
 >
 	<svg width="53" height="28" aria-hidden="true">
 		<circle cx="15" cy="14" r="6" fill="white" />
-		<circle cx="38" cy="14" r="6" fill="#FF0A0A" />
+		<circle cx="38" cy="14" r="6" fill="none" stroke="#FF0A0A" stroke-width="2" />
 	</svg>
 </GlassToggle>

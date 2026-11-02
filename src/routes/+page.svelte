@@ -1048,8 +1048,11 @@
             />
         </div>
     </div>
-    <div class="toolbar shrink-0">
+    <!-- The empty parts of the icon column drag the window; Tauri matches the
+         attribute on the event target alone, so the buttons are unaffected. -->
+    <div data-tauri-drag-region class="toolbar shrink-0">
         <div
+            data-tauri-drag-region
             class="toolbar-tools relative flex flex-col items-center"
             class:dimmed={!imagePayload}
             inert={!imagePayload}
@@ -1075,6 +1078,7 @@
             />
         </div>
         <div
+            data-tauri-drag-region
             class="toolbar-zoom absolute flex justify-center"
             class:dimmed={!imagePayload}
             inert={!imagePayload}
