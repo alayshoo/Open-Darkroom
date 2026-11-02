@@ -13,6 +13,7 @@ pub mod export_rendering;
 pub mod shaders;
 pub mod export_encoding;
 mod export;
+mod presets;
 
 use image_opening::ImageState;
 
@@ -31,6 +32,8 @@ pub fn run() {
             image_opening::crop_histograms,
             full_resolution::full_resolution_rows,
             export::export_image,
+            presets::export_preset,
+            presets::import_presets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

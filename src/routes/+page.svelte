@@ -32,6 +32,18 @@
     import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
     import ExportModal from "$lib/components/ExportModal.svelte";
+    import PresetsButton from "$lib/components/inputs/presetsButton.svelte";
+    import PresetsPanel from "$lib/components/presets/PresetsPanel.svelte";
+    import PresetModal from "$lib/components/presets/PresetModal.svelte";
+    import { presets } from "$lib/presets/presets.svelte";
+    import {
+        type Preset,
+        captureGroups,
+        changedGroupIds,
+        presetGroupIds,
+        revisePreset,
+        PRESET_GROUPS,
+    } from "$lib/presets/presetDocument";
 
     import {
         type Sliders,
@@ -366,6 +378,7 @@
     }
 
     function enterCrop() {
+        presets.open = false;
         zoom = null;
         draftCrop = { ...crop };
         isCropping = true;
@@ -630,6 +643,102 @@
 
     let isCurvesIdentity = $derived(curvesEqual(curves, defaultCurves()));
 
+    // ===== Presets =====
+
+    let hoveredPreset = $state<Preset | null>(null);
+    let previewPreset = $derived(presets.open && !sidebarInactive ? hoveredPreset : null);
+
+    $effect(() => {
+        if (!presets.open) hoveredPreset = null;
+    });
+
+    /* What the preview shows: the committed state with the hovered preset laid
+       over it, minus what applying it in B&W would divert. */
+    let shownSliders: Sliders = $derived.by(() => {
+        if (!previewPreset) return sliders;
+        const next = { ...sliders };
+        for (const [key, value] of Object.entries(previewPreset.sliders)) {
+            if (!isRgb && key in overridesBW) continue;
+            (next as any)[key] = value;
+        }
+        return next;
+    });
+
+    let shownCurveLut = $derived(
+        previewPreset?.curves
+            ? bakeCurveLut({ ...curves, ...previewPreset.curves }, isRgb)
+            : curveLut,
+    );
+
+    function applyPreset(preset: Preset) {
+        if (sidebarInactive) return;
+        applySliderSet({ ...preset.sliders }, preset.curves ?? {});
+    }
+
+    type PresetDialog = { editing: Preset | null; name: string; groups: Set<string> };
+    let presetDialog = $state<PresetDialog | null>(null);
+
+    function currentCurves() {
+        return cloneCurves($state.snapshot(curves) as Curves);
+    }
+
+    // A new preset starts from whatever has been changed, or from the whole
+    // mode when nothing has.
+    function openNewPreset() {
+        let groups = changedGroupIds(sliders, curves);
+        if (groups.size === 0) {
+            const mode = isDarkroom ? "darkroom" : "lighter-room";
+            const inMode = PRESET_GROUPS.filter((g) => g.mode === mode || g.mode === "both");
+            groups = new Set(inMode.map((g) => g.id));
+        }
+        presetDialog = { editing: null, name: "", groups };
+    }
+
+    function openEditPreset(preset: Preset) {
+        presetDialog = { editing: preset, name: preset.name, groups: presetGroupIds(preset) };
+    }
+
+    function savePresetDialog(name: string, groups: Set<string>, overwrite: boolean) {
+        const dialog = presetDialog;
+        presetDialog = null;
+        if (!dialog) return;
+
+        const current = captureGroups(groups, sliders, currentCurves());
+        const stored = dialog.editing;
+        if (!stored) {
+            presets.add({ name, ...current });
+            return;
+        }
+        if (overwrite) {
+            presets.update(stored.id, { name, ...current });
+            return;
+        }
+
+        presets.update(stored.id, { name, ...revisePreset(stored, current, groups) });
+    }
+
+    async function exportPreset(preset: Preset) {
+        try {
+            await presets.exportFile(preset);
+        } catch (e) {
+            console.error("Failed to export preset:", e);
+        }
+    }
+
+    async function importPresets() {
+        try {
+            const failed = await presets.importFiles();
+            if (failed > 0) console.warn(`${failed} preset file(s) could not be read`);
+        } catch (e) {
+            console.error("Failed to import presets:", e);
+        }
+    }
+
+    function deletePreset(preset: Preset) {
+        if (hoveredPreset?.id === preset.id) hoveredPreset = null;
+        presets.remove(preset.id);
+    }
+
     // Whether a reset would change anything, judged on the same keys it writes.
     let isIdentity = $derived(
         (isDarkroom || isCurvesIdentity) &&
@@ -686,6 +795,14 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        // The preset dialog takes the keyboard while it is up.
+        if (presetDialog) {
+            if (e.key === "Escape") {
+                presetDialog = null;
+                e.preventDefault();
+            }
+            return;
+        }
         if (loupe.picking && e.key === "Escape" && !settings.open && !isTextField(e.target)) {
             loupe.picking = false;
             e.preventDefault();
@@ -812,6 +929,21 @@
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
     <div class="chrome-scrim"></div>
+    <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
+        <div class="presets-slide h-full">
+            <PresetsPanel
+                list={presets.list}
+                canApply={!sidebarInactive}
+                onapply={applyPreset}
+                onhover={(preset) => (hoveredPreset = preset)}
+                onadd={openNewPreset}
+                onimport={importPresets}
+                onedit={openEditPreset}
+                onexport={exportPreset}
+                ondelete={deletePreset}
+            />
+        </div>
+    </div>
     <div class="toolbar shrink-0">
         <div
             class="toolbar-tools relative flex flex-col items-center"
@@ -819,6 +951,11 @@
             inert={!imagePayload}
         >
             <CropButton active={isCropping} ontoggle={toggleCrop} />
+            <PresetsButton
+                active={presets.open}
+                disabled={isCropping}
+                ontoggle={() => presets.toggle()}
+            />
             <CropTools
                 visible={isCropping}
                 bind:straightening={isStraightening}
@@ -843,14 +980,14 @@
     <!-- Its own column, so opening it shifts the image rather than covering it. -->
     {#if settings.debugTools && colorSpaceDebug.enabled}
         <div class="colour-space-bar shrink-0">
-            <ColorSpacePanel {sliders} {curveLut} {imagePayload} />
+            <ColorSpacePanel sliders={shownSliders} curveLut={shownCurveLut} {imagePayload} />
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
         <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas
-                {sliders}
-                {curveLut}
+                sliders={shownSliders}
+                curveLut={shownCurveLut}
                 {imagePayload}
                 crop={isCropping ? draftCrop : crop}
                 showWhole={isCropping}
@@ -884,8 +1021,8 @@
                 inert={sidebarInactive}
             >
                 <Histogram
-                    {sliders}
-                    {curveLut}
+                    sliders={shownSliders}
+                    curveLut={shownCurveLut}
                     {imagePayload}
                     {crop}
                     curveCanvas={curveHistogramCanvas}
@@ -1546,6 +1683,16 @@
 
 <ExportModal visible={showExportModal}></ExportModal>
 
+{#if presetDialog}
+    <PresetModal
+        editing={presetDialog.editing !== null}
+        initialName={presetDialog.name}
+        initialGroups={presetDialog.groups}
+        onsave={savePresetDialog}
+        oncancel={() => (presetDialog = null)}
+    />
+{/if}
+
 <style>
     .canvas-backdrop {
         position: fixed;
@@ -1693,6 +1840,38 @@
 
     .footer-item {
         transition: opacity 0.2s ease;
+    }
+
+    /* Opens as a column of its own, pushing the toolbar right and re-centring
+       the image in what is left. Closed, its negative margin cancels the
+       shell's gap; open, it also covers the toolbar's bleed to the edge. */
+    .presets-column {
+        --presets-width: 260px;
+        width: 0;
+        margin-right: -12px;
+        position: relative;
+        z-index: 10;
+        pointer-events: auto;
+        transition:
+            width 0.35s cubic-bezier(0.2, 0, 0, 1),
+            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .presets-column.open {
+        width: var(--presets-width);
+        margin-right: 12px;
+    }
+
+    /* The panel keeps its width and slides in with the toolbar rather than
+       being squeezed, so its list never reflows mid-animation. */
+    .presets-slide {
+        width: var(--presets-width);
+        transform: translateX(calc(-100% - 24px));
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .presets-column.open .presets-slide {
+        transform: translateX(0);
     }
 
     .toolbar-tools {
