@@ -2,20 +2,25 @@
 <script lang="ts">
 	import GlassButton from "$lib/components/inputs/GlassButton.svelte";
 	import SettingsToggle from "$lib/components/settings/SettingsToggle.svelte";
-	import { PRESET_GROUPS, type PresetMode } from "$lib/presets/presetDocument";
+	import {
+		PRESET_FIELDS,
+		PRESET_GROUPS,
+		type PresetField,
+		type PresetMode,
+	} from "$lib/presets/presetDocument";
 
 	let {
 		editing = false,
 		initialName = "",
-		initialGroups,
+		initialFields,
 		onsave,
 		oncancel,
 	}: {
 		// Modifying an existing preset rather than adding one.
 		editing?: boolean;
 		initialName?: string;
-		initialGroups: Iterable<string>;
-		onsave: (name: string, groups: Set<string>, overwrite: boolean) => void;
+		initialFields: Iterable<string>;
+		onsave: (name: string, fields: Set<string>, overwrite: boolean) => void;
 		oncancel: () => void;
 	} = $props();
 
@@ -23,26 +28,42 @@
 	// svelte-ignore state_referenced_locally
 	let name = $state(initialName);
 	// svelte-ignore state_referenced_locally
-	let selected = $state(new Set(initialGroups));
+	let selected = $state(new Set(initialFields));
 	let overwrite = $state(false);
 
 	let canSave = $derived(name.trim().length > 0 && selected.size > 0);
 
-	const COLUMNS: { mode: PresetMode; label: string }[] = [
+	const SECTIONS: { mode: PresetMode; label: string }[] = [
 		{ mode: "lighter-room", label: "Lighter Room" },
 		{ mode: "darkroom", label: "Darkroom" },
 		{ mode: "both", label: "Both Modes" },
 	];
 
-	function toggle(id: string) {
+	function countSelected(fields: PresetField[]) {
+		return fields.filter((f) => selected.has(f.id)).length;
+	}
+
+	function setFields(fields: PresetField[], on: boolean) {
 		const next = new Set(selected);
-		if (next.has(id)) next.delete(id);
-		else next.add(id);
+		for (const f of fields) {
+			if (on) next.add(f.id);
+			else next.delete(f.id);
+		}
 		selected = next;
 	}
 
-	function setAll(on: boolean) {
-		selected = on ? new Set(PRESET_GROUPS.map((g) => g.id)) : new Set();
+	// A partly ticked set fills up; a full one empties.
+	function toggleFields(fields: PresetField[]) {
+		setFields(fields, countSelected(fields) < fields.length);
+	}
+
+	function indeterminate(node: HTMLInputElement, value: boolean) {
+		node.indeterminate = value;
+		return {
+			update(next: boolean) {
+				node.indeterminate = next;
+			},
+		};
 	}
 
 	function save() {
@@ -70,6 +91,32 @@
 	}
 </script>
 
+{#snippet setBox(fields: PresetField[], label: string, strong: boolean)}
+	{@const count = countSelected(fields)}
+	<label class="check-row flex items-center gap-2 cursor-auto" class:strong>
+		<input
+			type="checkbox"
+			class="checkbox"
+			checked={count === fields.length}
+			use:indeterminate={count > 0 && count < fields.length}
+			onchange={() => toggleFields(fields)}
+		/>
+		<span>{label}</span>
+	</label>
+{/snippet}
+
+{#snippet fieldBox(field: PresetField)}
+	<label class="check-row flex items-center gap-2 cursor-auto">
+		<input
+			type="checkbox"
+			class="checkbox"
+			checked={selected.has(field.id)}
+			onchange={() => setFields([field], !selected.has(field.id))}
+		/>
+		<span>{field.label}</span>
+	</label>
+{/snippet}
+
 <!-- Like the settings overlay, it paints and filters nothing itself, so the
      glass behind the scrim keeps sampling the app. -->
 <div
@@ -86,7 +133,7 @@
 		aria-modal="true"
 		aria-label={editing ? "Modify preset" : "New preset"}
 	>
-		<header class="flex items-center justify-between pl-5 pr-2.5 pt-2.5">
+		<header class="flex items-center justify-between shrink-0 pl-5 pr-2.5 pt-2.5 pb-1">
 			<h2 class="title m-0">{editing ? "Modify Preset" : "New Preset"}</h2>
 			<div class="close-slot">
 				<GlassButton label="Cancel" onclick={oncancel}>
@@ -103,8 +150,8 @@
 			</div>
 		</header>
 
-		<div class="body flex flex-col gap-4 px-5 pt-3 pb-5">
-			<label class="field flex flex-col gap-1.5">
+		<div class="body flex flex-col flex-1 min-h-0 gap-4 px-5 pt-3 pb-4">
+			<label class="flex flex-col gap-1.5">
 				<span class="label">Name</span>
 				<input
 					bind:this={nameEl}
@@ -117,41 +164,61 @@
 				/>
 			</label>
 
-			<div class="flex flex-col gap-1.5">
-				<div class="flex items-center justify-between">
-					<span class="label">Include</span>
-					<div class="flex gap-3">
-						<button class="link border-0 p-0" onclick={() => setAll(true)}>All</button>
-						<button class="link border-0 p-0" onclick={() => setAll(false)}>None</button>
-					</div>
-				</div>
-				<div class="groups grid gap-x-6 gap-y-3">
-					{#each COLUMNS as column (column.mode)}
-						<div class="flex flex-col gap-1">
-							<span class="column-title">{column.label}</span>
-							{#each PRESET_GROUPS.filter((g) => g.mode === column.mode) as group (group.id)}
-								<label class="group-row flex items-center gap-2 h-7 cursor-auto">
-									<input
-										type="checkbox"
-										class="checkbox"
-										checked={selected.has(group.id)}
-										onchange={() => toggle(group.id)}
-									/>
-									<span>{group.label}</span>
-								</label>
-							{/each}
-						</div>
-					{/each}
+			<div class="flex items-center justify-between">
+				<span class="label">Include</span>
+				<div class="flex gap-3">
+					<button class="link border-0 p-0" onclick={() => setFields(PRESET_FIELDS, true)}>All</button>
+					<button class="link border-0 p-0" onclick={() => setFields(PRESET_FIELDS, false)}>None</button>
 				</div>
 			</div>
 
+			{#each SECTIONS as section (section.mode)}
+				{@const groups = PRESET_GROUPS.filter((g) => g.mode === section.mode)}
+				<section class="flex flex-col gap-2">
+					{@render setBox(groups.flatMap((g) => g.fields), section.label, true)}
+					<div class="groups grid gap-2">
+						{#each groups as group (group.id)}
+							<div
+								class="group-card flex flex-col gap-0.5 rounded-[10px] px-3 py-2"
+								class:wide={group.rows}
+							>
+								{@render setBox(group.fields, group.label, true)}
+								<!-- A lone slider is its group's own checkbox. -->
+								{#if group.fields.length > 1}
+								<div class="fields flex flex-col gap-0.5">
+									{#if group.rows}
+										{#each group.rows as row (row.label)}
+											<div class="band flex items-center gap-3">
+												<div class="band-label">
+													{@render setBox(row.fields, row.label, false)}
+												</div>
+												{#each row.fields as field (field.id)}
+													{@render fieldBox(field)}
+												{/each}
+											</div>
+										{/each}
+									{:else}
+										{#each group.fields as field (field.id)}
+											{@render fieldBox(field)}
+										{/each}
+									{/if}
+								</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/each}
+		</div>
+
+		<div class="footer flex flex-col shrink-0 gap-3 px-5 pt-3 pb-4">
 			{#if editing}
-				<div class="overwrite flex items-center justify-between gap-4">
+				<div class="flex items-center justify-between gap-4">
 					<div class="flex flex-col">
 						<span class="option">Update values from the current image</span>
 						<span class="hint">
-							Off keeps the stored values. Newly included groups take
-							the current image's values either way.
+							Off keeps the stored values. Newly ticked sliders take the
+							current image's values either way.
 						</span>
 					</div>
 					<SettingsToggle
@@ -161,8 +228,7 @@
 					/>
 				</div>
 			{/if}
-
-			<div class="footer flex justify-end gap-2 pt-1">
+			<div class="flex justify-end gap-2">
 				<button class="action h-8 px-4 rounded-[8px] border-0" onclick={oncancel}>
 					Cancel
 				</button>
@@ -190,9 +256,8 @@
 	}
 
 	.dialog {
-		width: min(520px, 92vw);
+		width: min(860px, 94vw);
 		max-height: 90vh;
-		overflow-y: auto;
 		background: var(--bg3);
 		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
 		font-family: var(--font-ui);
@@ -229,15 +294,37 @@
 		position: relative;
 	}
 
-	.label,
-	.column-title {
+	.label {
 		font-size: 13px;
 		font-weight: 600;
 		color: var(--color3);
 	}
 
-	.column-title {
-		padding-bottom: 2px;
+	.body {
+		overflow-y: auto;
+		scrollbar-width: none;
+		mask-image: linear-gradient(
+			to bottom,
+			transparent 0,
+			black 12px,
+			black calc(100% - 16px),
+			transparent 100%
+		);
+		-webkit-mask-image: linear-gradient(
+			to bottom,
+			transparent 0,
+			black 12px,
+			black calc(100% - 16px),
+			transparent 100%
+		);
+	}
+
+	.body::-webkit-scrollbar {
+		display: none;
+	}
+
+	.footer {
+		border-top: 1px solid var(--color5);
 	}
 
 	.name-input {
@@ -255,15 +342,39 @@
 	}
 
 	.groups {
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+		align-items: start;
 	}
 
-	.group-row {
+	.group-card {
+		background: color-mix(in srgb, var(--glassRim) 3%, transparent);
+	}
+
+	.group-card.wide {
+		grid-column: span 2;
+	}
+
+	.fields {
+		padding-left: 22px;
+	}
+
+	.band-label {
+		width: 76px;
+	}
+
+	.check-row {
+		height: 24px;
 		font-size: 13px;
 		color: var(--color2);
+		white-space: nowrap;
 	}
 
-	.group-row:hover {
+	.check-row:hover {
+		color: var(--color1);
+	}
+
+	.check-row.strong {
+		font-weight: 600;
 		color: var(--color1);
 	}
 

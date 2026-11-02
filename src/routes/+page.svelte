@@ -38,11 +38,11 @@
     import { presets } from "$lib/presets/presets.svelte";
     import {
         type Preset,
-        captureGroups,
-        changedGroupIds,
-        presetGroupIds,
+        captureFields,
+        changedFieldIds,
+        modeFieldIds,
+        presetFieldIds,
         revisePreset,
-        PRESET_GROUPS,
     } from "$lib/presets/presetDocument";
 
     import {
@@ -675,7 +675,7 @@
         applySliderSet({ ...preset.sliders }, preset.curves ?? {});
     }
 
-    type PresetDialog = { editing: Preset | null; name: string; groups: Set<string> };
+    type PresetDialog = { editing: Preset | null; name: string; fields: Set<string> };
     let presetDialog = $state<PresetDialog | null>(null);
 
     function currentCurves() {
@@ -685,25 +685,21 @@
     // A new preset starts from whatever has been changed, or from the whole
     // mode when nothing has.
     function openNewPreset() {
-        let groups = changedGroupIds(sliders, curves);
-        if (groups.size === 0) {
-            const mode = isDarkroom ? "darkroom" : "lighter-room";
-            const inMode = PRESET_GROUPS.filter((g) => g.mode === mode || g.mode === "both");
-            groups = new Set(inMode.map((g) => g.id));
-        }
-        presetDialog = { editing: null, name: "", groups };
+        let fields = changedFieldIds(sliders, curves);
+        if (fields.size === 0) fields = modeFieldIds(isDarkroom ? "darkroom" : "lighter-room");
+        presetDialog = { editing: null, name: "", fields };
     }
 
     function openEditPreset(preset: Preset) {
-        presetDialog = { editing: preset, name: preset.name, groups: presetGroupIds(preset) };
+        presetDialog = { editing: preset, name: preset.name, fields: presetFieldIds(preset) };
     }
 
-    function savePresetDialog(name: string, groups: Set<string>, overwrite: boolean) {
+    function savePresetDialog(name: string, fields: Set<string>, overwrite: boolean) {
         const dialog = presetDialog;
         presetDialog = null;
         if (!dialog) return;
 
-        const current = captureGroups(groups, sliders, currentCurves());
+        const current = captureFields(fields, sliders, currentCurves());
         const stored = dialog.editing;
         if (!stored) {
             presets.add({ name, ...current });
@@ -714,7 +710,7 @@
             return;
         }
 
-        presets.update(stored.id, { name, ...revisePreset(stored, current, groups) });
+        presets.update(stored.id, { name, ...revisePreset(stored, current, fields) });
     }
 
     async function exportPreset(preset: Preset) {
@@ -1687,7 +1683,7 @@
     <PresetModal
         editing={presetDialog.editing !== null}
         initialName={presetDialog.name}
-        initialGroups={presetDialog.groups}
+        initialFields={presetDialog.fields}
         onsave={savePresetDialog}
         oncancel={() => (presetDialog = null)}
     />

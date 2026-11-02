@@ -7,14 +7,18 @@ import { defaultCurves } from "$lib/types/curves";
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(), readText: vi.fn() }));
 
 const {
+  PRESET_FIELDS,
   PRESET_GROUPS,
-  captureGroups,
-  changedGroupIds,
+  captureFields,
+  changedFieldIds,
+  modeFieldIds,
   parsePreset,
-  presetGroupIds,
+  presetFieldIds,
   revisePreset,
   serializePreset,
 } = await import("$lib/presets/presetDocument");
+
+const ALL_FIELDS = PRESET_FIELDS.map((f) => f.id);
 
 function distinctSliders(): Sliders {
   const sliders = { ...defaultSlidersRGB };
@@ -36,69 +40,72 @@ function bentCurves() {
   return curves;
 }
 
-describe("preset groups", () => {
-  it("hold every slider exactly once", () => {
-    const keys = PRESET_GROUPS.flatMap((g) => g.keys);
-    expect([...keys].sort()).toEqual(Object.keys(defaultSlidersRGB).sort());
-    expect(new Set(keys).size).toBe(keys.length);
+describe("preset fields", () => {
+  it("cover every slider and curve channel exactly once", () => {
+    const expected = [
+      ...Object.keys(defaultSlidersRGB),
+      ...["master", "red", "green", "blue"].map((c) => `curve:${c}`),
+    ];
+    expect([...ALL_FIELDS].sort()).toEqual(expected.sort());
+    expect(new Set(ALL_FIELDS).size).toBe(ALL_FIELDS.length);
   });
 
-  it("have one group for the curves", () => {
-    expect(PRESET_GROUPS.filter((g) => g.curves)).toHaveLength(1);
+  it("list every row's fields as the group's own", () => {
+    for (const group of PRESET_GROUPS) {
+      if (group.rows) expect(group.rows.flatMap((r) => r.fields)).toEqual(group.fields);
+    }
   });
 
-  it("have unique ids", () => {
-    const ids = PRESET_GROUPS.map((g) => g.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it("give each mode its own fields plus the shared ones", () => {
+    expect(modeFieldIds("darkroom").has("invert")).toBe(true);
+    expect(modeFieldIds("darkroom").has("usmAmount")).toBe(true);
+    expect(modeFieldIds("darkroom").has("exposure")).toBe(false);
+    expect(modeFieldIds("lighter-room").has("curve:red")).toBe(true);
   });
 });
 
 describe("capturing", () => {
-  it("takes only the chosen groups", () => {
-    const captured = captureGroups(["light", "invert"], distinctSliders(), defaultCurves());
-    expect(Object.keys(captured.sliders).sort()).toEqual(
-      ["brightness", "contrast", "exposure", "invert"].sort(),
-    );
+  it("takes only the chosen sliders", () => {
+    const captured = captureFields(["exposure", "invert"], distinctSliders(), defaultCurves());
+    expect(Object.keys(captured.sliders).sort()).toEqual(["exposure", "invert"]);
     expect(captured.curves).toBeUndefined();
   });
 
-  it("takes all four curves with the curves group", () => {
-    const captured = captureGroups(["curves"], defaultSlidersRGB, bentCurves());
-    expect(captured.sliders).toEqual({});
-    expect(captured.curves).toEqual(bentCurves());
+  it("takes single curve channels", () => {
+    const captured = captureFields(["curve:red"], defaultSlidersRGB, bentCurves());
+    expect(captured).toEqual({ sliders: {}, curves: { red: bentCurves().red } });
   });
 
-  it("reports the groups a preset holds", () => {
-    const captured = captureGroups(["tone", "curves", "rgbOutput"], distinctSliders(), bentCurves());
-    expect([...presetGroupIds({ name: "x", ...captured })].sort()).toEqual(
-      ["curves", "rgbOutput", "tone"].sort(),
+  it("reports the fields a preset holds", () => {
+    const captured = captureFields(["shadows", "curve:red", "rgbOutputWhite"], distinctSliders(), bentCurves());
+    expect([...presetFieldIds({ name: "x", ...captured })].sort()).toEqual(
+      ["curve:red", "rgbOutputWhite", "shadows"].sort(),
     );
   });
 
-  it("finds the groups moved off their defaults", () => {
+  it("finds the fields moved off their defaults", () => {
     const sliders = { ...defaultSlidersRGB, exposure: 0.5, usmAmount: 40 };
-    expect([...changedGroupIds(sliders, defaultCurves())].sort()).toEqual(["light", "unsharpMask"]);
-    expect([...changedGroupIds(defaultSlidersRGB, bentCurves())]).toEqual(["curves"]);
-    expect(changedGroupIds(defaultSlidersRGB, defaultCurves()).size).toBe(0);
+    expect([...changedFieldIds(sliders, defaultCurves())].sort()).toEqual(["exposure", "usmAmount"]);
+    expect([...changedFieldIds(defaultSlidersRGB, bentCurves())]).toEqual(["curve:red"]);
+    expect(changedFieldIds(defaultSlidersRGB, defaultCurves()).size).toBe(0);
   });
 });
 
 describe("revising", () => {
   const stored = { name: "Old", sliders: { exposure: 1.5, usmAmount: 80 } };
-  const current = captureGroups(
-    PRESET_GROUPS.map((g) => g.id),
+  const current = captureFields(
+    ALL_FIELDS,
     { ...defaultSlidersRGB, exposure: -2, contrast: 20, wbTemp: 6000 },
     bentCurves(),
   );
 
-  it("keeps stored values, leaving out what the stored group lacked", () => {
-    expect(revisePreset(stored, current, new Set(["light"]))).toEqual({ sliders: { exposure: 1.5 } });
+  it("keeps stored values and drops unticked ones", () => {
+    expect(revisePreset(stored, current, new Set(["exposure"]))).toEqual({ sliders: { exposure: 1.5 } });
   });
 
-  it("takes the current values for groups new to the preset", () => {
-    const revised = revisePreset(stored, current, new Set(["light", "whiteBalance", "curves"]));
-    expect(revised.sliders).toEqual({ exposure: 1.5, wbTemp: 6000, wbTint: 0 });
-    expect(revised.curves).toEqual(bentCurves());
+  it("takes the current values for fields new to the preset", () => {
+    const revised = revisePreset(stored, current, new Set(["exposure", "wbTemp", "curve:red"]));
+    expect(revised).toEqual({ sliders: { exposure: 1.5, wbTemp: 6000 }, curves: { red: bentCurves().red } });
   });
 });
 
@@ -106,7 +113,7 @@ describe("the document", () => {
   it("round-trips a full preset", () => {
     const preset = {
       name: "Portra 400 #2",
-      ...captureGroups(PRESET_GROUPS.map((g) => g.id), distinctSliders(), bentCurves()),
+      ...captureFields(ALL_FIELDS, distinctSliders(), bentCurves()),
     };
     expect(parsePreset(serializePreset(preset))).toEqual(preset);
   });

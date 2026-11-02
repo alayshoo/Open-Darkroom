@@ -27,8 +27,8 @@
 	} = $props();
 </script>
 
-<div class="presets-panel glass flex flex-col h-full rounded-[12px]">
-	<header class="flex items-center shrink-0 gap-1 ml-4 mr-2.5 mt-2.5 mb-1">
+<div class="presets-panel flex flex-col h-full">
+	<header class="flex items-center shrink-0 gap-1 ml-5 mr-2.5 mt-2.5 mb-1">
 		<span class="title flex-1">Presets</span>
 		<GlassButton label="Import presets" onclick={() => onimport?.()}>
 			<svg width="28" height="28" viewBox="0 0 24 24">
@@ -75,13 +75,10 @@
 </div>
 
 <style>
+	/* No panel of its own: the list sits straight on the chrome, like the
+	   toolbar's icons, so it carries the same shadow they do. */
 	.presets-panel {
-		--panel-angle: 146deg;
-		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-		box-shadow:
-			10px 16px 38px -4px rgba(0, 0, 0, 0.51),
-			3px 5px 12px -2px rgba(0, 0, 0, 0.36),
-			inset 20px 30px 60px -42px rgba(255, 255, 255, 0.17);
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 	}
 
 	.title {
@@ -92,8 +89,9 @@
 	}
 
 	header :global(svg) {
-		color: var(--color2);
+		color: var(--chromeInk);
 		position: relative;
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
 	}
 
 	.list {
