@@ -62,8 +62,10 @@ function sliderBlocks(markup: string): SliderBlock[] {
     });
 }
 
+// The unsharp mask lives in a snippet that both modes render.
 const SHARPNESS = sliderBlocks(
-  section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->"),
+  section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->") +
+    section("{#snippet unsharpMask()}", "{/snippet}"),
 );
 
 /** Name → slider key, in the order the panel lays them out. */
@@ -79,6 +81,15 @@ const EXPECTED: [string, keyof Sliders][] = [
 describe("sharpness panel wiring", () => {
   it("lays out the six sharpness sliders in order", () => {
     expect(SHARPNESS.map((s) => s.name)).toEqual(EXPECTED.map(([name]) => name));
+  });
+
+  it("renders the same unsharp mask controls in both modes", () => {
+    expect(section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->")).toContain(
+      "{@render unsharpMask()}",
+    );
+    expect(section("<!-- Darkroom Sharpness Panel -->", "</div>")).toContain(
+      "{@render unsharpMask()}",
+    );
   });
 
   it("binds each slider to its own field", () => {

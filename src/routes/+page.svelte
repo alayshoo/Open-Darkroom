@@ -131,7 +131,7 @@
     // ===== Control Pages =====
 
     let activePageNormal = $state(1);
-    let activePageDarkroom = $state(0);
+    let activePageDarkroom = $state(1);
     let pagerElNormal: HTMLDivElement | null = $state(null);
     let pagerElDarkroom: HTMLDivElement | null = $state(null);
 
@@ -200,7 +200,8 @@
             lastRestoredDarkroom !== pagerElDarkroom
         ) {
             lastRestoredDarkroom = pagerElDarkroom;
-            pagerElDarkroom.scrollLeft = 0;
+            pagerElDarkroom.scrollLeft =
+                activePageDarkroom * pagerElDarkroom.clientWidth;
         }
         if (!isDarkroom) lastRestoredDarkroom = null;
     });
@@ -247,7 +248,7 @@
     let activePage = $derived(
         isDarkroom ? activePageDarkroom : activePageNormal,
     );
-    let pageCount = $derived(isDarkroom ? 1 : 3);
+    let pageCount = $derived(isDarkroom ? 2 : 3);
 
     // B&W leaves the colour curves out, the way it pins the colour sliders.
     let curveLut = $derived(bakeCurveLut(curves, isRgb));
@@ -535,8 +536,8 @@
         if (curvesChange.newCurves) stateAccessors.setCurves(curvesChange.newCurves);
     }
 
-    // All three act on the mode the user is looking at, and never reach across
-    // into the other mode's half of the sliders.
+    // All three act on the sliders of the mode the user is looking at, which
+    // includes the ones both modes share.
     let activeKeys = $derived(modeKeys(isDarkroom));
 
     async function handleCopyAdjustments() {
@@ -675,6 +676,99 @@
     resetAdjustments={handleResetAdjustments}
     openSettings={(section) => settings.show(section)}
 ></TitleBar>
+<!-- Shared by both modes, so the two sets of controls stay one and the same. -->
+{#snippet unsharpMask()}
+    <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
+        <span class="section-title pb-1.5"
+            >Unsharp Mask</span
+        >
+        <div
+            class="flex w-full aspect-square rounded-[6px] mb-3"
+            style="background: black;"
+        ></div>
+        <SingleValSliderGroup
+            bind:value={sliders.usmAmount}
+            defaultValue={0}
+            name="Amount"
+            unit="%"
+            min={0}
+            max={300}
+            allowOverflow
+            hardMin={-100}
+            decimalPlaces={0}
+            dragStep={1}
+            sliderStep={1}
+            keyboardStep={1}
+            onCommit={(oldVal, newVal) =>
+                commit({
+                    type: "slider",
+                    key: "usmAmount",
+                    oldValue: oldVal,
+                    newValue: newVal,
+                })}
+        ></SingleValSliderGroup>
+        <SingleValSliderGroup
+            bind:value={sliders.usmRadius}
+            defaultValue={1}
+            name="Radius"
+            unit="px"
+            min={0.5}
+            max={10}
+            decimalPlaces={2}
+            dragStep={0.01}
+            sliderStep={0.1}
+            keyboardStep={0.01}
+            onCommit={(oldVal, newVal) =>
+                commit({
+                    type: "slider",
+                    key: "usmRadius",
+                    oldValue: oldVal,
+                    newValue: newVal,
+                })}
+        ></SingleValSliderGroup>
+        <SingleValSliderGroup
+            bind:value={sliders.usmLumaThreshold}
+            defaultValue={0}
+            name="Luma Threshold"
+            unit="%"
+            min={0}
+            max={100}
+            decimalPlaces={1}
+            dragStep={0.1}
+            sliderStep={1}
+            keyboardStep={0.1}
+            gradientStartColor="#000000"
+            gradientEndColor="#ffffff"
+            onCommit={(oldVal, newVal) =>
+                commit({
+                    type: "slider",
+                    key: "usmLumaThreshold",
+                    oldValue: oldVal,
+                    newValue: newVal,
+                })}
+        ></SingleValSliderGroup>
+        <SingleValSliderGroup
+            bind:value={sliders.usmDetailThreshold}
+            defaultValue={0}
+            name="Detail Threshold"
+            unit="%"
+            min={0}
+            max={100}
+            decimalPlaces={1}
+            dragStep={0.1}
+            sliderStep={1}
+            keyboardStep={0.1}
+            onCommit={(oldVal, newVal) =>
+                commit({
+                    type: "slider",
+                    key: "usmDetailThreshold",
+                    oldValue: oldVal,
+                    newValue: newVal,
+                })}
+        ></SingleValSliderGroup>
+    </div>
+{/snippet}
+
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and
      side bar sit on a higher layer and simply paint over the overflow. -->
@@ -850,95 +944,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                 </div>
-                                <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
-                                    <span class="section-title pb-1.5"
-                                        >Unsharp Mask</span
-                                    >
-                                    <div
-                                        class="flex w-full aspect-square rounded-[6px] mb-3"
-                                        style="background: black;"
-                                    ></div>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.usmAmount}
-                                        defaultValue={0}
-                                        name="Amount"
-                                        unit="%"
-                                        min={0}
-                                        max={300}
-                                        allowOverflow
-                                        hardMin={-100}
-                                        decimalPlaces={0}
-                                        dragStep={1}
-                                        sliderStep={1}
-                                        keyboardStep={1}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "usmAmount",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.usmRadius}
-                                        defaultValue={1}
-                                        name="Radius"
-                                        unit="px"
-                                        min={0.5}
-                                        max={10}
-                                        decimalPlaces={2}
-                                        dragStep={0.01}
-                                        sliderStep={0.1}
-                                        keyboardStep={0.01}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "usmRadius",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.usmLumaThreshold}
-                                        defaultValue={0}
-                                        name="Luma Threshold"
-                                        unit="%"
-                                        min={0}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        gradientStartColor="#000000"
-                                        gradientEndColor="#ffffff"
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "usmLumaThreshold",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                    <SingleValSliderGroup
-                                        bind:value={sliders.usmDetailThreshold}
-                                        defaultValue={0}
-                                        name="Detail Threshold"
-                                        unit="%"
-                                        min={0}
-                                        max={100}
-                                        decimalPlaces={1}
-                                        dragStep={0.1}
-                                        sliderStep={1}
-                                        keyboardStep={0.1}
-                                        onCommit={(oldVal, newVal) =>
-                                            commit({
-                                                type: "slider",
-                                                key: "usmDetailThreshold",
-                                                oldValue: oldVal,
-                                                newValue: newVal,
-                                            })}
-                                    ></SingleValSliderGroup>
-                                </div>
+                                {@render unsharpMask()}
                                 <div class="flex h-7.5"></div>
                             </div>
                             <!-- Light & Color Panel -->
@@ -1307,6 +1313,12 @@
                             role="group"
                             transition:slideX={{ direction: 1 }}
                         >
+                            <!-- Darkroom Sharpness Panel -->
+                            <div class="controls-page">
+                                {@render unsharpMask()}
+                                <div class="flex h-7.5"></div>
+                            </div>
+                            <!-- Input Levels Panel -->
                             <div class="controls-page">
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <TripleValSliderHistGroup
@@ -1441,11 +1453,17 @@
                         class:shown={isDarkroom}
                         aria-hidden={!isDarkroom}
                     >
-                        <button
-                            class="dot active size-1.5 rounded-full border-0 cursor-pointer p-0"
-                            aria-label="Darkroom page"
-                            aria-current="step"
-                        ></button>
+                        {#each Array(2) as _, i}
+                            <button
+                                class="dot size-1.5 rounded-full border-0 cursor-pointer p-0"
+                                class:active={activePageDarkroom === i}
+                                onclick={() => scrollToPage(i)}
+                                aria-label="Go to darkroom page {i + 1}"
+                                aria-current={activePageDarkroom === i
+                                    ? "step"
+                                    : undefined}
+                            ></button>
+                        {/each}
                     </div>
             </div>
             <div
