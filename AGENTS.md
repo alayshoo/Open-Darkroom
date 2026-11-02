@@ -12,3 +12,7 @@ Don't build things without permission to do so, don't be too eager to build that
 
 Do not litter the codebase with massive comment blocks. A comment larger than 3 lines in the middle of a file is way too much.
 Comments should be generic, not based on your reasoning when solving a specific issue.
+
+## Branches and releases
+
+`night-build` is the default branch. All work branches off it and merges back into it. `main` only receives `night-build` through the `release` skill, and every push to `main` builds the Windows `.msi` and publishes it as a GitHub release. Never merge or push anything else into `main`.
