@@ -669,27 +669,25 @@ pub const HIST_VOTE: u32 = 256;
 /// Run histogram.wgsl over `img` with `sliders` applied, returning the R, G and
 /// B bin arrays. This is the shader the preview's histogram panel uses.
 pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST_BINS]; 3] {
-    run_histogram_with(img, sliders, &SourceSpace::default(), false)
+    run_histogram_with(img, sliders, &SourceSpace::default())
 }
 
-/// [`run_histogram`] with a chosen source space, measuring either the image on
-/// screen or, with `darkroom` set, the darkroom block's output alone.
+/// [`run_histogram`] with a chosen source space.
 pub fn run_histogram_with(
     img: &Rgba16Image,
     sliders: &SlidersPayload,
     space: &SourceSpace,
-    darkroom: bool,
 ) -> [[u32; HIST_BINS]; 3] {
-    run_histograms(img, sliders, space, darkroom).0
+    run_histograms(img, sliders, space, false).0
 }
 
 /// Both sets of bins histogram.wgsl writes: the main ones, and the master input
-/// levels' ones, which only the darkroom stage fills.
+/// levels' ones, which are only filled with `master` set.
 pub fn run_histograms(
     img: &Rgba16Image,
     sliders: &SlidersPayload,
     space: &SourceSpace,
-    darkroom: bool,
+    master: bool,
 ) -> ([[u32; HIST_BINS]; 3], [[u32; HIST_BINS]; 3]) {
     let (device, queue) = device();
     let (width, height) = img.dimensions();
@@ -779,7 +777,7 @@ pub fn run_histograms(
         module: &module,
         entry_point: Some("main"),
         compilation_options: wgpu::PipelineCompilationOptions {
-            constants: &[("MEASURE_DARKROOM", if darkroom { 1.0 } else { 0.0 })],
+            constants: &[("MEASURE_MASTER", if master { 1.0 } else { 0.0 })],
             ..Default::default()
         },
         cache: None,

@@ -21,7 +21,7 @@
 var<workgroup> local_bins: array<atomic<u32>, BIN_TOTAL>;
 
 // The master input levels' bins, measured on the channels' combined result just
-// ahead of the master step. Only written while measuring the darkroom block.
+// ahead of the master step. Only written when MEASURE_MASTER is set.
 @group(0) @binding(5) var<storage, read_write> master_bins: array<atomic<u32>, BIN_TOTAL>;
 var<workgroup> local_master: array<atomic<u32>, BIN_TOTAL>;
 
@@ -54,10 +54,9 @@ fn in_crop(p: vec2f) -> bool {
   return u >= 0.0 && u < crop.size.x && v >= 0.0 && v < crop.size.y;
 }
 
-// Set while bracketing: the bins then measure the darkroom block's output in
-// the source's own channels, sRGB encoded to match the sliders, so each channel
-// moves only with its own sliders. Off, they measure the image on screen.
-override MEASURE_DARKROOM: bool = false;
+// Set while the master input slider is shown, so its bins are only paid for
+// when something draws them.
+override MEASURE_MASTER: bool = false;
 
 // Fractional bin positions of one pixel, per channel: the lower bin, the upper
 // one, and the upper one's share of the vote.
@@ -108,11 +107,8 @@ fn accumulate_master(encoded: vec3f) {
 // measured in whichever destination the preview is currently rendered for.
 fn measure(coord: vec2u) {
   let source = textureLoad(inputTexture, coord, 0).rgb;
-  if (MEASURE_DARKROOM) {
-    let channels = darkroom_channels(source);
-    accumulate(encode_srgb(darkroom_master(channels)));
-    accumulate_master(encode_srgb(channels));
-    return;
+  if (MEASURE_MASTER) {
+    accumulate_master(encode_srgb(darkroom_channels(source)));
   }
   accumulate(to_destination(develop(source), outputSpace));
 }
@@ -127,7 +123,7 @@ fn main(
 ) {
   for (var i = lid; i < BIN_TOTAL; i += WORKGROUP_THREADS) {
     atomicStore(&local_bins[i], 0u);
-    if (MEASURE_DARKROOM) {
+    if (MEASURE_MASTER) {
       atomicStore(&local_master[i], 0u);
     }
   }
@@ -149,7 +145,7 @@ fn main(
     if (total != 0u) {
       atomicAdd(&bins[i], total);
     }
-    if (MEASURE_DARKROOM) {
+    if (MEASURE_MASTER) {
       let master_total = atomicLoad(&local_master[i]);
       if (master_total != 0u) {
         atomicAdd(&master_bins[i], master_total);
