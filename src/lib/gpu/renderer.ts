@@ -602,11 +602,19 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         const submitAt = performance.now();
         gpu.device.queue.submit([encoder.finish()]);
 
+        // A frame that fails to drain still releases the next one, or the
+        // preview would stop drawing for good.
         inFlight = true;
-        const drained = gpu.device.queue.onSubmittedWorkDone();
+        const drained = gpu.device.queue.onSubmittedWorkDone().then(
+            () => true,
+            (e) => {
+                console.warn("Preview frame did not drain:", e);
+                return false;
+            },
+        );
         const timedDetail = !!next && !renderedBackdrop;
-        drained.then(() => {
-            if (timedDetail) lastDetailMs = performance.now() - submitAt;
+        drained.then((ok) => {
+            if (ok && timedDetail) lastDetailMs = performance.now() - submitAt;
         });
 
         // Once idle, the backdrop catches up with the adjustments, so a later
@@ -625,8 +633,9 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         }
 
         const submitEnd = performance.now();
-        drained.then(() => {
+        drained.then((ok) => {
             onWorkDone();
+            if (!ok) return;
             void recordSample(
                 intervalMs,
                 acquireEnd - frameStart,
