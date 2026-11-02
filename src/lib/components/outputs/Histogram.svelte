@@ -2,12 +2,7 @@
 <script lang="ts">
     import { untrack } from "svelte";
     import { type Sliders } from "$lib/types/imgParameters";
-    import type {
-        GPUCanvasLink,
-        GPUImage,
-        HistogramPipeline,
-        HistogramStage,
-    } from "$lib/types/gpuTypes";
+    import type { GPUCanvasLink, GPUImage, HistogramPipeline } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
     import { linkCanvas2GPU } from "$lib/gpu/canvasConfig";
     import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
@@ -26,7 +21,6 @@
         curveCanvas = null,
         curveChannel = "master",
         crop,
-        stage = "output",
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
@@ -37,7 +31,6 @@
         // Whose bins the backdrop shows.
         curveChannel?: CurveChannel;
         crop: Crop;
-        stage?: HistogramStage;
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -236,12 +229,6 @@
 
     $effect(() => {
         void curveChannel;
-        requestRender();
-    });
-
-    $effect(() => {
-        if (!histPipeline) return;
-        histPipeline.setStage(stage);
         requestRender();
     });
 

@@ -739,7 +739,6 @@
                     {curveLut}
                     {imagePayload}
                     {crop}
-                    stage={isDarkroom ? "darkroom" : "output"}
                     curveCanvas={curveHistogramCanvas}
                     curveChannel={isRgb ? curveChannel : "master"}
                 />

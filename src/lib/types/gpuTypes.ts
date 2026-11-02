@@ -93,10 +93,6 @@ export interface Renderer {
 }
 
 
-// Where the histogram measures: the image on screen, or the darkroom block's
-// output in the source's own channels.
-export type HistogramStage = "output" | "darkroom";
-
 export interface HistogramPipeline {
     // The open image's primaries, as a matrix into the working space. The
     // histogram runs its own copy of the develop chain, so it needs the same
@@ -111,7 +107,6 @@ export interface HistogramPipeline {
     setCurves: (lut: Float32Array | null) => void;
     // Only what the crop keeps is binned.
     setCrop: (crop: Crop) => void;
-    setStage: (stage: HistogramStage) => void;
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
     // in one submit. Omitting the target bins without drawing. The backdrop
     // gets one curve channel's bins in that curve's colour, for the curves editor.
