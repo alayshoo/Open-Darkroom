@@ -1885,7 +1885,9 @@
     /* The panel keeps its width and slides in with the toolbar rather than
        being squeezed, so its list never reflows mid-animation. */
     .presets-slide {
-        width: var(--presets-width);
+        /* Laps 4px into the shell's edge inset, so the names sit 18px in. */
+        width: calc(var(--presets-width) + 4px);
+        margin-left: -4px;
         transform: translateX(calc(-100% - 24px));
         transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
