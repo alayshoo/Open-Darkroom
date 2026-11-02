@@ -20,6 +20,7 @@
         imagePayload,
         curveCanvas = null,
         curveChannel = "master",
+        masterCanvas = null,
         crop,
     }: {
         sliders: Sliders;
@@ -30,6 +31,8 @@
         curveCanvas?: HTMLCanvasElement | null;
         // Whose bins the backdrop shows.
         curveChannel?: CurveChannel;
+        // The darkroom's master input slider, drawn from the bins at its input.
+        masterCanvas?: HTMLCanvasElement | null;
         crop: Crop;
     } = $props();
 
@@ -39,6 +42,7 @@
     let canvas: HTMLCanvasElement;
     let canvasLink: GPUCanvasLink | null = $state(null);
     let curveLink: GPUCanvasLink | null = $state(null);
+    let masterLink: GPUCanvasLink | null = $state(null);
     let histPipeline: HistogramPipeline | null = $state(null);
     let image: GPUImage | null = $state(null);
 
@@ -75,11 +79,17 @@
                   }
                 : undefined;
 
+        const master =
+            masterLink && masterCanvas && masterCanvas.width > 0 && masterCanvas.height > 0
+                ? masterLink.canvasConfig.getCurrentTexture().createView()
+                : undefined;
+
         histPipeline.render(
             image.texture,
             sliders,
             canvasLink.canvasConfig.getCurrentTexture().createView(),
             backdrop,
+            master,
         );
         return true;
     }
@@ -126,26 +136,31 @@
         return observeBackingStore(canvas);
     });
 
-    // The curves editor's canvas comes and goes with its page, so it is linked
-    // and observed for as long as it is mounted.
-    $effect(() => {
-        const target = curveCanvas;
+    // Links a canvas that comes and goes with its page, for as long as it is
+    // mounted, handing the link to `setLink`.
+    function linkSideCanvas(
+        target: HTMLCanvasElement | null,
+        setLink: (link: GPUCanvasLink | null) => void,
+    ) {
         if (!target) return;
 
         let destroyed = false;
         const disconnect = observeBackingStore(target);
         linkCanvas2GPU(target, gpu, "premultiplied", "srgb").then((link) => {
             if (destroyed) return;
-            curveLink = link;
+            setLink(link);
             requestRender();
         });
 
         return () => {
             destroyed = true;
             disconnect();
-            curveLink = null;
+            setLink(null);
         };
-    });
+    }
+
+    $effect(() => linkSideCanvas(curveCanvas, (link) => (curveLink = link)));
+    $effect(() => linkSideCanvas(masterCanvas, (link) => (masterLink = link)));
 
     // Link the canvas and create the pipeline once on mount
     $effect(() => {

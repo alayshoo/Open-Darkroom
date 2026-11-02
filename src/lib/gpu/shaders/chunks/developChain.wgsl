@@ -78,9 +78,9 @@ fn curve_channel(x: f32, ch: u32) -> f32 {
   return mix(params.curve_lut[i][ch], params.curve_lut[i + 1u][ch], t - f32(i));
 }
 
-// Steps 1-3, the darkroom block, in the source's own channels. Each output
+// Steps 1-2 of the darkroom block, in the source's own channels. Each output
 // channel depends only on the same input channel and its own sliders.
-fn darkroom(source: vec3f) -> vec3f {
+fn darkroom_channels(source: vec3f) -> vec3f {
   var rgb = source;
 
   // 1. Darkroom matrix — black/white point remap + optional inversion,
@@ -88,11 +88,20 @@ fn darkroom(source: vec3f) -> vec3f {
   rgb = (params.dr_matrix * vec4f(rgb, 1.0)).xyz;
 
   // 2. Per-channel gamma
-  rgb = vec3f(
+  return vec3f(
     pow(max(rgb.r, 0.0), 1.0 / params.red_gamma),
     pow(max(rgb.g, 0.0), 1.0 / params.green_gamma),
     pow(max(rgb.b, 0.0), 1.0 / params.blue_gamma),
   );
+}
+
+// Steps 2b-3, the rest of the darkroom block, on the result of darkroom_channels.
+fn darkroom_master(channels: vec3f) -> vec3f {
+  // 2b. Master input levels — one black/white remap and gamma shared by all
+  //     three channels. It runs on the positive, after the channels are
+  //     balanced, so a neutral stays neutral whatever it is set to.
+  let levelled = max((channels - vec3f(params.master_black)) * params.master_scale, vec3f(0.0));
+  let rgb = pow(levelled, vec3f(1.0 / params.master_gamma));
 
   // 3. Output black/white — the print end of the darkroom block.
   //
@@ -102,6 +111,11 @@ fn darkroom(source: vec3f) -> vec3f {
   // and output white 200 put pure white at 228. Input remap → gamma → output
   // remap is the order a Levels dialog and a scanner both use.
   return rgb * params.out_scale + params.out_black;
+}
+
+// Steps 1-3, the darkroom block.
+fn darkroom(source: vec3f) -> vec3f {
+  return darkroom_master(darkroom_channels(source));
 }
 
 fn develop(source: vec3f) -> vec3f {

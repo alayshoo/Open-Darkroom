@@ -8,9 +8,9 @@ struct Params {
   blue_gamma:     f32,          //  72
   out_black:      f32,          //  76
   out_scale:      f32,          //  80
-  _pad1:          f32,          //  84
-  _pad2:          f32,          //  88
-  _pad3:          f32,          //  92  (align wb_matrix to 16)
+  master_black:   f32,          //  84
+  master_scale:   f32,          //  88
+  master_gamma:   f32,          //  92
   wb_matrix:      mat3x3<f32>,  //  96 — 48 bytes (3 cols × 16)
   exposure:       f32,          // 144
   contrast:       f32,          // 148

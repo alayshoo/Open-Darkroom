@@ -130,13 +130,13 @@ pub const CURVE_LUT_ENTRIES: usize = 256;
 /// u32, padded to the 16 bytes a uniform struct binds at.
 pub const OUTPUT_SPACE_BYTES: u64 = 160;
 
-/// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 54
-/// f32 fields occupy 216 bytes; a uniform struct is bound 16-aligned, so the
-/// last 8 bytes are tail padding and are never written.
-pub const SLIDERS_BYTES: usize = 224;
+/// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 57
+/// f32 fields occupy 228 bytes; a uniform struct is bound 16-aligned, so the
+/// last 12 bytes are tail padding and are never written.
+pub const SLIDERS_BYTES: usize = 240;
 
 /// Number of f32 fields in the `Sliders` struct, ahead of the tail padding.
-pub const SLIDER_COUNT: usize = 54;
+pub const SLIDER_COUNT: usize = 57;
 
 /// Size of the `View` uniform consumed by calcParams.wgsl. Three f32 of payload,
 /// padded to the 16 bytes a uniform struct binds at.
@@ -162,6 +162,9 @@ pub struct SlidersPayload {
     pub red_gamma:         f32,
     pub green_gamma:       f32,
     pub blue_gamma:        f32,
+    pub master_black_point: f32,
+    pub master_white_point: f32,
+    pub master_gamma:       f32,
     pub wb_temp:           f32,
     pub wb_tint:           f32,
     pub exposure:          f32,
@@ -233,6 +236,9 @@ impl Default for SlidersPayload {
             red_gamma:         1.0,
             green_gamma:       1.0,
             blue_gamma:        1.0,
+            master_black_point: 0.0,
+            master_white_point: 255.0,
+            master_gamma:       1.0,
             wb_temp:           5500.0,
             wb_tint:           0.0,
             exposure:          0.0,
@@ -354,6 +360,9 @@ pub fn sliders_to_bytes(s: &SlidersPayload) -> [u8; SLIDERS_BYTES] {
         s.red_gamma,
         s.green_gamma,
         s.blue_gamma,
+        s.master_black_point,
+        s.master_white_point,
+        s.master_gamma,
         s.wb_temp,
         s.wb_tint,
         s.exposure,

@@ -25,13 +25,13 @@ use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::icc::SourceSpace;
 
 /// Lane index of each sharpness field in the packed uniform. These are the tail
-/// of the struct, after the 24 fields the develop chain already consumes.
-const CLARITY: usize = 24;
-const TEXTURE: usize = 25;
-const USM_AMOUNT: usize = 26;
-const USM_RADIUS: usize = 27;
-const USM_LUMA_THRESHOLD: usize = 28;
-const USM_DETAIL_THRESHOLD: usize = 29;
+/// of the struct, after the 27 fields the develop chain already consumes.
+const CLARITY: usize = 27;
+const TEXTURE: usize = 28;
+const USM_AMOUNT: usize = 29;
+const USM_RADIUS: usize = 30;
+const USM_LUMA_THRESHOLD: usize = 31;
+const USM_DETAIL_THRESHOLD: usize = 32;
 
 /// Every sharpness control pushed as far as the UI allows.
 fn railed() -> SlidersPayload {
@@ -142,6 +142,9 @@ fn the_export_payload_carries_the_sharpness_keys() {
         "redGamma": 1.0,
         "greenGamma": 1.0,
         "blueGamma": 1.0,
+        "masterBlackPoint": 0.0,
+        "masterWhitePoint": 255.0,
+        "masterGamma": 1.0,
         "wbTemp": 5500.0,
         "wbTint": 0.0,
         "exposure": 0.0,

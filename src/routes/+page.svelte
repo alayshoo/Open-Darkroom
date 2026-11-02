@@ -57,6 +57,7 @@
         cropsEqual,
         isFullFrame,
         turnCrop,
+        flipCrop,
     } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
@@ -219,6 +220,7 @@
 
     let curves: Curves = $state(defaultCurves());
     let curveHistogramCanvas: HTMLCanvasElement | null = $state(null);
+    let masterHistogramCanvas: HTMLCanvasElement | null = $state(null);
     let curveChannel: CurveChannel = $state("master");
 
     // ===== B&W toggle logic =====
@@ -363,6 +365,19 @@
 
     function turnDraft(clockwise: boolean) {
         draftCrop = turnCrop(draftCrop, clockwise);
+    }
+
+    function flipDraft(horizontal: boolean) {
+        draftCrop = flipCrop(draftCrop, horizontal);
+    }
+
+    // Outside the crop tool a flip lands on the applied crop as its own step.
+    function flipShortcut(horizontal: boolean) {
+        if (!imagePayload) return;
+        if (isCropping) return flipDraft(horizontal);
+        const flipped = flipCrop(crop, horizontal);
+        commit({ type: "crop", oldValue: { ...crop }, newValue: flipped });
+        crop = flipped;
     }
 
     function toggleCrop() {
@@ -605,6 +620,8 @@
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
             toggleCrop: toggleCrop,
+            flipHorizontal: () => flipShortcut(true),
+            flipVertical: () => flipShortcut(false),
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
@@ -676,6 +693,7 @@
                 bind:straightening={isStraightening}
                 canReset={!isFullFrame(draftCrop)}
                 onturn={turnDraft}
+                onflip={flipDraft}
                 onreset={() => (draftCrop = { ...FULL_FRAME })}
             />
         </div>
@@ -740,6 +758,7 @@
                     {imagePayload}
                     {crop}
                     curveCanvas={curveHistogramCanvas}
+                    masterCanvas={masterHistogramCanvas}
                     curveChannel={isRgb ? curveChannel : "master"}
                 />
             </div>
@@ -1341,6 +1360,23 @@
                                         histogramData={inputHistograms?.b ?? null}
                                         histogramChannel="b"
                                     ></TripleValSliderHistGroup>
+                                    <TripleValSliderHistGroup
+                                        name="RGB Input"
+                                        bind:valueA={sliders.masterBlackPoint}
+                                        bind:valueB={sliders.masterGamma}
+                                        bind:valueC={sliders.masterWhitePoint}
+                                        defaultValueA={0}
+                                        defaultValueB={1}
+                                        defaultValueC={255}
+                                        min={0}
+                                        max={255}
+                                        minB={0.1}
+                                        maxB={2}
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                        liveHistogram
+                                        bind:histogramCanvas={masterHistogramCanvas}
+                                    ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"
                                         bind:valueA={sliders.rgbOutputBlack}
@@ -1723,7 +1759,7 @@
     }
 
     .section-title {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 18px;
         font-weight: 600;
         color: var(--color1);

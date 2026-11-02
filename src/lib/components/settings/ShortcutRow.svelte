@@ -151,7 +151,7 @@
 <style>
     /* SettingsRow's type, so the two read as one table. */
     .label {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 13px;
         font-weight: 400;
         line-height: 1.5;
@@ -159,14 +159,14 @@
     }
 
     .description {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 11.5px;
         line-height: 1.35;
         color: var(--color3);
     }
 
     .notice {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 11.5px;
         line-height: 1.35;
         color: var(--color1s);
@@ -178,7 +178,7 @@
         min-height: 22px;
         background: var(--bg5);
         border: 1px solid color-mix(in srgb, var(--glassRim) 8%, transparent);
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 12px;
         font-weight: 500;
         color: var(--color1s);
@@ -218,7 +218,7 @@
     }
 
     .unbound {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 12px;
         font-style: italic;
         color: var(--color4);

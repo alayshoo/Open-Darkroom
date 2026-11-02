@@ -110,11 +110,14 @@ export interface HistogramPipeline {
     // Bins the image, reduces the scale and draws the curves — all on the GPU,
     // in one submit. Omitting the target bins without drawing. The backdrop
     // gets one curve channel's bins in that curve's colour, for the curves editor.
+    // The master view gets the master input levels' bins, which are only
+    // measured when it is given.
     render: (
         inputTexture: GPUTexture,
         sliders: Sliders,
         target?: GPUTextureView,
         backdrop?: { view: GPUTextureView; channel: CurveChannel },
+        master?: GPUTextureView,
     ) => void;
     // The bins on the CPU, at the cost of the round trip drawing on the GPU
     // exists to avoid. For tests.
@@ -124,6 +127,8 @@ export interface HistogramPipeline {
         b: Uint32Array;
         // What the last render reduced the bins to for normalisation.
         scale: number;
+        // The master input levels' bins, filled only by a render given a master view.
+        master: { r: Uint32Array; g: Uint32Array; b: Uint32Array };
     }>;
     destroy: () => void;
 }

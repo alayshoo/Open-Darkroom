@@ -127,7 +127,7 @@
 
 <style>
     .name {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         color: var(--color2);
         font-size: 12px;
         font-weight: 400;

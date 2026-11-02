@@ -83,6 +83,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: { type: "uniform" },
             },
+            {
+                binding: 5, // master input levels' bins, filled only with a master target
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "storage" },
+            },
         ],
     });
 
@@ -100,14 +105,20 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         bindGroupLayouts: [bindGroupLayout],
     });
 
-    const binPipeline = device.createComputePipeline({
-        label: "Histogram Compute Pipeline",
-        layout: pipelineLayout,
-        compute: {
-            module: shaderModule,
-            entryPoint: "main",
-        },
-    });
+    function createBinPipeline(label: string, measureMaster: boolean): GPUComputePipeline {
+        return device.createComputePipeline({
+            label,
+            layout: pipelineLayout,
+            compute: {
+                module: shaderModule,
+                entryPoint: "main",
+                constants: { MEASURE_MASTER: measureMaster ? 1 : 0 },
+            },
+        });
+    }
+
+    const binPipeline = createBinPipeline("Histogram Compute Pipeline", false);
+    const binMasterPipeline = createBinPipeline("Histogram Master Compute Pipeline", true);
 
     // ── Storage buffer for histogram bins (GPU-side) ─────────────────
     // Written atomically by the compute shader, then read in place by the scale
@@ -123,6 +134,17 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             GPUBufferUsage.COPY_DST,   // clearBuffer
     });
 
+    // The signal entering the master input levels, binned in the same pass so
+    // the master slider's histogram holds still while its handles move.
+    const masterBins = device.createBuffer({
+        label: "Histogram Master Bins",
+        size: BINS_BUFFER_SIZE,
+        usage:
+            GPUBufferUsage.STORAGE |
+            GPUBufferUsage.COPY_SRC |
+            GPUBufferUsage.COPY_DST,
+    });
+
     // ── Scale: the tallest bin, reduced on the GPU ───────────────────
     const scaleBuffer = device.createBuffer({
         label: "Histogram Scale",
@@ -130,6 +152,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         usage:
             GPUBufferUsage.STORAGE |
             GPUBufferUsage.COPY_SRC,  // readBins
+    });
+    const masterScaleBuffer = device.createBuffer({
+        label: "Histogram Master Scale",
+        size: 4,
+        usage: GPUBufferUsage.STORAGE,
     });
 
     const scaleLayout = device.createBindGroupLayout({
@@ -201,25 +228,27 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         ]),
     ) as Record<CurveChannel, GPURenderPipeline>;
 
-    // Both read the same two buffers for the life of the pipeline, so neither
-    // group ever needs rebuilding.
-    const scaleBindGroup = device.createBindGroup({
-        label: "Histogram Scale Bind Group",
-        layout: scaleLayout,
-        entries: [
-            { binding: 0, resource: { buffer: bins } },
-            { binding: 1, resource: { buffer: scaleBuffer } },
-        ],
-    });
+    // Each reads the same two buffers for the life of the pipeline, so none of
+    // these groups ever needs rebuilding.
+    function binsBindGroup(label: string, layout: GPUBindGroupLayout, binBuffer: GPUBuffer, scale: GPUBuffer) {
+        return device.createBindGroup({
+            label,
+            layout,
+            entries: [
+                { binding: 0, resource: { buffer: binBuffer } },
+                { binding: 1, resource: { buffer: scale } },
+            ],
+        });
+    }
 
-    const drawBindGroup = device.createBindGroup({
-        label: "Histogram Draw Bind Group",
-        layout: drawLayout,
-        entries: [
-            { binding: 0, resource: { buffer: bins } },
-            { binding: 1, resource: { buffer: scaleBuffer } },
-        ],
-    });
+    const scaleBindGroup = binsBindGroup("Histogram Scale Bind Group", scaleLayout, bins, scaleBuffer);
+    const drawBindGroup = binsBindGroup("Histogram Draw Bind Group", drawLayout, bins, scaleBuffer);
+    const masterScaleBindGroup = binsBindGroup(
+        "Histogram Master Scale Bind Group", scaleLayout, masterBins, masterScaleBuffer,
+    );
+    const masterDrawBindGroup = binsBindGroup(
+        "Histogram Master Draw Bind Group", drawLayout, masterBins, masterScaleBuffer,
+    );
 
     // Times the compute pass on its own, against the whole update.
     const timer = createFrameTimer(gpu);
@@ -241,6 +270,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
                 { binding: 2, resource: { buffer: bins } },
                 { binding: 3, resource: { buffer: outputSpace.buffer } },
                 { binding: 4, resource: { buffer: cropBuffer } },
+                { binding: 5, resource: { buffer: masterBins } },
             ],
         });
         return bindGroup;
@@ -269,6 +299,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         target: GPUTextureView,
         pipeline: GPURenderPipeline,
         timestampWrites?: GPURenderPassTimestampWrites,
+        bindGroup: GPUBindGroup = drawBindGroup,
     ) {
         const drawPass = encoder.beginRenderPass({
             label: "Histogram Draw Pass",
@@ -283,7 +314,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             timestampWrites,
         });
         drawPass.setPipeline(pipeline);
-        drawPass.setBindGroup(0, drawBindGroup);
+        drawPass.setBindGroup(0, bindGroup);
         drawPass.draw(6);
         drawPass.end();
     }
@@ -297,6 +328,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         sliders: Sliders,
         target?: GPUTextureView,
         backdrop?: { view: GPUTextureView; channel: CurveChannel },
+        master?: GPUTextureView,
     ) {
         // Upload raw slider values to the GPU
         calcParams.updateSliders(sliders);
@@ -319,13 +351,14 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
 
         // Clear bins to zero before dispatch
         encoder.clearBuffer(bins);
+        encoder.clearBuffer(masterBins);
 
         // Dispatch histogram compute shader
         const pass = encoder.beginComputePass({
             label: "Histogram Pass",
             timestampWrites: measure ? timer.passWrites("bin") : undefined,
         });
-        pass.setPipeline(binPipeline);
+        pass.setPipeline(master ? binMasterPipeline : binPipeline);
         pass.setBindGroup(0, bindGroupFor(inputTexture));
 
         // Workgroups: ceil(width / 16) × ceil(height / 16)
@@ -343,6 +376,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         scalePass.setPipeline(scalePipeline);
         scalePass.setBindGroup(0, scaleBindGroup);
         scalePass.dispatchWorkgroups(1);
+        if (master) {
+            scalePass.setBindGroup(0, masterScaleBindGroup);
+            scalePass.dispatchWorkgroups(1);
+        }
         scalePass.end();
 
         if (target) {
@@ -350,6 +387,9 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         }
         if (backdrop) {
             recordDraw(encoder, backdrop.view, backdropPipelines[backdrop.channel]);
+        }
+        if (master) {
+            recordDraw(encoder, master, drawPipeline, undefined, masterDrawBindGroup);
         }
 
         if (measure) timer.resolve(encoder);
@@ -383,17 +423,19 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         g: Uint32Array;
         b: Uint32Array;
         scale: number;
+        master: { r: Uint32Array; g: Uint32Array; b: Uint32Array };
     }> {
         const target = (staging ??= device.createBuffer({
             label: "Histogram Staging",
-            // The bins, with the reduced scale appended after them.
-            size: BINS_BUFFER_SIZE + 4,
+            // The bins, the reduced scale, then the master bins.
+            size: BINS_BUFFER_SIZE * 2 + 4,
             usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         }));
 
         const encoder = device.createCommandEncoder({ label: "Histogram Readback" });
         encoder.copyBufferToBuffer(bins, 0, target, 0, BINS_BUFFER_SIZE);
         encoder.copyBufferToBuffer(scaleBuffer, 0, target, BINS_BUFFER_SIZE, 4);
+        encoder.copyBufferToBuffer(masterBins, 0, target, BINS_BUFFER_SIZE + 4, BINS_BUFFER_SIZE);
         device.queue.submit([encoder.finish()]);
 
         await target.mapAsync(GPUMapMode.READ);
@@ -405,6 +447,11 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             g: all.slice(NUM_BINS, NUM_BINS * 2),
             b: all.slice(NUM_BINS * 2, NUM_BINS * 3),
             scale: all[NUM_BINS * 3],
+            master: {
+                r: all.slice(NUM_BINS * 3 + 1, NUM_BINS * 4 + 1),
+                g: all.slice(NUM_BINS * 4 + 1, NUM_BINS * 5 + 1),
+                b: all.slice(NUM_BINS * 5 + 1, NUM_BINS * 6 + 1),
+            },
         };
     }
 
@@ -414,7 +461,9 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         cropBuffer.destroy();
         timer.destroy();
         bins.destroy();
+        masterBins.destroy();
         scaleBuffer.destroy();
+        masterScaleBuffer.destroy();
         staging?.destroy();
     }
 

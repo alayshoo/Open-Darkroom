@@ -1492,7 +1492,7 @@ fn hue_leaves_a_neutral_neutral() {
 
 // ── Cross-cutting ─────────────────────────────────────────────────────────────
 
-/// The anti-dead-slider guard: every one of the 24 lanes, moved on its own,
+/// The anti-dead-slider guard: every one of the 27 lanes, moved on its own,
 /// must change the rendered image. A slider dropped from the packing order, or
 /// left unread by the shader, fails here and nowhere else.
 #[test]
@@ -1513,6 +1513,9 @@ fn every_slider_changes_the_rendered_image() {
         ("red_gamma", SlidersPayload { red_gamma: 1.8, ..defaults() }),
         ("green_gamma", SlidersPayload { green_gamma: 1.8, ..defaults() }),
         ("blue_gamma", SlidersPayload { blue_gamma: 1.8, ..defaults() }),
+        ("master_black_point", SlidersPayload { master_black_point: 40.0, ..defaults() }),
+        ("master_white_point", SlidersPayload { master_white_point: 200.0, ..defaults() }),
+        ("master_gamma", SlidersPayload { master_gamma: 1.8, ..defaults() }),
         ("wb_temp", SlidersPayload { wb_temp: 3200.0, ..defaults() }),
         ("wb_tint", SlidersPayload { wb_tint: 40.0, ..defaults() }),
         ("exposure", SlidersPayload { exposure: 1.0, ..defaults() }),
@@ -1527,7 +1530,7 @@ fn every_slider_changes_the_rendered_image() {
         ("hue", SlidersPayload { hue: 60.0, ..defaults() }),
     ];
 
-    assert_eq!(cases.len(), 24, "one case per lane of the Sliders struct");
+    assert_eq!(cases.len(), 27, "one case per lane of the Sliders struct");
 
     let mut inert = Vec::new();
     for (name, sliders) in cases {

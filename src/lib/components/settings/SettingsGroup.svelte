@@ -32,7 +32,7 @@
        weight and colour. Indented onto the rows' own text column, so it clears
        the corner the table rounds off underneath it. */
     .group-title {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 15px;
         font-weight: 600;
         color: var(--color1);
@@ -51,7 +51,7 @@
     }
 
     .group-note {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 11.5px;
         color: var(--color3);
         padding-left: 12px;

@@ -134,7 +134,7 @@
         height: min(800px, 90vh);
         background: transparent;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         animation: dialogIn 0.18s cubic-bezier(0.2, 0, 0, 1) forwards;
     }
 
@@ -283,7 +283,7 @@
     }
 
     .panel-title {
-        font-family: "Outfit Variable", "Figtree", sans-serif;
+        font-family: "Outfit Variable", var(--font-ui);
         font-size: 25px;
         font-weight: 700;
         color: var(--color1);

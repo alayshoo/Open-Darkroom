@@ -678,6 +678,17 @@ pub fn run_histogram_with(
     sliders: &SlidersPayload,
     space: &SourceSpace,
 ) -> [[u32; HIST_BINS]; 3] {
+    run_histograms(img, sliders, space, false).0
+}
+
+/// Both sets of bins histogram.wgsl writes: the main ones, and the master input
+/// levels' ones, which are only filled with `master` set.
+pub fn run_histograms(
+    img: &Rgba16Image,
+    sliders: &SlidersPayload,
+    space: &SourceSpace,
+    master: bool,
+) -> ([[u32; HIST_BINS]; 3], [[u32; HIST_BINS]; 3]) {
     let (device, queue) = device();
     let (width, height) = img.dimensions();
 
@@ -730,6 +741,11 @@ pub fn run_histogram_with(
         contents: &vec![0u8; bin_bytes as usize],
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
+    let master_bins = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("master_bins"),
+        contents: &vec![0u8; bin_bytes as usize],
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
 
     // sRGB, unproofed: the bins these tests assert on are the ones the Rust
     // renderer produces, which is given the same destination.
@@ -760,7 +776,10 @@ pub fn run_histogram_with(
         layout: None,
         module: &module,
         entry_point: Some("main"),
-        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &[("MEASURE_MASTER", if master { 1.0 } else { 0.0 })],
+            ..Default::default()
+        },
         cache: None,
     });
 
@@ -789,12 +808,16 @@ pub fn run_histogram_with(
                 binding: 4,
                 resource: crop.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: master_bins.as_entire_binding(),
+            },
         ],
     });
 
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("test_hist_staging"),
-        size: bin_bytes,
+        size: bin_bytes * 2,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -807,14 +830,19 @@ pub fn run_histogram_with(
         pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
     }
     enc.copy_buffer_to_buffer(&bins, 0, &staging, 0, bin_bytes);
+    enc.copy_buffer_to_buffer(&master_bins, 0, &staging, bin_bytes, bin_bytes);
     queue.submit(std::iter::once(enc.finish()));
 
     let bytes = read_buffer(device, &staging);
-    let mut out = [[0u32; HIST_BINS]; 3];
+    let mut main = [[0u32; HIST_BINS]; 3];
+    let mut master = [[0u32; HIST_BINS]; 3];
     for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-        out[i / HIST_BINS][i % HIST_BINS] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        let set = if i < HIST_BINS * 3 { &mut main } else { &mut master };
+        let i = i % (HIST_BINS * 3);
+        set[i / HIST_BINS][i % HIST_BINS] = value;
     }
-    out
+    (main, master)
 }
 
 // ── Assertions ────────────────────────────────────────────────────────────────

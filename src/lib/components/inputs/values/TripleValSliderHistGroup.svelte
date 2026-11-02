@@ -35,6 +35,8 @@
         onCommitC = (_old: number, _new: number) => {},
         histogramData = null,
         histogramChannel = "r",
+        liveHistogram = false,
+        histogramCanvas = $bindable(null),
     }: {
         valueA?: number;
         valueB?: number;
@@ -64,6 +66,9 @@
         onCommitC?: (oldValue: number, newValue: number) => void;
         histogramData?: Uint32Array | null;
 		histogramChannel?: "r" | "g" | "b";
+        // Drawn into on the GPU by the main histogram, instead of from `histogramData`.
+        liveHistogram?: boolean;
+        histogramCanvas?: HTMLCanvasElement | null;
     } = $props();
 
     // Snapshots taken at interaction start, per value
@@ -114,10 +119,17 @@
     <div class="text-container flex flex-row items-baseline justify-between w-full">
         <span class="name">{name}</span>
     </div>
-    <StaticHistogram 
-        data={histogramData}
-        channel={histogramChannel}
-    ></StaticHistogram>
+    {#if liveHistogram}
+        <canvas
+            class="live-histogram w-full aspect-[4/1] rounded-b-[4px] rounded-t-[8px] mb-1"
+            bind:this={histogramCanvas}
+        ></canvas>
+    {:else}
+        <StaticHistogram 
+            data={histogramData}
+            channel={histogramChannel}
+        ></StaticHistogram>
+    {/if}
     <div class="slider-container pr-1.5">
         <TripleValSlider
             bind:valueA
@@ -186,10 +198,13 @@
 
 <style>
     .name {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         color: var(--color2);
         font-size: 12px;
         font-weight: 400;
     }
 
+    .live-histogram {
+        background: var(--bg1);
+    }
 </style>

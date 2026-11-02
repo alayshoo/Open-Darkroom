@@ -417,10 +417,10 @@ describe("pipeline construction", () => {
   });
 
   it("declares buffer sizes matching the WGSL structs", () => {
-    // 54 f32 fields, rounded up to the 16-byte alignment of a uniform struct.
-    expect(SLIDERS_BUFFER_SIZE).toBe(224);
+    // 57 f32 fields, rounded up to the 16-byte alignment of a uniform struct.
+    expect(SLIDERS_BUFFER_SIZE).toBe(240);
     expect(SLIDERS_BUFFER_SIZE % 16).toBe(0);
-    expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(54 * 4);
+    expect(SLIDERS_BUFFER_SIZE).toBeGreaterThanOrEqual(57 * 4);
     expect(PARAMS_BUFFER_SIZE).toBe(4496);
     // One f32, rounded up to the 16-byte alignment of a uniform struct.
     expect(VIEW_BUFFER_SIZE).toBe(16);
@@ -750,7 +750,7 @@ describe("histogram compute", () => {
 describe("histogram draw", () => {
   // A pipeline that fails validation does not throw: the error surfaces on the
   // device, and the submit carrying it drops the whole frame, bins included.
-  it("draws the main histogram and every curve backdrop without a validation error", async () => {
+  it("draws the main histogram, every curve backdrop and the master input without a validation error", async () => {
     gpu.device.pushErrorScope("validation");
     const pipeline = createHistogramPipeline(gpu);
     const image = uploadRawPixelsToGPU(gpu.device, linearisePixels(rampChart()), WIDTH, HEIGHT);
@@ -766,6 +766,7 @@ describe("histogram draw", () => {
         channel,
       });
     }
+    pipeline.render(image.texture, defaultSlidersRGB, target.createView(), undefined, target.createView());
     const error = await gpu.device.popErrorScope();
     target.destroy();
     image.texture.destroy();
@@ -776,7 +777,7 @@ describe("histogram draw", () => {
 
 describe("the crop", () => {
   // Columns 16–47 and rows 1–2 of the 64 × 4 chart.
-  const CROP: Crop = { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0, quarterTurns: 0 };
+  const CROP: Crop = { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0, quarterTurns: 0, flipX: false, flipY: false };
 
   it("keeps exactly the pixels it covers, untouched", async () => {
     const source = rampChart();
@@ -801,7 +802,7 @@ describe("the crop", () => {
     for (let y = 0; y < HEIGHT; y++) {
       source.fill(190, (y * WIDTH + WIDTH / 2) * 3, (y + 1) * WIDTH * 3);
     }
-    const rightHalf: Crop = { cx: 0.75, cy: 0.5, w: 0.5, h: 1, angle: 0, quarterTurns: 0 };
+    const rightHalf: Crop = { cx: 0.75, cy: 0.5, w: 0.5, h: 1, angle: 0, quarterTurns: 0, flipX: false, flipY: false };
     const sliders = { ...defaultSlidersRGB, usmAmount: 200, usmRadius: 3 };
 
     const plain = await develop(source, defaultSlidersRGB);

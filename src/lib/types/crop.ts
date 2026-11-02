@@ -3,7 +3,7 @@
 // The crop, stored resolution-independently so the downscaled preview and the
 // full-resolution export read the same edit. Mirrored in src-tauri/src/crop.rs.
 //
-// The image is first turned by whole quarter turns, then rotated by `angle`
+// The image is first mirrored, then turned by whole quarter turns, then rotated by `angle`
 // about its centre. The crop box is upright in that rotated frame, which shares
 // the turned image's centre and size, so its fractions are of the turned image.
 
@@ -18,9 +18,12 @@ export interface Crop {
     angle: number;
     /** Clockwise quarter turns, 0–3, applied before `angle`. */
     quarterTurns: number;
+    /** Mirrored along the source's own axes, before it is turned. */
+    flipX: boolean;
+    flipY: boolean;
 }
 
-export const FULL_FRAME: Crop = { cx: 0.5, cy: 0.5, w: 1, h: 1, angle: 0, quarterTurns: 0 };
+export const FULL_FRAME: Crop = { cx: 0.5, cy: 0.5, w: 1, h: 1, angle: 0, quarterTurns: 0, flipX: false, flipY: false };
 
 export const MAX_ANGLE = Math.PI / 4;
 
@@ -40,13 +43,15 @@ export function cropsEqual(a: Crop, b: Crop): boolean {
         a.w === b.w &&
         a.h === b.h &&
         a.angle === b.angle &&
-        a.quarterTurns === b.quarterTurns
+        a.quarterTurns === b.quarterTurns &&
+        a.flipX === b.flipX &&
+        a.flipY === b.flipY
     );
 }
 
 /** The turned image before any rotation: the frame the crop tool lays out. */
 export function uprightFrame(c: Crop): Crop {
-    return { ...FULL_FRAME, quarterTurns: c.quarterTurns };
+    return { ...FULL_FRAME, quarterTurns: c.quarterTurns, flipX: c.flipX, flipY: c.flipY };
 }
 
 /** All of the turned and rotated image, corners included. */
@@ -88,12 +93,26 @@ export function turnedSize(c: Crop, width: number, height: number): [number, num
 /** The same crop on the image turned a further quarter turn either way. */
 export function turnCrop(c: Crop, clockwise: boolean): Crop {
     return {
+        ...c,
         cx: clockwise ? 1 - c.cy : c.cy,
         cy: clockwise ? c.cx : 1 - c.cx,
         w: c.h,
         h: c.w,
-        angle: c.angle,
         quarterTurns: (c.quarterTurns + (clockwise ? 1 : 3)) % 4,
+    };
+}
+
+/** The same crop on the image mirrored on screen, left to right or top to bottom. */
+export function flipCrop(c: Crop, horizontal: boolean): Crop {
+    // A quarter turn swaps which of the source's axes runs across the screen.
+    const alongX = horizontal === (c.quarterTurns % 2 === 0);
+    return {
+        ...c,
+        cx: horizontal ? 1 - c.cx : c.cx,
+        cy: horizontal ? c.cy : 1 - c.cy,
+        angle: -c.angle,
+        flipX: alongX ? !c.flipX : c.flipX,
+        flipY: alongX ? c.flipY : !c.flipY,
     };
 }
 
@@ -210,17 +229,19 @@ export function cropView(crop: Crop, srcWidth: number, srcHeight: number): CropV
         y0 = crop.cy * size[1] - height / 2;
     }
 
-    // Rotated frame → turned image → source.
+    // Rotated frame → turned image → mirrored source → source.
     const toSource = (x: number, y: number): [number, number] => {
         const [tx, ty] = toTurned(x, y, size, crop.angle);
         const ox = tx + size[0] / 2;
         const oy = ty + size[1] / 2;
+        let mx: number, my: number;
         switch (crop.quarterTurns % 4) {
-            case 1: return [oy, srcHeight - ox];
-            case 2: return [srcWidth - ox, srcHeight - oy];
-            case 3: return [srcWidth - oy, ox];
-            default: return [ox, oy];
+            case 1: [mx, my] = [oy, srcHeight - ox]; break;
+            case 2: [mx, my] = [srcWidth - ox, srcHeight - oy]; break;
+            case 3: [mx, my] = [srcWidth - oy, ox]; break;
+            default: [mx, my] = [ox, oy];
         }
+        return [crop.flipX ? srcWidth - mx : mx, crop.flipY ? srcHeight - my : my];
     };
 
     const origin = toSource(x0, y0);
