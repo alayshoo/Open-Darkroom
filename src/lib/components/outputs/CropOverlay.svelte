@@ -1,18 +1,22 @@
 <!-- src/lib/components/outputs/CropOverlay.svelte -->
 <script lang="ts">
-    import { MAX_ANGLE, cropInside, fitCrop, type Crop } from "$lib/types/crop";
+    import { MAX_ANGLE, cropInside, fitCrop, turnedSize, type Crop } from "$lib/types/crop";
+    import { cropAspect } from "$lib/types/cropAspect";
 
     // Laid over the whole turned and rotated frame, so every position here is a
     // fraction of that frame and maps straight onto the crop's own units.
     let {
         crop = $bindable(),
         straightening = $bindable(false),
+        aspect = null,
         imageWidth,
         imageHeight,
     }: {
         crop: Crop;
         // While set, a drag draws a line to level instead of moving anything.
         straightening?: boolean;
+        // Width over height, in pixels, that resizing holds to. Free when null.
+        aspect?: number | null;
         // The source's size, before any turn. Only its proportions matter.
         imageWidth: number;
         imageHeight: number;
@@ -194,6 +198,13 @@
         const s = toRect(start);
         const { l, r, t, b } = drag.sides;
 
+        // Shift holds a free box to the shape it started the drag with.
+        const held = aspect ?? (e.shiftKey ? cropAspect(start, imageWidth, imageHeight) : null);
+        if (held !== null && !(l && r && t && b)) {
+            crop = resizeHeld(start, drag.sides, dx, dy, held);
+            return;
+        }
+
         // Each axis is limited on its own, so a box pinned on one side can still
         // slide along the other.
         let next: Crop;
@@ -212,6 +223,35 @@
             next = limited(across, fromRect(y, across));
         }
         crop = next;
+    }
+
+    // A resize that keeps the box's aspect. A corner follows the pointer along
+    // the box's diagonal; an edge grows the other axis about its centre.
+    function resizeHeld(start: Crop, sides: Sides, dx: number, dy: number, held: number): Crop {
+        const [tw, th] = turnedSize(start, imageWidth, imageHeight);
+        const s = toRect(start);
+        const { l, r, t, b } = sides;
+        let w = start.w + (r ? dx : l ? -dx : 0);
+        let h = start.h + (b ? dy : t ? -dy : 0);
+
+        // In pixels, so the diagonal is the one seen on screen.
+        if ((l || r) && (t || b)) {
+            const along = (w * tw * held + h * th) / (held * held + 1);
+            w = (along * held) / tw;
+        } else if (t || b) {
+            w = (h * th * held) / tw;
+        }
+        // A pointer dragged past the far side leaves the box at its smallest.
+        w = Math.max(w, 1e-9);
+        h = (w * tw) / (held * th);
+
+        const grow = Math.max(1, MIN_EXTENT / w, MIN_EXTENT / h);
+        w *= grow;
+        h *= grow;
+
+        const x0 = l ? s.x1 - w : r ? s.x0 : start.cx - w / 2;
+        const y0 = t ? s.y1 - h : b ? s.y0 : start.cy - h / 2;
+        return limited(start, fromRect({ x0, y0, x1: x0 + w, y1: y0 + h }, start));
     }
 
     // A finished line is turned level, or plumb when it is nearer upright.
