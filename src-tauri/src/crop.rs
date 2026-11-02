@@ -20,11 +20,24 @@ pub struct CropPayload {
     /// Clockwise quarter turns, applied before `angle`.
     #[serde(default)]
     pub quarter_turns: u32,
+    /// Mirrored along the source's own axes, before it is turned.
+    #[serde(default)]
+    pub flip_x: bool,
+    #[serde(default)]
+    pub flip_y: bool,
 }
 
 impl CropPayload {
-    pub const FULL_FRAME: Self =
-        Self { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0, angle: 0.0, quarter_turns: 0 };
+    pub const FULL_FRAME: Self = Self {
+        cx: 0.5,
+        cy: 0.5,
+        w: 1.0,
+        h: 1.0,
+        angle: 0.0,
+        quarter_turns: 0,
+        flip_x: false,
+        flip_y: false,
+    };
 
     /// The whole frame is what anything malformed falls back to.
     fn is_valid(&self) -> bool {
@@ -51,7 +64,7 @@ pub struct CropView {
     pub axis_y: [f64; 2],
 }
 
-/// The image is turned, then rotated about its centre, with the box upright in
+/// The image is mirrored, turned, then rotated about its centre, with the box upright in
 /// that frame. Unrotated crops snap to whole pixels so they sample texel centres.
 /// Mirrors `cropView()` in src/lib/types/crop.ts.
 pub fn crop_view(crop: &CropPayload, src_width: u32, src_height: u32) -> CropView {
@@ -77,18 +90,22 @@ pub fn crop_view(crop: &CropPayload, src_width: u32, src_height: u32) -> CropVie
         y0 = crop.cy * size[1] - height / 2.0;
     }
 
-    // Rotated frame → turned image → source.
+    // Rotated frame → turned image → mirrored source → source.
     let (sin, cos) = crop.angle.sin_cos();
     let to_source = |x: f64, y: f64| -> [f64; 2] {
         let (dx, dy) = (x - size[0] / 2.0, y - size[1] / 2.0);
         let ox = cos * dx + sin * dy + size[0] / 2.0;
         let oy = -sin * dx + cos * dy + size[1] / 2.0;
-        match turns {
+        let [mx, my] = match turns {
             1 => [oy, src_h - ox],
             2 => [src_w - ox, src_h - oy],
             3 => [src_w - oy, ox],
             _ => [ox, oy],
-        }
+        };
+        [
+            if crop.flip_x { src_w - mx } else { mx },
+            if crop.flip_y { src_h - my } else { my },
+        ]
     };
 
     let origin = to_source(x0, y0);

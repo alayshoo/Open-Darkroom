@@ -213,6 +213,18 @@ export const shortcutActions = [
         defaults: ["r"],
     },
     {
+        id: "flipHorizontal",
+        group: "edit",
+        label: "Flip horizontally",
+        defaults: ["h"],
+    },
+    {
+        id: "flipVertical",
+        group: "edit",
+        label: "Flip vertically",
+        defaults: ["v"],
+    },
+    {
         id: "resetAdjustments",
         group: "edit",
         label: "Reset adjustments",

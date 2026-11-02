@@ -6,6 +6,7 @@
 		straightening = $bindable(false),
 		canReset = false,
 		onturn,
+		onflip,
 		onreset,
 	}: {
 		visible?: boolean;
@@ -13,6 +14,7 @@
 		// Whether the crop differs from the original image at all.
 		canReset?: boolean;
 		onturn?: (clockwise: boolean) => void;
+		onflip?: (horizontal: boolean) => void;
 		onreset?: () => void;
 	} = $props();
 </script>
@@ -43,6 +45,24 @@
 				stroke-linecap="round"
 				stroke-linejoin="round"
 			/>
+		</svg>
+	</GlassButton>
+	<GlassButton size={34} label="Flip horizontally" onclick={() => onflip?.(true)}>
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+				<path d="M12 4.5V19.5" stroke-dasharray="1.6 1.6" stroke-linecap="round" />
+				<path d="M10 7V17H4.5Z" />
+				<path d="M14 7V17H19.5Z" fill="currentColor" fill-opacity="0.35" />
+			</g>
+		</svg>
+	</GlassButton>
+	<GlassButton size={34} label="Flip vertically" onclick={() => onflip?.(false)}>
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<g transform="rotate(90 12 12)" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+				<path d="M12 4.5V19.5" stroke-dasharray="1.6 1.6" stroke-linecap="round" />
+				<path d="M10 7V17H4.5Z" />
+				<path d="M14 7V17H19.5Z" fill="currentColor" fill-opacity="0.35" />
+			</g>
 		</svg>
 	</GlassButton>
 	<GlassButton

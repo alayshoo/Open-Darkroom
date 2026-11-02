@@ -55,7 +55,7 @@ fn the_full_frame_maps_one_to_one() {
 /// Mirrors the same case in tests/unit/crop.test.ts, so the two snap alike.
 #[test]
 fn an_unrotated_crop_snaps_to_whole_pixels_as_the_frontend_does() {
-    let crop = CropPayload { cx: 0.4, cy: 0.5, w: 0.333, h: 0.5, angle: 0.0, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.4, cy: 0.5, w: 0.333, h: 0.5, angle: 0.0, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 100, 10);
     assert_eq!(view.origin, [23.0, 3.0]);
     assert_eq!((view.width, view.height), (34, 5));
@@ -64,7 +64,7 @@ fn an_unrotated_crop_snaps_to_whole_pixels_as_the_frontend_does() {
 /// Mirrors the same case in tests/unit/crop.test.ts.
 #[test]
 fn a_turned_and_rotated_crop_maps_as_the_frontend_does() {
-    let crop = CropPayload { cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarter_turns: 1 };
+    let crop = CropPayload { cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarter_turns: 1, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 100, 60);
     assert_eq!((view.width, view.height), (18, 20));
     let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-6, "{a} vs {b}");
@@ -73,6 +73,30 @@ fn a_turned_and_rotated_crop_maps_as_the_frontend_does() {
     close(view.axis_x[0], -0.1986693);
     close(view.axis_x[1], -0.9800666);
     close(view.axis_y[0], 0.9800666);
+    close(view.axis_y[1], -0.1986693);
+}
+
+/// Mirrors the same case in tests/unit/crop.test.ts.
+#[test]
+fn a_flipped_turned_and_rotated_crop_maps_as_the_frontend_does() {
+    let crop = CropPayload {
+        cx: 0.4,
+        cy: 0.55,
+        w: 0.3,
+        h: 0.2,
+        angle: 0.2,
+        quarter_turns: 1,
+        flip_x: true,
+        flip_y: false,
+    };
+    let view = crop_view(&crop, 100, 60);
+    assert_eq!((view.width, view.height), (18, 20));
+    let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-6, "{a} vs {b}");
+    close(view.origin[0], 51.9202929);
+    close(view.origin[1], 45.6943453);
+    close(view.axis_x[0], 0.1986693);
+    close(view.axis_x[1], -0.9800666);
+    close(view.axis_y[0], -0.9800666);
     close(view.axis_y[1], -0.1986693);
 }
 
@@ -94,7 +118,7 @@ fn the_uniform_matches_its_declared_size() {
 fn an_export_keeps_exactly_the_pixels_it_covers() {
     let img = rgb_ramp(64, 40);
     let sliders = SlidersPayload::default();
-    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0.0, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0.0, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 64, 40);
 
     let full = render(&img, &sliders, &CropPayload::FULL_FRAME, 40);
@@ -116,7 +140,7 @@ fn sharpening_near_the_crop_edge_matches_the_full_render() {
         usm_radius: 3.0,
         ..Default::default()
     };
-    let crop = CropPayload { cx: 0.45, cy: 0.55, w: 0.4, h: 0.5, angle: 0.0, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.45, cy: 0.55, w: 0.4, h: 0.5, angle: 0.0, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 300, 260);
     let [x0, y0] = view.origin.map(|v| v as u32);
 
@@ -147,7 +171,7 @@ fn sharpening_near_the_crop_edge_matches_the_full_render() {
 #[test]
 fn a_rotated_crop_renders_at_its_own_size() {
     let img = rgb_ramp(80, 60);
-    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0.1, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: 0.1, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 80, 60);
     let out = render(&img, &SlidersPayload::default(), &crop, 7);
     assert_eq!(out.len(), (view.width * view.height * 3) as usize);
@@ -159,7 +183,7 @@ fn a_rotated_crop_renders_at_its_own_size() {
 fn a_rotated_crop_renders_the_same_however_it_is_tiled() {
     let img = noise(160, 120, 11);
     let sliders = SlidersPayload { usm_amount: 120.0, usm_radius: 2.0, ..Default::default() };
-    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.6, quarter_turns: 1 };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.6, quarter_turns: 1, flip_x: false, flip_y: false };
     let whole = render(&img, &sliders, &crop, 1000);
     for chunk_rows in [13, 32] {
         let got = render(&img, &sliders, &crop, chunk_rows);
@@ -171,7 +195,7 @@ fn a_rotated_crop_renders_the_same_however_it_is_tiled() {
 
 #[test]
 fn a_rotated_tile_reads_a_bounded_region_of_the_source() {
-    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.785, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.6, h: 0.6, angle: 0.785, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&crop, 6000, 4000);
     assert!(!view.is_axis_aligned());
     let [x0, y0, x1, y1] = view.source_texels(0..512, 0..512);
@@ -207,13 +231,36 @@ fn a_quarter_turn_transposes_the_render_exactly() {
     }
 }
 
+/// Output pixel (u, v) of a left-to-right mirror is source pixel (W - 1 - u, v),
+/// read exactly.
+#[test]
+fn a_flip_mirrors_the_render_exactly() {
+    let img = noise(37, 23, 4);
+    let sliders = SlidersPayload { usm_amount: 120.0, usm_radius: 2.0, ..Default::default() };
+    let full = render(&img, &sliders, &CropPayload::FULL_FRAME, 23);
+
+    for (flip_x, flip_y) in [(true, false), (false, true), (true, true)] {
+        let crop = CropPayload { flip_x, flip_y, ..CropPayload::FULL_FRAME };
+        let flipped = render(&img, &sliders, &crop, 9);
+        for v in 0..23 {
+            for u in 0..37 {
+                let sx = if flip_x { 36 - u } else { u };
+                let sy = if flip_y { 22 - v } else { v };
+                let o = ((v * 37 + u) * 3) as usize;
+                let i = ((sy * 37 + sx) * 3) as usize;
+                assert_eq!(flipped[o..o + 3], full[i..i + 3], "flip ({flip_x}, {flip_y}), pixel ({u}, {v})");
+            }
+        }
+    }
+}
+
 /// The frontend's fitted crops sit on the image, so nothing they export may
 /// come from off it — which would show as the backdrop grey.
 #[test]
 fn a_rotated_crop_inside_the_image_never_reads_past_it() {
     let img = common::solid(120, 80, [65535, 65535, 65535, 65535]);
     // About the largest crop at this angle that stays on a 3:2 frame.
-    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.8, h: 0.75, angle: 0.08, quarter_turns: 0 };
+    let crop = CropPayload { cx: 0.5, cy: 0.5, w: 0.8, h: 0.75, angle: 0.08, quarter_turns: 0, flip_x: false, flip_y: false };
     let out = render(&img, &SlidersPayload::default(), &crop, 16);
     assert!(out.iter().all(|&v| v == 255), "a rotated crop picked up off-image pixels");
 }
@@ -230,7 +277,7 @@ fn the_input_histograms_bin_only_what_the_crop_keeps() {
     assert_eq!(whole.b, whole_in.b);
 
     // The left half of a ramp rising left to right holds none of its top values.
-    let left = CropPayload { cx: 0.25, cy: 0.5, w: 0.5, h: 1.0, angle: 0.0, quarter_turns: 0 };
+    let left = CropPayload { cx: 0.25, cy: 0.5, w: 0.5, h: 1.0, angle: 0.0, quarter_turns: 0, flip_x: false, flip_y: false };
     let view = crop_view(&left, 64, 8);
     let h = compute_histograms_in(img.as_raw(), 64, 8, channels, &view, &encoded_bins());
     assert_eq!(h.r.iter().sum::<u32>(), 32 * 8);

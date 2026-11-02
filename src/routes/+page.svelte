@@ -57,6 +57,7 @@
         cropsEqual,
         isFullFrame,
         turnCrop,
+        flipCrop,
     } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { openImage } from "$lib/utils/openImage";
@@ -365,6 +366,19 @@
         draftCrop = turnCrop(draftCrop, clockwise);
     }
 
+    function flipDraft(horizontal: boolean) {
+        draftCrop = flipCrop(draftCrop, horizontal);
+    }
+
+    // Outside the crop tool a flip lands on the applied crop as its own step.
+    function flipShortcut(horizontal: boolean) {
+        if (!imagePayload) return;
+        if (isCropping) return flipDraft(horizontal);
+        const flipped = flipCrop(crop, horizontal);
+        commit({ type: "crop", oldValue: { ...crop }, newValue: flipped });
+        crop = flipped;
+    }
+
     function toggleCrop() {
         if (!imagePayload) return;
         if (isCropping) applyCrop();
@@ -605,6 +619,8 @@
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
             toggleCrop: toggleCrop,
+            flipHorizontal: () => flipShortcut(true),
+            flipVertical: () => flipShortcut(false),
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
@@ -676,6 +692,7 @@
                 bind:straightening={isStraightening}
                 canReset={!isFullFrame(draftCrop)}
                 onturn={turnDraft}
+                onflip={flipDraft}
                 onreset={() => (draftCrop = { ...FULL_FRAME })}
             />
         </div>
