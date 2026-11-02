@@ -924,7 +924,9 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="chrome-scrim"></div>
+    <div class="chrome-scrim" class:shifted={presets.open}>
+        <div class="scrim-fill"></div>
+    </div>
     <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
         <div class="presets-slide h-full">
             <PresetsPanel
@@ -1699,6 +1701,7 @@
     }
 
     .app-shell {
+        --presets-width: 260px;
         /* 32px title bar + the same 12px inset used on the other three sides */
         top: 44px;
         bottom: 12px;
@@ -1770,6 +1773,28 @@
         inset: 0;
         z-index: 5;
         pointer-events: none;
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    /* Follows the toolbar when the presets column opens: the panel width plus
+       the gap either side of it. */
+    .chrome-scrim.shifted {
+        transform: translateX(calc(var(--presets-width) + 24px));
+    }
+
+    /* What the shift uncovers at the window edge, held at the darkness both
+       bands reach there, so the presets sit under the same cast. */
+    .scrim-fill {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 100%;
+        width: calc(var(--presets-width) + 24px);
+        background: black;
+        opacity: calc(
+            var(--scrimStrength) * 1.35 - var(--scrimStrength) * var(--scrimStrength) * 0.35
+        );
+        transition: opacity 0.5s ease;
     }
 
     .chrome-scrim::before,
@@ -1842,7 +1867,6 @@
        the image in what is left. Closed, its negative margin cancels the
        shell's gap; open, it also covers the toolbar's bleed to the edge. */
     .presets-column {
-        --presets-width: 260px;
         width: 0;
         margin-right: -12px;
         position: relative;
