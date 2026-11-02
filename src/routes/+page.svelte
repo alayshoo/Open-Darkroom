@@ -586,6 +586,13 @@
         if (curvesChange.newCurves) stateAccessors.setCurves(curvesChange.newCurves);
     }
 
+    // In B&W the colour keys hold their overrides, so anything that saves the
+    // sliders takes the colour values set aside for the toggle back instead.
+    function colourSliders(): Sliders {
+        if (isRgb || !savedColorValues) return sliders;
+        return { ...sliders, ...savedColorValues };
+    }
+
     // All three act on the sliders of the mode the user is looking at, which
     // includes the ones both modes share.
     let activeKeys = $derived(modeKeys(isDarkroom));
@@ -593,7 +600,7 @@
     async function handleCopyAdjustments() {
         try {
             await copyAdjustments(
-                sliders,
+                colourSliders(),
                 activeKeys,
                 isDarkroom ? undefined : ($state.snapshot(curves) as Curves),
             );
@@ -667,11 +674,19 @@
 
     // ===== Presets =====
 
-    let hoveredPreset = $state<Preset | null>(null);
-    let previewPreset = $derived(presets.open && !sidebarInactive ? hoveredPreset : null);
+    type PresetDialog = { editing: Preset | null; name: string; fields: Set<string> };
+    let presetDialog = $state<PresetDialog | null>(null);
+
+    // Held by id, so an edited preset previews its new values.
+    let hoveredPresetId = $state<string | null>(null);
+    let previewPreset = $derived(
+        presets.open && !sidebarInactive && !presetDialog && hoveredPresetId
+            ? (presets.list.find((p) => p.id === hoveredPresetId) ?? null)
+            : null,
+    );
 
     $effect(() => {
-        if (!presets.open) hoveredPreset = null;
+        if (!presets.open) hoveredPresetId = null;
     });
 
     /* What the preview shows: the committed state with the hovered preset laid
@@ -697,9 +712,6 @@
         applySliderSet({ ...preset.sliders }, preset.curves ?? {});
     }
 
-    type PresetDialog = { editing: Preset | null; name: string; fields: Set<string> };
-    let presetDialog = $state<PresetDialog | null>(null);
-
     function currentCurves() {
         return cloneCurves($state.snapshot(curves) as Curves);
     }
@@ -707,7 +719,7 @@
     // A new preset starts from whatever has been changed, or from the whole
     // mode when nothing has.
     function openNewPreset() {
-        let fields = changedFieldIds(sliders, curves);
+        let fields = changedFieldIds(colourSliders(), curves);
         if (fields.size === 0) fields = modeFieldIds(isDarkroom ? "darkroom" : "lighter-room");
         presetDialog = { editing: null, name: "", fields };
     }
@@ -721,7 +733,7 @@
         presetDialog = null;
         if (!dialog) return;
 
-        const current = captureFields(fields, sliders, currentCurves());
+        const current = captureFields(fields, colourSliders(), currentCurves());
         const stored = dialog.editing;
         if (!stored) {
             presets.add({ name, ...current });
@@ -753,7 +765,6 @@
     }
 
     function deletePreset(preset: Preset) {
-        if (hoveredPreset?.id === preset.id) hoveredPreset = null;
         presets.remove(preset.id);
     }
 
@@ -957,7 +968,7 @@
                 list={presets.list}
                 canApply={!sidebarInactive}
                 onapply={applyPreset}
-                onhover={(preset) => (hoveredPreset = preset)}
+                onhover={(preset) => (hoveredPresetId = preset?.id ?? null)}
                 onadd={openNewPreset}
                 onimport={importPresets}
                 onedit={openEditPreset}
