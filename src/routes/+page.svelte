@@ -370,6 +370,15 @@
         draftCrop = flipCrop(draftCrop, horizontal);
     }
 
+    // Outside the crop tool a flip lands on the applied crop as its own step.
+    function flipShortcut(horizontal: boolean) {
+        if (!imagePayload) return;
+        if (isCropping) return flipDraft(horizontal);
+        const flipped = flipCrop(crop, horizontal);
+        commit({ type: "crop", oldValue: { ...crop }, newValue: flipped });
+        crop = flipped;
+    }
+
     function toggleCrop() {
         if (!imagePayload) return;
         if (isCropping) applyCrop();
@@ -610,8 +619,8 @@
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
             toggleCrop: toggleCrop,
-            flipHorizontal: () => isCropping && flipDraft(true),
-            flipVertical: () => isCropping && flipDraft(false),
+            flipHorizontal: () => flipShortcut(true),
+            flipVertical: () => flipShortcut(false),
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
