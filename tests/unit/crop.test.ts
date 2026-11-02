@@ -4,10 +4,12 @@ import {
     cropInside,
     cropView,
     fitCrop,
+    flipCrop,
     isFullFrame,
     rotationCanvas,
     turnCrop,
     type Crop,
+    type CropView,
 } from "$lib/types/crop";
 
 describe("cropView", () => {
@@ -22,14 +24,14 @@ describe("cropView", () => {
     });
 
     it("snaps an unrotated crop to whole source pixels", () => {
-        const view = cropView({ cx: 0.4, cy: 0.5, w: 0.333, h: 0.5, angle: 0, quarterTurns: 0 }, 100, 10);
+        const view = cropView({ cx: 0.4, cy: 0.5, w: 0.333, h: 0.5, angle: 0, quarterTurns: 0, flipX: false, flipY: false }, 100, 10);
         expect(view.origin).toEqual([23, 3]);
         expect(view.width).toBe(34);
         expect(view.height).toBe(5);
     });
 
     it("never collapses to nothing, or leaves the source", () => {
-        const view = cropView({ cx: 1, cy: 1, w: 0.0001, h: 0.0001, angle: 0, quarterTurns: 0 }, 50, 50);
+        const view = cropView({ cx: 1, cy: 1, w: 0.0001, h: 0.0001, angle: 0, quarterTurns: 0, flipX: false, flipY: false }, 50, 50);
         expect(view.width).toBe(1);
         expect(view.height).toBe(1);
         expect(view.origin).toEqual([49, 49]);
@@ -42,7 +44,7 @@ describe("cropView", () => {
     });
 
     it("keeps a rotated crop centred where it was put", () => {
-        const view = cropView({ cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: Math.PI / 6, quarterTurns: 0 }, 200, 100);
+        const view = cropView({ cx: 0.5, cy: 0.5, w: 0.5, h: 0.5, angle: Math.PI / 6, quarterTurns: 0, flipX: false, flipY: false }, 200, 100);
         const centreX = view.origin[0] + (view.width / 2) * view.axisX[0] + (view.height / 2) * view.axisY[0];
         const centreY = view.origin[1] + (view.width / 2) * view.axisX[1] + (view.height / 2) * view.axisY[1];
         expect(centreX).toBeCloseTo(100);
@@ -73,13 +75,59 @@ describe("quarter turns", () => {
     });
 
     it("carry the crop round with the image and back", () => {
-        const crop: Crop = { cx: 0.3, cy: 0.6, w: 0.2, h: 0.5, angle: 0.1, quarterTurns: 0 };
+        const crop: Crop = { cx: 0.3, cy: 0.6, w: 0.2, h: 0.5, angle: 0.1, quarterTurns: 0, flipX: false, flipY: false };
         let turned = crop;
         for (let i = 0; i < 4; i++) turned = turnCrop(turned, true);
         expect(turned.cx).toBeCloseTo(crop.cx);
         expect(turned.cy).toBeCloseTo(crop.cy);
         expect(turned.quarterTurns).toBe(0);
         expect(turnCrop(turnCrop(crop, true), false)).toEqual(crop);
+    });
+});
+
+describe("flips", () => {
+    // Output pixel (u, v) of a left-to-right mirror is source pixel (W - 1 - u, v).
+    it("read every output pixel from a source texel centre", () => {
+        const view = cropView({ ...FULL_FRAME, flipX: true }, 6, 4);
+        const at = (u: number, v: number) => [
+            view.origin[0] + (u + 0.5) * view.axisX[0] + (v + 0.5) * view.axisY[0],
+            view.origin[1] + (u + 0.5) * view.axisX[1] + (v + 0.5) * view.axisY[1],
+        ];
+        expect(at(0, 0)).toEqual([5.5, 0.5]);
+        expect(at(5, 3)).toEqual([0.5, 3.5]);
+    });
+
+    it("mirror the crop on screen, however the image is turned", () => {
+        for (const quarterTurns of [0, 1, 2, 3]) {
+            const crop: Crop = { cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarterTurns, flipX: false, flipY: true };
+            const view = cropView(crop, 100, 60);
+            const point = (v: CropView, x: number, y: number) => [
+                v.origin[0] + x * v.axisX[0] + y * v.axisY[0],
+                v.origin[1] + x * v.axisX[1] + y * v.axisY[1],
+            ];
+            for (const horizontal of [true, false]) {
+                const flipped = cropView(flipCrop(crop, horizontal), 100, 60);
+                expect([flipped.width, flipped.height]).toEqual([view.width, view.height]);
+                for (const [x, y] of [[0, 0], [3, 7], [view.width, view.height]]) {
+                    const mirrored = horizontal ? [view.width - x, y] : [x, view.height - y];
+                    const [ex, ey] = point(view, mirrored[0], mirrored[1]);
+                    const [fx, fy] = point(flipped, x, y);
+                    expect(fx).toBeCloseTo(ex, 9);
+                    expect(fy).toBeCloseTo(ey, 9);
+                }
+            }
+        }
+    });
+
+    it("undo themselves", () => {
+        const crop: Crop = { cx: 0.25, cy: 0.625, w: 0.5, h: 0.25, angle: 0.1, quarterTurns: 1, flipX: false, flipY: false };
+        expect(flipCrop(flipCrop(crop, true), true)).toEqual(crop);
+        expect(flipCrop(flipCrop(crop, false), false)).toEqual(crop);
+    });
+
+    it("carry through a quarter turn", () => {
+        const flipped = turnCrop({ ...FULL_FRAME, flipX: true }, true);
+        expect([flipped.flipX, flipped.flipY]).toEqual([true, false]);
     });
 });
 
@@ -101,12 +149,12 @@ describe("keeping the crop on the image", () => {
     });
 
     it("leaves a crop that already fits alone", () => {
-        const small: Crop = { cx: 0.5, cy: 0.5, w: 0.3, h: 0.3, angle: 0.1, quarterTurns: 0 };
+        const small: Crop = { cx: 0.5, cy: 0.5, w: 0.3, h: 0.3, angle: 0.1, quarterTurns: 0, flipX: false, flipY: false };
         expect(fitCrop(small, 300, 200)).toEqual(small);
     });
 
     it("pulls a centre that has left the image back onto it", () => {
-        const stray: Crop = { cx: 0.01, cy: 0.01, w: 0.2, h: 0.2, angle: 0.6, quarterTurns: 0 };
+        const stray: Crop = { cx: 0.01, cy: 0.01, w: 0.2, h: 0.2, angle: 0.6, quarterTurns: 0, flipX: false, flipY: false };
         const fitted = fitCrop(stray, 300, 200);
         expect(cropInside(fitted, 300, 200)).toBe(true);
         expect(fitted.w).toBeGreaterThan(0);
@@ -116,13 +164,25 @@ describe("keeping the crop on the image", () => {
 // The same case is asserted in src-tauri/tests/crop.rs, so the two
 // implementations cannot drift apart on a turned and rotated crop.
 it("maps a turned and rotated crop as the backend does", () => {
-    const view = cropView({ cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarterTurns: 1 }, 100, 60);
+    const view = cropView({ cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarterTurns: 1, flipX: false, flipY: false }, 100, 60);
     expect([view.width, view.height]).toEqual([18, 20]);
     expect(view.origin[0]).toBeCloseTo(48.0797071, 6);
     expect(view.origin[1]).toBeCloseTo(45.6943453, 6);
     expect(view.axisX[0]).toBeCloseTo(-0.1986693, 6);
     expect(view.axisX[1]).toBeCloseTo(-0.9800666, 6);
     expect(view.axisY[0]).toBeCloseTo(0.9800666, 6);
+    expect(view.axisY[1]).toBeCloseTo(-0.1986693, 6);
+});
+
+// The same case is asserted in src-tauri/tests/crop.rs.
+it("maps a flipped, turned and rotated crop as the backend does", () => {
+    const view = cropView({ cx: 0.4, cy: 0.55, w: 0.3, h: 0.2, angle: 0.2, quarterTurns: 1, flipX: true, flipY: false }, 100, 60);
+    expect([view.width, view.height]).toEqual([18, 20]);
+    expect(view.origin[0]).toBeCloseTo(51.9202929, 6);
+    expect(view.origin[1]).toBeCloseTo(45.6943453, 6);
+    expect(view.axisX[0]).toBeCloseTo(0.1986693, 6);
+    expect(view.axisX[1]).toBeCloseTo(-0.9800666, 6);
+    expect(view.axisY[0]).toBeCloseTo(-0.9800666, 6);
     expect(view.axisY[1]).toBeCloseTo(-0.1986693, 6);
 });
 
