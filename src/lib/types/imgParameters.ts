@@ -12,6 +12,9 @@ export interface Sliders extends Record<HslKey, number> {
     redWhitePoint: number;
     greenWhitePoint: number;
     blueWhitePoint: number;
+    masterBlackPoint: number;
+    masterGamma: number;
+    masterWhitePoint: number;
     rgbOutputBlack: number;
     rgbOutputWhite: number;
     wbTemp: number;
@@ -65,6 +68,9 @@ export const defaultSlidersRGB: Sliders = {
     redWhitePoint: 255,
     greenWhitePoint: 255,
     blueWhitePoint: 255,
+    masterBlackPoint: 0,
+    masterGamma: 1.0,
+    masterWhitePoint: 255,
     rgbOutputBlack: 0,
     rgbOutputWhite: 255,
     wbTemp: 5500,
@@ -102,6 +108,9 @@ export const defaultSlidersBW: Sliders = {
     redWhitePoint: 255,
     greenWhitePoint: 255,
     blueWhitePoint: 255,
+    masterBlackPoint: 0,
+    masterGamma: 1.0,
+    masterWhitePoint: 255,
     rgbOutputBlack: 0,
     rgbOutputWhite: 255,
     wbTemp: 5500,
@@ -139,6 +148,9 @@ const darkroomKeys = new Set<keyof Sliders>([
     "blueBlackPoint",
     "blueGamma",
     "blueWhitePoint",
+    "masterBlackPoint",
+    "masterGamma",
+    "masterWhitePoint",
     "rgbOutputBlack",
     "rgbOutputWhite",
 ]);

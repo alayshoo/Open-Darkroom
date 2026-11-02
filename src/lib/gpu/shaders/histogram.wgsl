@@ -20,6 +20,11 @@
 // leaves one global atomic per bin per workgroup instead.
 var<workgroup> local_bins: array<atomic<u32>, BIN_TOTAL>;
 
+// The master input levels' bins, measured on the channels' combined result just
+// ahead of the master step. Only written while measuring the darkroom block.
+@group(0) @binding(5) var<storage, read_write> master_bins: array<atomic<u32>, BIN_TOTAL>;
+var<workgroup> local_master: array<atomic<u32>, BIN_TOTAL>;
+
 // Total weight each pixel contributes, split between the two bins it falls
 // between. This also bounds how many pixels a single bin can hold before the
 // u32 wraps: u32::MAX / 256 = 16.7M pixels, comfortably above the 4.2M cap of
@@ -54,24 +59,15 @@ fn in_crop(p: vec2f) -> bool {
 // moves only with its own sliders. Off, they measure the image on screen.
 override MEASURE_DARKROOM: bool = false;
 
-// One pixel through the same chain develop.wgsl runs, ending in the destination
-// the bins measure — whichever space the preview is currently rendered for.
-fn developed_destination(coord: vec2u) -> vec3f {
-  let source = textureLoad(inputTexture, coord, 0).rgb;
-  if (MEASURE_DARKROOM) {
-    return encode_srgb(darkroom(source));
-  }
-
-  let rgb = develop(source);
-
-  // The same output transform the preview is rendered through, so the bins
-  // measure the image on screen rather than the working space behind it.
-  return to_destination(rgb, outputSpace);
+// Fractional bin positions of one pixel, per channel: the lower bin, the upper
+// one, and the upper one's share of the vote.
+struct Vote {
+  lo: vec3u,
+  hi: vec3u,
+  w:  vec3u,
 }
 
-// Split one pixel's vote between the two bins its value falls between, per
-// channel, into this workgroup's tallies.
-fn accumulate(encoded: vec3f) {
+fn vote(encoded: vec3f) -> Vote {
   // Fractional bin position in [0, 255]
   let f = clamp(encoded, vec3f(0.0), vec3f(1.0)) * 255.0;
 
@@ -83,13 +79,42 @@ fn accumulate(encoded: vec3f) {
   // vote can be split across two adjacent bins without floating-point atomics.
   // Eliminates 8-bit quantisation combing.
   let w = vec3u((f - vec3f(lo)) * f32(VOTE));
+  return Vote(lo, hi, w);
+}
 
-  atomicAdd(&local_bins[R_BASE + lo.r], VOTE - w.r);
-  atomicAdd(&local_bins[R_BASE + hi.r], w.r);
-  atomicAdd(&local_bins[G_BASE + lo.g], VOTE - w.g);
-  atomicAdd(&local_bins[G_BASE + hi.g], w.g);
-  atomicAdd(&local_bins[B_BASE + lo.b], VOTE - w.b);
-  atomicAdd(&local_bins[B_BASE + hi.b], w.b);
+// Split one pixel's vote between the two bins its value falls between, per
+// channel, into this workgroup's tallies.
+fn accumulate(encoded: vec3f) {
+  let v = vote(encoded);
+  atomicAdd(&local_bins[R_BASE + v.lo.r], VOTE - v.w.r);
+  atomicAdd(&local_bins[R_BASE + v.hi.r], v.w.r);
+  atomicAdd(&local_bins[G_BASE + v.lo.g], VOTE - v.w.g);
+  atomicAdd(&local_bins[G_BASE + v.hi.g], v.w.g);
+  atomicAdd(&local_bins[B_BASE + v.lo.b], VOTE - v.w.b);
+  atomicAdd(&local_bins[B_BASE + v.hi.b], v.w.b);
+}
+
+fn accumulate_master(encoded: vec3f) {
+  let v = vote(encoded);
+  atomicAdd(&local_master[R_BASE + v.lo.r], VOTE - v.w.r);
+  atomicAdd(&local_master[R_BASE + v.hi.r], v.w.r);
+  atomicAdd(&local_master[G_BASE + v.lo.g], VOTE - v.w.g);
+  atomicAdd(&local_master[G_BASE + v.hi.g], v.w.g);
+  atomicAdd(&local_master[B_BASE + v.lo.b], VOTE - v.w.b);
+  atomicAdd(&local_master[B_BASE + v.hi.b], v.w.b);
+}
+
+// One pixel through the same chain develop.wgsl runs. The image on screen is
+// measured in whichever destination the preview is currently rendered for.
+fn measure(coord: vec2u) {
+  let source = textureLoad(inputTexture, coord, 0).rgb;
+  if (MEASURE_DARKROOM) {
+    let channels = darkroom_channels(source);
+    accumulate(encode_srgb(darkroom_master(channels)));
+    accumulate_master(encode_srgb(channels));
+    return;
+  }
+  accumulate(to_destination(develop(source), outputSpace));
 }
 
 // 16 × 16, so the strided loops below cover 768 bins three entries at a time.
@@ -102,6 +127,9 @@ fn main(
 ) {
   for (var i = lid; i < BIN_TOTAL; i += WORKGROUP_THREADS) {
     atomicStore(&local_bins[i], 0u);
+    if (MEASURE_DARKROOM) {
+      atomicStore(&local_master[i], 0u);
+    }
   }
   workgroupBarrier();
 
@@ -109,7 +137,7 @@ fn main(
   // the edge of the image gates the work rather than returning out of it.
   let dimensions = textureDimensions(inputTexture);
   if (gid.x < dimensions.x && gid.y < dimensions.y && in_crop(vec2f(gid.xy) + 0.5)) {
-    accumulate(developed_destination(gid.xy));
+    measure(gid.xy);
   }
 
   workgroupBarrier();
@@ -120,6 +148,12 @@ fn main(
     let total = atomicLoad(&local_bins[i]);
     if (total != 0u) {
       atomicAdd(&bins[i], total);
+    }
+    if (MEASURE_DARKROOM) {
+      let master_total = atomicLoad(&local_master[i]);
+      if (master_total != 0u) {
+        atomicAdd(&master_bins[i], master_total);
+      }
     }
   }
 }
