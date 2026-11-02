@@ -33,6 +33,7 @@
     import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
     import ExportModal from "$lib/components/ExportModal.svelte";
+    import CustomAspectModal from "$lib/components/CustomAspectModal.svelte";
 
     import {
         type Sliders,
@@ -351,6 +352,7 @@
     // The crop tool's aspect lock, kept from one image to the next.
     let aspectLock: AspectLock = $state({ ...FREE_ASPECT });
     let aspectMenuOpen = $state(false);
+    let customAspectOpen = $state(false);
     let lockedAspect = $derived.by(() =>
         imagePayload ? aspectRatio(aspectLock, imagePayload.fullWidth, imagePayload.fullHeight) : null,
     );
@@ -408,13 +410,18 @@
     function setAspect(lock: AspectLock) {
         if (!imagePayload) return;
         const { fullWidth, fullHeight } = imagePayload;
-        if (lock.preset !== aspectLock.preset) {
+        if (lock.preset !== aspectLock.preset && lock.preset !== "custom") {
             lock = { ...lock, portrait: cropAspect(draftCrop, fullWidth, fullHeight) < 1 };
         }
         aspectLock = lock;
         const ratio = aspectRatio(lock, fullWidth, fullHeight);
         if (ratio === null || aspectsMatch(cropAspect(draftCrop, fullWidth, fullHeight), ratio)) return;
         draftCrop = cropWithAspect(draftCrop, ratio, fullWidth, fullHeight);
+    }
+
+    // An entered ratio stands the way it was typed.
+    function setCustomAspect(w: number, h: number) {
+        setAspect({ preset: "custom", portrait: h > w, custom: [w, h] });
     }
 
     function resetDraft() {
@@ -766,7 +773,11 @@
             return;
         }
         const ownsKey =
-            isCropping && !settings.open && !exportMenuOpen && !isTextField(e.target);
+            isCropping &&
+            !settings.open &&
+            !exportMenuOpen &&
+            !customAspectOpen &&
+            !isTextField(e.target);
         if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") applyCrop();
             else if (aspectMenuOpen) aspectMenuOpen = false;
@@ -904,6 +915,7 @@
                 onturn={turnDraft}
                 onflip={flipDraft}
                 onaspect={setAspect}
+                oncustom={() => (customAspectOpen = true)}
                 onreset={resetDraft}
             />
         </div>
@@ -1626,6 +1638,11 @@
 </div>
 
 <ExportModal visible={showExportModal}></ExportModal>
+<CustomAspectModal
+    bind:open={customAspectOpen}
+    initial={aspectLock.custom ?? [1, 1]}
+    onapply={setCustomAspect}
+/>
 
 <style>
     .canvas-backdrop {

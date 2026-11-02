@@ -1,6 +1,6 @@
 <script lang="ts">
 	import GlassButton from "./GlassButton.svelte";
-	import { ASPECT_PRESETS, type AspectLock, type AspectPresetId } from "$lib/types/cropAspect";
+	import { ASPECT_PRESETS, aspectLabel, type AspectLock, type AspectPresetId } from "$lib/types/cropAspect";
 
 	let {
 		visible = false,
@@ -12,6 +12,7 @@
 		onturn,
 		onflip,
 		onaspect,
+		oncustom,
 		onreset,
 	}: {
 		visible?: boolean;
@@ -25,12 +26,14 @@
 		onturn?: (clockwise: boolean) => void;
 		onflip?: (horizontal: boolean) => void;
 		onaspect?: (lock: AspectLock) => void;
+		// Asks for a custom ratio to be entered.
+		oncustom?: () => void;
 		onreset?: () => void;
 	} = $props();
 
 	let aspectEl: HTMLDivElement | undefined = $state();
 
-	let presetLabel = $derived(ASPECT_PRESETS.find((p) => p.id === aspect.preset)?.label ?? "Free");
+	let presetLabel = $derived(aspectLabel(aspect));
 	let canSwap = $derived(aspectRatio !== null && aspectRatio !== 1);
 
 	// The icon's box takes the lock's shape, within a 14-unit square.
@@ -56,7 +59,8 @@
 
 	function choose(preset: AspectPresetId) {
 		aspectMenuOpen = false;
-		onaspect?.({ ...aspect, preset });
+		if (preset === "custom") oncustom?.();
+		else onaspect?.({ ...aspect, preset });
 	}
 </script>
 
@@ -106,6 +110,33 @@
 			</g>
 		</svg>
 	</GlassButton>
+	<GlassButton
+		size={34}
+		label="Straighten: draw along a horizon"
+		active={straightening}
+		onclick={() => (straightening = !straightening)}
+	>
+		<!-- A ruler laid at a slant: draw along something that should be level. -->
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<g transform="rotate(-24 12 12)" fill="none" stroke="currentColor" stroke-linecap="round">
+				<rect x="2.5" y="9.5" width="19" height="5" rx="1" stroke-width="1.2" />
+				<path d="M6 9.5V11.5M9 9.5V11M12 9.5V12M15 9.5V11M18 9.5V11.5" stroke-width="1" />
+			</g>
+		</svg>
+	</GlassButton>
+	<!-- The same arrow as the adjustments' reset button. -->
+	<GlassButton size={34} label="Reset crop" disabled={!canReset} onclick={() => onreset?.()}>
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<path
+				d="M12.7 7.56A4.5 4.5 0 1 1 7.57 12.78"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.2"
+				stroke-linecap="round"
+			/>
+			<path d="M9.15 7.5 12 5.35 12 9.65Z" fill="currentColor" />
+		</svg>
+	</GlassButton>
 	<div class="aspect relative" bind:this={aspectEl}>
 		<GlassButton
 			size={34}
@@ -138,6 +169,9 @@
 						onclick={() => choose(preset.id)}
 					>
 						{preset.label}
+						{#if preset.id === "custom" && aspect.preset === "custom"}
+							<span class="custom-value">{presetLabel}</span>
+						{/if}
 					</button>
 				{/each}
 			</div>
@@ -156,33 +190,6 @@
 				<rect x="14" y="3.5" width="6.5" height="9.5" rx="1" />
 				<path d="M5.5 9.5A5 5 0 0 1 10.5 4.5M8.6 3 10.5 4.5 8.6 6" />
 			</g>
-		</svg>
-	</GlassButton>
-	<GlassButton
-		size={34}
-		label="Straighten: draw along a horizon"
-		active={straightening}
-		onclick={() => (straightening = !straightening)}
-	>
-		<!-- A ruler laid at a slant: draw along something that should be level. -->
-		<svg width="28" height="28" viewBox="0 0 24 24">
-			<g transform="rotate(-24 12 12)" fill="none" stroke="currentColor" stroke-linecap="round">
-				<rect x="2.5" y="9.5" width="19" height="5" rx="1" stroke-width="1.2" />
-				<path d="M6 9.5V11.5M9 9.5V11M12 9.5V12M15 9.5V11M18 9.5V11.5" stroke-width="1" />
-			</g>
-		</svg>
-	</GlassButton>
-	<!-- The same arrow as the adjustments' reset button. -->
-	<GlassButton size={34} label="Reset crop" disabled={!canReset} onclick={() => onreset?.()}>
-		<svg width="28" height="28" viewBox="0 0 24 24">
-			<path
-				d="M12.7 7.56A4.5 4.5 0 1 1 7.57 12.78"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.2"
-				stroke-linecap="round"
-			/>
-			<path d="M9.15 7.5 12 5.35 12 9.65Z" fill="currentColor" />
 		</svg>
 	</GlassButton>
 </div>
@@ -227,12 +234,18 @@
 
 	.aspect-option {
 		padding: 4px 10px;
+		white-space: nowrap;
 		font: 13px var(--font-ui);
 		font-variant-numeric: tabular-nums;
 		background: transparent;
 		color: var(--color2);
 		cursor: pointer;
 		transition: background 0.15s ease;
+	}
+
+	.custom-value {
+		margin-left: 6px;
+		opacity: 0.7;
 	}
 
 	.aspect-option:hover {
