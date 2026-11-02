@@ -10,6 +10,8 @@
     import Histogram from "$lib/components/outputs/Histogram.svelte";
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import CropOverlay from "$lib/components/outputs/CropOverlay.svelte";
+    import Loupe from "$lib/components/outputs/Loupe.svelte";
+    import { loupe } from "$lib/gpu/loupe.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
     import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
@@ -344,6 +346,13 @@
         if (sidebarInactive) exportMenuOpen = false;
     });
 
+    // Any press in the sidebar but on the loupe itself settles where it is.
+    function endLoupeOnPress(e: PointerEvent) {
+        if (!loupe.picking) return;
+        if (e.target instanceof Element && e.target.closest("[data-loupe]")) return;
+        loupe.picking = false;
+    }
+
     function enterCrop() {
         zoom = null;
         draftCrop = { ...crop };
@@ -651,6 +660,11 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        if (loupe.picking && e.key === "Escape" && !settings.open && !isTextField(e.target)) {
+            loupe.picking = false;
+            e.preventDefault();
+            return;
+        }
         const ownsKey =
             isCropping && !settings.open && !exportMenuOpen && !isTextField(e.target);
         if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
@@ -682,10 +696,7 @@
         <span class="section-title pb-1.5"
             >Unsharp Mask</span
         >
-        <div
-            class="flex w-full aspect-square rounded-[6px] mb-3"
-            style="background: black;"
-        ></div>
+        <Loupe />
         <SingleValSliderGroup
             bind:value={sliders.usmAmount}
             defaultValue={0}
@@ -798,7 +809,7 @@
         >
             <ZoomButton
                 fitted={zoom === null}
-                disabled={isCropping || (zoom === null && !zoomable)}
+                disabled={isCropping || loupe.picking || (zoom === null && !zoomable)}
                 ontoggle={toggleZoom}
             />
         </div>
@@ -836,7 +847,7 @@
             <DebugStatsOverlay />
         {/if}
     </div>
-    <div class="side-bar flex w-[23%] flex-col gap-3">
+    <div class="side-bar flex w-[23%] flex-col gap-3" onpointerdowncapture={endLoupeOnPress}>
         <div
             class="histogram-panel glass shrink-0 rounded-[12px]"
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}

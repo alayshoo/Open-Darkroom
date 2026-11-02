@@ -140,6 +140,13 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     let detailStale = true;
     let backdropStale = true;
 
+    // The loupe: its own canvas and frame at 1:1, rendered only when stale and
+    // while it has somewhere to be drawn.
+    let loupeTarget: GPUCanvasLink | null = null;
+    let loupeView: ViewFrame | null = null;
+    let loupe: Held | null = null;
+    let loupeStale = true;
+
     // When the view last moved, and what the last sharp render cost: a cheap
     // one is redone mid-gesture, a costly one waits for the view to settle.
     let movedAt = 0;
@@ -281,7 +288,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             { binding: 1, resource: viewSampler },
             { binding: 2, resource: { buffer: viewSampleBuffer } },
         ]);
-        detailStale = backdropStale = true;
+        detailStale = backdropStale = loupeStale = true;
     }
 
     function loadImage(image: GPUImage, srcToWorking: Float32Array) {
@@ -291,7 +298,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         bindSource(image);
         releaseHeld(detail);
         releaseHeld(backdrop);
-        detail = backdrop = null;
+        releaseHeld(loupe);
+        detail = backdrop = loupe = null;
         freshImage = true;
     }
 
@@ -334,7 +342,20 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     }
 
     function markStale() {
-        detailStale = backdropStale = true;
+        detailStale = backdropStale = loupeStale = true;
+    }
+
+    function setLoupe(target: GPUCanvasLink | null, view: ViewFrame | null) {
+        const moved =
+            !view ||
+            !loupeView ||
+            view.canvasWidth !== loupeView.canvasWidth ||
+            view.canvasHeight !== loupeView.canvasHeight ||
+            view.toImage.origin.some((v, i) => v !== loupeView!.toImage.origin[i]) ||
+            view.toImage.axisX.some((v, i) => v !== loupeView!.toImage.axisX[i]);
+        if (moved || target !== loupeTarget) loupeStale = true;
+        loupeTarget = target;
+        loupeView = view;
     }
 
     // The destination the preview is encoded for, and the export space it is
@@ -343,6 +364,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // stage reads it, so what the chain holds stays good.
     function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
         outputSpace.set(destination, proof);
+        loupeStale = true;
     }
 
     function setToneMap(toneMap: ToneMap) {
@@ -473,6 +495,36 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         counters.backdropRenders++;
     }
 
+    // The loupe's region at 1:1, or as close as the source allows, drawn
+    // straight onto its own canvas.
+    function renderLoupe(view: ViewFrame, image: GPUImage, target: GPUCanvasLink) {
+        const { fullWidth, fullHeight } = view;
+        const texture = target.canvasConfig.getCurrentTexture();
+        const encoder = gpu.device.createCommandEncoder({ label: "Render Loupe" });
+        const visible = visibleRegion(view);
+        if (visible) {
+            const scale = Math.min(1, image.width / fullWidth);
+            const apron = sharpnessReach(currentSliders, scale, fullWidth, fullHeight);
+            const limit = gpu.device.limits.maxTextureDimension2D;
+            const region = planRegion(neededBox(visible.image, scale), scale, apron, 0, fullWidth, fullHeight, limit);
+            loupe = outputFor(loupe, region, "Loupe");
+            recordChain(encoder, view, image, region, loupe.texture, false);
+            writeCrop(loupe, view, imageInChain(region, fullWidth, fullHeight));
+            recordFullScreenPass(encoder, colorSpaceEncode, texture.createView(), loupe.encode, {
+                scissor: pixelBox(visible.canvas, texture.width, texture.height),
+                clearValue: CLEAR,
+            });
+        } else {
+            const pass = encoder.beginRenderPass({
+                label: "Loupe Clear Pass",
+                colorAttachments: [{ view: texture.createView(), clearValue: CLEAR, loadOp: "clear", storeOp: "store" }],
+            });
+            pass.end();
+        }
+        gpu.device.queue.submit([encoder.finish()]);
+        loupeStale = false;
+    }
+
     function writeCrop(held: Held, view: ViewFrame, image: Box) {
         gpu.device.queue.writeBuffer(
             held.crop,
@@ -540,6 +592,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
             renderBackdrop(view, image);
             renderedBackdrop = true;
         }
+        const renderedLoupe = loupeStale && !!loupeTarget && !!loupeView;
+        if (renderedLoupe) renderLoupe(loupeView!, image, loupeTarget!);
 
         // Step 3: the canvas texture, and the sharp region's chain, recorded
         // after any backdrop run was submitted so each has its own uniforms.
@@ -604,7 +658,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
 
         inFlight = true;
         const drained = gpu.device.queue.onSubmittedWorkDone();
-        const timedDetail = !!next && !renderedBackdrop;
+        const timedDetail = !!next && !renderedBackdrop && !renderedLoupe;
         drained.then(() => {
             if (timedDetail) lastDetailMs = performance.now() - submitAt;
         });
@@ -674,7 +728,9 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         destroyScratch();
         releaseHeld(detail);
         releaseHeld(backdrop);
-        detail = backdrop = null;
+        releaseHeld(loupe);
+        detail = backdrop = loupe = null;
+        loupeTarget = null;
     }
 
     // Initialize with default sliders, and with the display as the destination
@@ -683,7 +739,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     setOutputSpace(gpu.displaySpace, null);
 
     return {
-        loadImage, setSource, setSliders, setOutputSpace, setToneMap, setCurves, setFrame,
+        loadImage, setSource, setSliders, setOutputSpace, setToneMap, setCurves, setFrame, setLoupe,
         requestRender, destroy,
     };
 }

@@ -26,6 +26,9 @@
        every judgement made on the image. Darkroom only takes it down a step. */
     --canvasBackdrop: #262626;
 
+    /* The loupe's border and its square on the image. */
+    --loupeAccent: #ffb000;
+
     /*
      * The glass material (styles/glass.css). Only --glassTint varies with the
      * theme, and it varies in alpha alone: darkroom darkens the panels, it
@@ -74,6 +77,8 @@
     --scrimStrength: 0.88;
 
     --canvasBackdrop: #1f1f1f;
+
+    --loupeAccent: #FF0A0A;
 
     /* Alpha only — same black, more of it. The red in this mode comes from
        the text and the --bg* fills; the glass just gets out of the way. */

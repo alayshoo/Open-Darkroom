@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FULL_FRAME, type Affine } from "$lib/types/crop";
+import { FULL_FRAME, cropView, type Affine } from "$lib/types/crop";
 import {
     MAX_ZOOM,
     PAN_MARGIN,
@@ -20,7 +20,10 @@ import {
     cropLayout,
     detailAction,
     imageInChain,
+    insideCrop,
     invert,
+    loupeCenter,
+    loupeFrame,
     neededBox,
     planRegion,
     scaleBy,
@@ -261,5 +264,41 @@ describe("backdropScale", () => {
         expect(4000 * scale + 2 * 180).toBeLessThanOrEqual(2048);
         expect(3000 * scale + 2 * 180).toBeLessThanOrEqual(1792);
         expect(backdropScale(1000, 800, 0.5, 8192, 8192, 180)).toBe(0.5);
+    });
+});
+
+describe("the loupe", () => {
+    const whole = cropView(FULL_FRAME, 4000, 2000);
+    // The right half of the image.
+    const half = cropView({ ...FULL_FRAME, cx: 0.75, w: 0.5 }, 4000, 2000);
+
+    it("sits on the crop's centre until it is moved", () => {
+        expectPoint(loupeCenter(null, whole, 500), [2000, 1000]);
+        expectPoint(loupeCenter(null, half, 500), [1000, 1000]);
+    });
+
+    it("keeps a position the crop still reaches, in the crop's own pixels", () => {
+        expect(insideCrop([3000, 500], half)).toBe(true);
+        expectPoint(loupeCenter([3000, 500], half, 500), [1000, 500]);
+    });
+
+    it("goes back to the centre once the crop no longer reaches it", () => {
+        expect(insideCrop([1000, 500], half)).toBe(false);
+        expectPoint(loupeCenter([1000, 500], half, 500), [1000, 1000]);
+    });
+
+    it("stays wholly on the crop", () => {
+        expectPoint(loupeCenter([3990, 10], half, 500), [1750, 250]);
+        const small = cropView({ ...FULL_FRAME, w: 0.05, h: 0.1 }, 4000, 2000);
+        expectPoint(loupeCenter(null, small, 500), [100, 100]);
+    });
+
+    it("shows whole pixels at 1:1, whatever its size", () => {
+        const center = loupeCenter([1234.4, 987.6], whole, 301);
+        const frame = loupeFrame(whole, center, 301, 4000, 2000);
+        expect(frame.scale).toBe(1);
+        expect(frame.toImage.axisX).toEqual([1, 0]);
+        expect(frame.toImage.origin.every(Number.isInteger)).toBe(true);
+        expectPoint(apply(frame.toImage, [150.5, 150.5]), apply(whole, center));
     });
 });
