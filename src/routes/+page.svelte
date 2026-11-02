@@ -1055,11 +1055,6 @@
             inert={!imagePayload}
         >
             <CropButton active={isCropping} ontoggle={toggleCrop} />
-            <PresetsButton
-                active={presets.open}
-                disabled={isCropping}
-                ontoggle={() => presets.toggle()}
-            />
             <CropTools
                 visible={isCropping}
                 bind:straightening={isStraightening}
@@ -1072,6 +1067,11 @@
                 onaspect={setAspect}
                 oncustom={() => (customAspectOpen = true)}
                 onreset={resetDraft}
+            />
+            <PresetsButton
+                active={presets.open}
+                disabled={isCropping}
+                ontoggle={() => presets.toggle()}
             />
         </div>
         <div
