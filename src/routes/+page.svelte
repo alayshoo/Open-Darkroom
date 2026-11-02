@@ -1724,7 +1724,7 @@
     }
 
     .section-title {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 18px;
         font-weight: 600;
         color: var(--color1);

@@ -360,7 +360,7 @@
         border-radius: 6px;
         background: rgba(0, 0, 0, 0.6);
         color: var(--color1);
-        font: 500 12px "Figtree", sans-serif;
+        font: 500 12px var(--font-ui);
         font-variant-numeric: tabular-nums;
         pointer-events: none;
     }
