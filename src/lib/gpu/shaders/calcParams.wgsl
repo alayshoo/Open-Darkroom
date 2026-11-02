@@ -26,53 +26,57 @@ struct Sliders {
     red_gamma:         f32,   // 36
     green_gamma:       f32,   // 40
     blue_gamma:        f32,   // 44
-    wb_temp:           f32,   // 48
-    wb_tint:           f32,   // 52
-    exposure:          f32,   // 56
-    contrast:          f32,   // 60
-    brightness:        f32,   // 64
-    highlights:        f32,   // 68
-    shadows:           f32,   // 72
-    whites:            f32,   // 76
-    blacks:            f32,   // 80
-    saturation:        f32,   // 84
-    vibrance:          f32,   // 88
-    hue:               f32,   // 92
+    // Master input, applied to all three channels after their own sliders.
+    master_black_point: f32,  // 48   (0–255)
+    master_white_point: f32,  // 52
+    master_gamma:       f32,  // 56
+    wb_temp:           f32,   // 60
+    wb_tint:           f32,   // 64
+    exposure:          f32,   // 68
+    contrast:          f32,   // 72
+    brightness:        f32,   // 76
+    highlights:        f32,   // 80
+    shadows:           f32,   // 84
+    whites:            f32,   // 88
+    blacks:            f32,   // 92
+    saturation:        f32,   // 96
+    vibrance:          f32,   // 100
+    hue:               f32,   // 104
     // Sharpness. Carried through the uniform so the three CPU packers stay one
     // struct, but no step of the develop chain reads them yet.
-    clarity:              f32,   //  96
-    texture:              f32,   // 100
-    usm_amount:           f32,   // 104
-    usm_radius:           f32,   // 108
-    usm_luma_threshold:   f32,   // 112
-    usm_detail_threshold: f32,   // 116
+    clarity:              f32,   // 108
+    texture:              f32,   // 112
+    usm_amount:           f32,   // 116
+    usm_radius:           f32,   // 120
+    usm_luma_threshold:   f32,   // 124
+    usm_detail_threshold: f32,   // 128
     // Per-colour HSL, hue / saturation / luminance for each band in hue order.
-    hsl_red_hue:          f32,   // 120   (-100–100)
-    hsl_red_sat:          f32,   // 124
-    hsl_red_lum:          f32,   // 128
-    hsl_orange_hue:       f32,   // 132
-    hsl_orange_sat:       f32,   // 136
-    hsl_orange_lum:       f32,   // 140
-    hsl_yellow_hue:       f32,   // 144
-    hsl_yellow_sat:       f32,   // 148
-    hsl_yellow_lum:       f32,   // 152
-    hsl_green_hue:        f32,   // 156
-    hsl_green_sat:        f32,   // 160
-    hsl_green_lum:        f32,   // 164
-    hsl_aqua_hue:         f32,   // 168
-    hsl_aqua_sat:         f32,   // 172
-    hsl_aqua_lum:         f32,   // 176
-    hsl_blue_hue:         f32,   // 180
-    hsl_blue_sat:         f32,   // 184
-    hsl_blue_lum:         f32,   // 188
-    hsl_purple_hue:       f32,   // 192
-    hsl_purple_sat:       f32,   // 196
-    hsl_purple_lum:       f32,   // 200
-    hsl_magenta_hue:      f32,   // 204
-    hsl_magenta_sat:      f32,   // 208
-    hsl_magenta_lum:      f32,   // 212
-}                                // 216 bytes of fields; a uniform struct is
-                                 // 16-aligned, so the binding is 224.
+    hsl_red_hue:          f32,   // 132   (-100–100)
+    hsl_red_sat:          f32,   // 136
+    hsl_red_lum:          f32,   // 140
+    hsl_orange_hue:       f32,   // 144
+    hsl_orange_sat:       f32,   // 148
+    hsl_orange_lum:       f32,   // 152
+    hsl_yellow_hue:       f32,   // 156
+    hsl_yellow_sat:       f32,   // 160
+    hsl_yellow_lum:       f32,   // 164
+    hsl_green_hue:        f32,   // 168
+    hsl_green_sat:        f32,   // 172
+    hsl_green_lum:        f32,   // 176
+    hsl_aqua_hue:         f32,   // 180
+    hsl_aqua_sat:         f32,   // 184
+    hsl_aqua_lum:         f32,   // 188
+    hsl_blue_hue:         f32,   // 192
+    hsl_blue_sat:         f32,   // 196
+    hsl_blue_lum:         f32,   // 200
+    hsl_purple_hue:       f32,   // 204
+    hsl_purple_sat:       f32,   // 208
+    hsl_purple_lum:       f32,   // 212
+    hsl_magenta_hue:      f32,   // 216
+    hsl_magenta_sat:      f32,   // 220
+    hsl_magenta_lum:      f32,   // 224
+}                                // 228 bytes of fields; a uniform struct is
+                                 // 16-aligned, so the binding is 240.
 
 // Where this render sits relative to the full-resolution image. Sharpness radii
 // are specified in full-resolution pixels, so anything working in texture space
@@ -556,9 +560,14 @@ fn main() {
     params.out_black     = ob;
     params.out_scale     = ow - ob;
 
-    params._pad1         = 0.0;
-    params._pad2         = 0.0;
-    params._pad3         = 0.0;
+    // Master input levels, on the channels' combined result. Same sRGB slider
+    // scale as the per-channel points, and the same guard against a zero span.
+    let mb = srgb_to_linear(sliders.master_black_point / 255.0);
+    let mw = srgb_to_linear(sliders.master_white_point / 255.0);
+    params.master_black  = mb;
+    params.master_scale  = 1.0 / safe_range(mw - mb);
+    params.master_gamma  = max(sliders.master_gamma, MIN_GAMMA);
+
     // White balance, with the source → working-space conversion composed in
     // ahead of it. Both are linear matrices applied to linear data one after
     // the other, so a single multiply does the work of two. The order is fixed:

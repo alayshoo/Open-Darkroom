@@ -220,6 +220,7 @@
 
     let curves: Curves = $state(defaultCurves());
     let curveHistogramCanvas: HTMLCanvasElement | null = $state(null);
+    let masterHistogramCanvas: HTMLCanvasElement | null = $state(null);
     let curveChannel: CurveChannel = $state("master");
 
     // ===== B&W toggle logic =====
@@ -758,6 +759,7 @@
                     {crop}
                     stage={isDarkroom ? "darkroom" : "output"}
                     curveCanvas={curveHistogramCanvas}
+                    masterCanvas={masterHistogramCanvas}
                     curveChannel={isRgb ? curveChannel : "master"}
                 />
             </div>
@@ -1358,6 +1360,23 @@
                                         outerColor={"#000000"}
                                         histogramData={inputHistograms?.b ?? null}
                                         histogramChannel="b"
+                                    ></TripleValSliderHistGroup>
+                                    <TripleValSliderHistGroup
+                                        name="RGB Input"
+                                        bind:valueA={sliders.masterBlackPoint}
+                                        bind:valueB={sliders.masterGamma}
+                                        bind:valueC={sliders.masterWhitePoint}
+                                        defaultValueA={0}
+                                        defaultValueB={1}
+                                        defaultValueC={255}
+                                        min={0}
+                                        max={255}
+                                        minB={0.1}
+                                        maxB={2}
+                                        innerColor={"#430000"}
+                                        outerColor={"#000000"}
+                                        liveHistogram
+                                        bind:histogramCanvas={masterHistogramCanvas}
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"

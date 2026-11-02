@@ -7,7 +7,7 @@ import shaderSource from "../shaders/calcParams.wgsl?raw";
 
 // 54 f32 fields = 216 bytes, rounded up to the 16-byte alignment a uniform
 // struct is bound at.
-export const SLIDERS_BUFFER_SIZE = 224;
+export const SLIDERS_BUFFER_SIZE = 240;
 export const PARAMS_BUFFER_SIZE  = 4496; // Params struct (must match shader)
 // Where the CPU-written curve fields start inside Params.
 export const CURVES_OFFSET       = 384;
@@ -244,6 +244,9 @@ function slidersToArray(s: Sliders): Float32Array {
         s.redGamma,
         s.greenGamma,
         s.blueGamma,
+        s.masterBlackPoint,
+        s.masterWhitePoint,
+        s.masterGamma,
         s.wbTemp,
         s.wbTint,
         s.exposure,
