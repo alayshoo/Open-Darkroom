@@ -124,19 +124,6 @@
 			</g>
 		</svg>
 	</GlassButton>
-	<!-- The same arrow as the adjustments' reset button. -->
-	<GlassButton size={34} label="Reset crop" disabled={!canReset} onclick={() => onreset?.()}>
-		<svg width="28" height="28" viewBox="0 0 24 24">
-			<path
-				d="M12.7 7.56A4.5 4.5 0 1 1 7.57 12.78"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.2"
-				stroke-linecap="round"
-			/>
-			<path d="M9.15 7.5 12 5.35 12 9.65Z" fill="currentColor" />
-		</svg>
-	</GlassButton>
 	<div class="aspect relative" bind:this={aspectEl}>
 		<GlassButton
 			size={34}
@@ -190,6 +177,19 @@
 				<rect x="14" y="3.5" width="6.5" height="9.5" rx="1" />
 				<path d="M5.5 9.5A5 5 0 0 1 10.5 4.5M8.6 3 10.5 4.5 8.6 6" />
 			</g>
+		</svg>
+	</GlassButton>
+	<!-- The same arrow as the adjustments' reset button. -->
+	<GlassButton size={34} label="Reset crop" disabled={!canReset} onclick={() => onreset?.()}>
+		<svg width="28" height="28" viewBox="0 0 24 24">
+			<path
+				d="M12.7 7.56A4.5 4.5 0 1 1 7.57 12.78"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.2"
+				stroke-linecap="round"
+			/>
+			<path d="M9.15 7.5 12 5.35 12 9.65Z" fill="currentColor" />
 		</svg>
 	</GlassButton>
 </div>
