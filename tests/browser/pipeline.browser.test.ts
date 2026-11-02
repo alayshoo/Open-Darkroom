@@ -766,7 +766,6 @@ describe("histogram draw", () => {
         channel,
       });
     }
-    pipeline.setStage("darkroom");
     pipeline.render(image.texture, defaultSlidersRGB, target.createView(), undefined, target.createView());
     const error = await gpu.device.popErrorScope();
     target.destroy();

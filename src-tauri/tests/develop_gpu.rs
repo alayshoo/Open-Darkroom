@@ -606,47 +606,47 @@ fn histogram_agrees_with_the_developed_image() {
     }
 }
 
-// ── histogram.wgsl, darkroom stage ────────────────────────────────────────────
+// ── histogram.wgsl, master input bins ─────────────────────────────────────────
 
 /// A strongly non-diagonal source matrix with rows summing to one, the shape a
 /// camera's colour matrix takes. Column-major.
 const CAMERA_LIKE: Matrix3 = [1.6, -0.15, 0.0, -0.4, 1.55, -0.4, -0.2, -0.4, 1.4];
 
-/// While bracketing, the bins stop before the source matrix mixes the channels,
-/// so one channel's sliders move only that channel's bins.
+/// The master input bins stop before the source matrix mixes the channels, so
+/// one channel's sliders move only that channel's bins.
 #[test]
-fn the_darkroom_histogram_keeps_the_channels_apart() {
+fn the_master_input_bins_keep_the_channels_apart() {
     let space = SourceSpace::linear_with_matrix(CAMERA_LIKE);
     let img = rgb_ramp(64, 64);
     let moved = SlidersPayload { green_black_point: 60.0, green_gamma: 1.4, ..Default::default() };
 
-    let before = run_histogram_with(&img, &SlidersPayload::default(), &space, true);
-    let after = run_histogram_with(&img, &moved, &space, true);
+    let (_, before) = run_histograms(&img, &SlidersPayload::default(), &space, true);
+    let (_, after) = run_histograms(&img, &moved, &space, true);
     assert_ne!(before[1], after[1], "the green sliders did not move green");
     assert_eq!(before[0], after[0], "the green sliders moved red");
     assert_eq!(before[2], after[2], "the green sliders moved blue");
 
     // On screen the matrix does carry green into red, which is the point of
     // measuring before it.
-    let before = run_histogram_with(&img, &SlidersPayload::default(), &space, false);
-    let after = run_histogram_with(&img, &moved, &space, false);
+    let before = run_histogram_with(&img, &SlidersPayload::default(), &space);
+    let after = run_histogram_with(&img, &moved, &space);
     assert_ne!(before[0], after[0], "the fixture no longer exercises the matrix");
 }
 
-/// The darkroom bins sit on the sliders' scale: a patch at slider value `v`
+/// The master input bins sit on the sliders' scale: a patch at slider value `v`
 /// lands in bin `v`, and a black point set on it sends it to bin 0.
 #[test]
-fn the_darkroom_histogram_reads_on_the_slider_scale() {
+fn the_master_input_bins_read_on_the_slider_scale() {
     for value in [32u8, 128, 200] {
         let img = solid(16, 16, [u8_to_u16(value); 4]);
         let space = SourceSpace::default();
 
-        let bins = run_histogram_with(&img, &SlidersPayload::default(), &space, true);
+        let (_, bins) = run_histograms(&img, &SlidersPayload::default(), &space, true);
         let mean = weighted_mean_bin(&bins[0]);
         assert!((mean - value as f64).abs() < 1.0, "patch {value} measured at bin {mean:.2}");
 
         let black = SlidersPayload { red_black_point: value as f32, ..Default::default() };
-        let bins = run_histogram_with(&img, &black, &space, true);
+        let (_, bins) = run_histograms(&img, &black, &space, true);
         assert!(weighted_mean_bin(&bins[0]) < 0.5, "black point {value} did not reach bin 0");
     }
 }
@@ -677,24 +677,23 @@ fn the_master_gamma_composes_with_the_channel_gammas() {
 #[test]
 fn the_master_points_act_on_the_positive() {
     let space = SourceSpace::default();
+    let black_out = develop(&solid(16, 16, [0, 0, 0, u16::MAX]), &SlidersPayload::default());
+    let white_out = develop(&solid(16, 16, [u16::MAX; 4]), &SlidersPayload::default());
     for value in [32u8, 128, 200] {
         let img = solid(16, 16, [u8_to_u16(value); 4]);
 
         let black = SlidersPayload { master_black_point: value as f32, ..Default::default() };
-        let bins = run_histogram_with(&img, &black, &space, true);
-        assert!(weighted_mean_bin(&bins[1]) < 0.5, "master black {value} did not reach bin 0");
+        assert_eq!(develop(&img, &black), black_out, "master black {value} did not reach black");
 
         let white = SlidersPayload { master_white_point: value as f32, ..Default::default() };
-        let bins = run_histogram_with(&img, &white, &space, true);
-        assert!(weighted_mean_bin(&bins[1]) > 254.5, "master white {value} did not reach bin 255");
+        assert_eq!(develop(&img, &white), white_out, "master white {value} did not reach white");
 
         // Inverted, a master black point set just above where the patch lands
         // still sends it to black.
         let inverted = SlidersPayload { invert: true, ..Default::default() };
-        let landed = weighted_mean_bin(&run_histogram_with(&img, &inverted, &space, true)[1]);
+        let landed = weighted_mean_bin(&run_histograms(&img, &inverted, &space, true).1[1]);
         let inverted = SlidersPayload { master_black_point: landed as f32 + 1.0, ..inverted };
-        let bins = run_histogram_with(&img, &inverted, &space, true);
-        assert!(weighted_mean_bin(&bins[1]) < 0.5, "inverted patch {value} was not sent to black");
+        assert_eq!(develop(&img, &inverted), black_out, "inverted patch {value} was not sent to black");
     }
 }
 
@@ -721,13 +720,9 @@ fn the_master_histogram_is_measured_at_its_input() {
     let (_, master_moved) = run_histograms(&img, &channel, &space, true);
     assert_ne!(master_before[1], master_moved[1], "the green sliders did not reach the master histogram");
 
-    for c in 0..3 {
-        let main = weighted_mean_bin(&main_before[c]);
-        let master = weighted_mean_bin(&master_before[c]);
-        assert!((main - master).abs() < 0.5, "channel {c}: neutral master moved the mean from {master:.2} to {main:.2}");
-    }
-
-    // Measuring the image on screen leaves the master bins empty.
-    let (_, master_output) = run_histograms(&img, &base, &space, false);
-    assert!(master_output.iter().flatten().all(|&v| v == 0), "the output stage wrote master bins");
+    // Measuring the master input changes nothing about the main bins, and
+    // leaving it off leaves the master bins empty.
+    let (main_output, master_output) = run_histograms(&img, &base, &space, false);
+    assert_eq!(main_before, main_output, "measuring the master input moved the main histogram");
+    assert!(master_output.iter().flatten().all(|&v| v == 0), "the master bins were written unasked");
 }

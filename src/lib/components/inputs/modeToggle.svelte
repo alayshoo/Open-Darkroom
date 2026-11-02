@@ -11,7 +11,8 @@
 </script>
 
 <!-- The page flips `isDarkroom` itself, since the same handler drives the
-     theme swap and the pager — this only reports the state. -->
+     theme swap and the pager — this only reports the state. Stops land on
+     the circle centres at cx=15 and cx=38. -->
 <GlassToggle
 	checked={isDarkroom}
 	label="Toggle between lighter-room and darkroom mode"
@@ -19,6 +20,8 @@
 	thumb={{ off: { x: 3, w: 24 }, on: { x: 26, w: 24 } }}
 	onclick={onModeToggle}
 >
-	<img src="/sun_icon.png" class="absolute size-4" style="top: 6px; left: 7px;" alt="Lighter-Room Mode">
-	<img src="/lightbulb_icon.png" class="absolute size-5" style="top: 4px; right: 5px;" alt="Darkroom Mode">
+	<svg width="53" height="28" aria-hidden="true">
+		<circle cx="15" cy="14" r="6" fill="white" />
+		<circle cx="38" cy="14" r="6" fill="#FF0A0A" />
+	</svg>
 </GlassToggle>
