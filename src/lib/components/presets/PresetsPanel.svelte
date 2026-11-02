@@ -28,7 +28,7 @@
 </script>
 
 <div class="presets-panel flex flex-col h-full">
-	<header class="flex items-center shrink-0 gap-1 ml-5 mr-2.5 mt-2.5 mb-1">
+	<header class="flex items-center shrink-0 gap-1 ml-2.5 mr-1 mt-2.5">
 		<span class="title flex-1">Presets</span>
 		<GlassButton label="Import presets" onclick={() => onimport?.()}>
 			<svg width="28" height="28" viewBox="0 0 24 24">
@@ -54,7 +54,7 @@
 			</svg>
 		</GlassButton>
 	</header>
-	<div class="list flex flex-col flex-1 min-h-0 px-2 pb-6" role="list">
+	<div class="list flex flex-col flex-1 min-h-0 pt-2 pr-1 pb-6" role="list">
 		{#each list as preset (preset.id)}
 			<PresetItem
 				{preset}
@@ -66,7 +66,7 @@
 				ondelete={() => ondelete?.(preset)}
 			/>
 		{:else}
-			<p class="empty m-0 px-2 pt-2">
+			<p class="empty m-0 px-2.5 pt-2">
 				No presets yet. Add one from the current settings, or import a
 				.odpreset file.
 			</p>

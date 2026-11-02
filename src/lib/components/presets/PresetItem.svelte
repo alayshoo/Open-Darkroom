@@ -55,7 +55,7 @@
 	role="listitem"
 >
 	<button
-		class="apply relative flex flex-1 items-center min-w-0 h-10 border-0 p-0"
+		class="apply relative flex flex-1 items-center min-w-0 h-8 border-0 p-0"
 		disabled={!canApply}
 		title={canApply ? `Apply ${preset.name}` : preset.name}
 		onclick={() => onapply?.()}
@@ -64,8 +64,8 @@
 		<span class="name relative truncate">{preset.name}</span>
 	</button>
 	<div class="actions absolute flex items-center">
-		<GlassButton size={28} label="Modify preset" onclick={() => onedit?.()}>
-			<svg width="28" height="28" viewBox="0 0 24 24">
+		<GlassButton size={26} label="Modify preset" onclick={() => onedit?.()}>
+			<svg width="26" height="26" viewBox="0 0 24 24">
 				<path
 					d="M14.5 7.5l2 2M8 16l.6-2.6 6.9-6.9a1.4 1.4 0 0 1 2 2l-6.9 6.9z"
 					fill="none"
@@ -76,8 +76,8 @@
 				/>
 			</svg>
 		</GlassButton>
-		<GlassButton size={28} label="Export preset" onclick={() => onexport?.()}>
-			<svg width="28" height="28" viewBox="0 0 24 24">
+		<GlassButton size={26} label="Export preset" onclick={() => onexport?.()}>
+			<svg width="26" height="26" viewBox="0 0 24 24">
 				<path
 					d="M12 13.5V6M9.2 8.6 12 5.8l2.8 2.8M7.5 12.5v4.5h9v-4.5"
 					fill="none"
@@ -90,12 +90,12 @@
 		</GlassButton>
 		<div class="delete" class:armed={deleteArmed}>
 			<GlassButton
-				size={28}
+				size={26}
 				label={deleteArmed ? "Click again to delete" : "Delete preset"}
 				active={deleteArmed}
 				onclick={handleDelete}
 			>
-				<svg width="28" height="28" viewBox="0 0 24 24">
+				<svg width="26" height="26" viewBox="0 0 24 24">
 					<path
 						d="M7.5 8.5h9M10.5 8.5V7h3v1.5M8.7 8.5l.6 8.5h5.4l.6-8.5"
 						fill="none"
@@ -140,7 +140,7 @@
 		--rim-mid: 0.12;
 		--rim-lo: 0.05;
 		--rim-end: 0.12;
-		inset: 2px 0;
+		inset: 1px 0;
 		border-radius: 8px;
 		backdrop-filter: none;
 		-webkit-backdrop-filter: none;
@@ -171,17 +171,17 @@
 
 	/* Clear of the actions, which sit over the row's right end once shown. */
 	.name {
-		padding: 0 12px;
+		padding: 0 10px;
 		transition: padding 0.15s ease;
 	}
 
 	.item:hover .name,
 	.item:focus-within .name {
-		padding-right: 96px;
+		padding-right: 84px;
 	}
 
 	.actions {
-		right: 4px;
+		right: 2px;
 		opacity: 0;
 		visibility: hidden;
 		transition:
