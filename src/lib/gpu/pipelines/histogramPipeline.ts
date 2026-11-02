@@ -3,7 +3,7 @@
 import type { Sliders } from "$lib/types/imgParameters";
 import { CURVE_CHANNELS, CURVE_COLOURS, type CurveChannel } from "$lib/types/curves";
 import type { ToneMap } from "$lib/types/toneMap";
-import type { GPUSession, HistogramPipeline } from "$lib/types/gpuTypes";
+import type { GPUSession, HistogramPipeline, HistogramStage } from "$lib/types/gpuTypes";
 import { createCalcParamsPipeline, type CalcParamsPipeline, PARAMS_BUFFER_SIZE } from "./calcParamsPipeline";
 import { createFrameTimer } from "./frameTimer";
 import { debugStats } from "../debugStats.svelte";
@@ -100,14 +100,23 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         bindGroupLayouts: [bindGroupLayout],
     });
 
-    const pipeline = device.createComputePipeline({
-        label: "Histogram Compute Pipeline",
-        layout: pipelineLayout,
-        compute: {
-            module: shaderModule,
-            entryPoint: "main",
-        },
-    });
+    function createBinPipeline(label: string, measureDarkroom: boolean): GPUComputePipeline {
+        return device.createComputePipeline({
+            label,
+            layout: pipelineLayout,
+            compute: {
+                module: shaderModule,
+                entryPoint: "main",
+                constants: { MEASURE_DARKROOM: measureDarkroom ? 1 : 0 },
+            },
+        });
+    }
+
+    const binPipelines: Record<HistogramStage, GPUComputePipeline> = {
+        output: createBinPipeline("Histogram Compute Pipeline", false),
+        darkroom: createBinPipeline("Histogram Darkroom Compute Pipeline", true),
+    };
+    let stage: HistogramStage = "output";
 
     // ── Storage buffer for histogram bins (GPU-side) ─────────────────
     // Written atomically by the compute shader, then read in place by the scale
@@ -292,6 +301,10 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
         crop = next;
     }
 
+    function setStage(next: HistogramStage) {
+        stage = next;
+    }
+
     function render(
         inputTexture: GPUTexture,
         sliders: Sliders,
@@ -325,7 +338,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
             label: "Histogram Pass",
             timestampWrites: measure ? timer.passWrites("bin") : undefined,
         });
-        pass.setPipeline(pipeline);
+        pass.setPipeline(binPipelines[stage]);
         pass.setBindGroup(0, bindGroupFor(inputTexture));
 
         // Workgroups: ceil(width / 16) × ceil(height / 16)
@@ -425,6 +438,7 @@ export function createHistogramPipeline(gpu: GPUSession): HistogramPipeline {
     setOutputSpace(gpu.displaySpace, null);
 
     return {
-        setSourceSpace, setOutputSpace, setToneMap, setCurves, setCrop, render, readBins, destroy,
+        setSourceSpace, setOutputSpace, setToneMap, setCurves, setCrop, setStage, render, readBins,
+        destroy,
     };
 }

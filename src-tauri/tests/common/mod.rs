@@ -112,6 +112,12 @@ pub fn u8_to_u16(v: u8) -> u16 {
     v as u16 * 257
 }
 
+/// Input histogram bins for an sRGB-encoded source, the scale every fixture
+/// here is drawn on.
+pub fn encoded_bins() -> Vec<u8> {
+    SourceSpace::default().histogram_bins()
+}
+
 /// u16 values chosen to sit on the interesting edges of the domain.
 pub const EXTREME_VALUES: [u16; 8] = [0, 1, 2, 257, 32767, 32768, 65534, 65535];
 
@@ -663,10 +669,22 @@ pub const HIST_VOTE: u32 = 256;
 /// Run histogram.wgsl over `img` with `sliders` applied, returning the R, G and
 /// B bin arrays. This is the shader the preview's histogram panel uses.
 pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST_BINS]; 3] {
+    run_histogram_with(img, sliders, &SourceSpace::default(), false)
+}
+
+/// [`run_histogram`] with a chosen source space, measuring either the image on
+/// screen or, with `darkroom` set, the darkroom block's output alone.
+pub fn run_histogram_with(
+    img: &Rgba16Image,
+    sliders: &SlidersPayload,
+    space: &SourceSpace,
+    darkroom: bool,
+) -> [[u32; HIST_BINS]; 3] {
     let (device, queue) = device();
     let (width, height) = img.dimensions();
 
-    let params_buf = calc_params_buffer(sliders, wgpu::BufferUsages::empty());
+    let params_buf =
+        calc_buffers_in(sliders, &ViewPayload::default(), space, wgpu::BufferUsages::empty()).0;
 
     // Upload the image exactly the way the preview path does.
     let lut = build_srgb_to_linear_lut_u16();
@@ -744,7 +762,10 @@ pub fn run_histogram(img: &Rgba16Image, sliders: &SlidersPayload) -> [[u32; HIST
         layout: None,
         module: &module,
         entry_point: Some("main"),
-        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        compilation_options: wgpu::PipelineCompilationOptions {
+            constants: &[("MEASURE_DARKROOM", if darkroom { 1.0 } else { 0.0 })],
+            ..Default::default()
+        },
         cache: None,
     });
 

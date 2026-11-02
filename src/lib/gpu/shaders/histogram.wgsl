@@ -49,10 +49,20 @@ fn in_crop(p: vec2f) -> bool {
   return u >= 0.0 && u < crop.size.x && v >= 0.0 && v < crop.size.y;
 }
 
+// Set while bracketing: the bins then measure the darkroom block's output in
+// the source's own channels, sRGB encoded to match the sliders, so each channel
+// moves only with its own sliders. Off, they measure the image on screen.
+override MEASURE_DARKROOM: bool = false;
+
 // One pixel through the same chain develop.wgsl runs, ending in the destination
 // the bins measure — whichever space the preview is currently rendered for.
 fn developed_destination(coord: vec2u) -> vec3f {
-  let rgb = develop(textureLoad(inputTexture, coord, 0).rgb);
+  let source = textureLoad(inputTexture, coord, 0).rgb;
+  if (MEASURE_DARKROOM) {
+    return encode_srgb(darkroom(source));
+  }
+
+  let rgb = develop(source);
 
   // The same output transform the preview is rendered through, so the bins
   // measure the image on screen rather than the working space behind it.

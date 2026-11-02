@@ -5,7 +5,9 @@
 
 mod common;
 
-use common::{gray_ramp, linear_to_srgb, noise, rgb_ramp, solid, u8_to_u16};
+use common::{
+    encoded_bins, gray_ramp, linear_to_srgb, noise, rgb_ramp, solid, srgb_to_linear, u8_to_u16,
+};
 
 use half::f16;
 use image::{ImageBuffer, Rgba};
@@ -14,7 +16,7 @@ use open_darkroom_lib::image_opening::Rgba16Image;
 use open_darkroom_lib::color::{
     build_srgb_to_linear_lut_u16, linearize_u16, same_curve, LINEAR_BYTES_PER_PIXEL,
 };
-use open_darkroom_lib::icc::SourceSpace;
+use open_darkroom_lib::icc::{SourceSpace, IDENTITY};
 use open_darkroom_lib::image_opening::{
     build_payload, compute_histograms, downscale_to_max_edge, downscale_to_target_pixels,
     payload_len_for, prepare_image, PreparedImage, HIST_BINS, OVERVIEW_MAX_EDGE,
@@ -135,7 +137,7 @@ fn downscale_agrees_across_channel_counts() {
 #[test]
 fn histogram_counts_every_pixel_once() {
     let img = noise(200, 150, 0xC0FFEE);
-    let h = compute_histograms(img.as_raw(), 4);
+    let h = compute_histograms(img.as_raw(), 4, &encoded_bins());
 
     let total = (200 * 150) as u32;
     assert_eq!(h.r.iter().sum::<u32>(), total);
@@ -146,7 +148,7 @@ fn histogram_counts_every_pixel_once() {
 #[test]
 fn histogram_bins_by_the_high_byte() {
     let img = solid(10, 10, [u8_to_u16(128), u8_to_u16(0), u8_to_u16(255), u16::MAX]);
-    let h = compute_histograms(img.as_raw(), 4);
+    let h = compute_histograms(img.as_raw(), 4, &encoded_bins());
 
     // 128 * 257 = 32896, and 32896 >> 8 = 128.
     assert_eq!(h.r[128], 100);
@@ -157,12 +159,38 @@ fn histogram_bins_by_the_high_byte() {
 #[test]
 fn histogram_channels_are_not_crossed() {
     let img = solid(4, 4, [u8_to_u16(10), u8_to_u16(20), u8_to_u16(30), u16::MAX]);
-    let h = compute_histograms(img.as_raw(), 4);
+    let h = compute_histograms(img.as_raw(), 4, &encoded_bins());
 
     assert_eq!(h.r[10], 16, "red");
     assert_eq!(h.g[20], 16, "green");
     assert_eq!(h.b[30], 16, "blue");
     assert_eq!(h.r[20] + h.r[30], 0, "red bin picked up another channel");
+}
+
+/// A linear source is binned on the sliders' sRGB scale, so a code value sitting
+/// in the middle of slider step `v` lands in bin `v` rather than near the left
+/// edge where its linear value would put it.
+#[test]
+fn a_linear_source_bins_on_the_slider_scale() {
+    let bins = SourceSpace::linear_with_matrix(IDENTITY).histogram_bins();
+
+    for v in [0u8, 1, 10, 64, 128, 200, 254, 255] {
+        let linear = srgb_to_linear((v as f64 + 0.5) / 256.0);
+        let code = (linear * 65535.0).round() as usize;
+        assert_eq!(bins[code], v, "linear {linear:.5} (code {code})");
+    }
+    assert_eq!(bins[0], 0);
+    assert_eq!(bins[65535], 255);
+}
+
+#[test]
+fn the_bin_table_never_runs_backwards() {
+    for (label, bins) in [
+        ("encoded", encoded_bins()),
+        ("linear", SourceSpace::linear_with_matrix(IDENTITY).histogram_bins()),
+    ] {
+        assert!(bins.windows(2).all(|w| w[0] <= w[1]), "{label} bins are not monotonic");
+    }
 }
 
 /// The stride is the only thing separating one channel's bin from the next, so a
@@ -171,8 +199,8 @@ fn histogram_channels_are_not_crossed() {
 fn histograms_do_not_depend_on_the_channel_count() {
     let img = noise(64, 48, 0xA11FA);
 
-    let rgba = compute_histograms(img.as_raw(), 4);
-    let rgb = compute_histograms(&without_alpha(&img), 3);
+    let rgba = compute_histograms(img.as_raw(), 4, &encoded_bins());
+    let rgb = compute_histograms(&without_alpha(&img), 3, &encoded_bins());
 
     assert_eq!(rgb.r, rgba.r, "red");
     assert_eq!(rgb.g, rgba.g, "green");

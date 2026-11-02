@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{noise, rgb_ramp};
+use common::{encoded_bins, noise, rgb_ramp};
 
 use open_darkroom_lib::crop::{crop_view, crop_view_to_bytes, CropPayload, CROP_VIEW_BYTES};
 use open_darkroom_lib::export_rendering::{
@@ -223,16 +223,16 @@ fn the_input_histograms_bin_only_what_the_crop_keeps() {
     let img = rgb_ramp(64, 8);
     let channels = 4;
 
-    let whole = compute_histograms(img.as_raw(), channels);
+    let whole = compute_histograms(img.as_raw(), channels, &encoded_bins());
     let full_view = crop_view(&CropPayload::FULL_FRAME, 64, 8);
-    let whole_in = compute_histograms_in(img.as_raw(), 64, 8, channels, &full_view);
+    let whole_in = compute_histograms_in(img.as_raw(), 64, 8, channels, &full_view, &encoded_bins());
     assert_eq!(whole.r, whole_in.r);
     assert_eq!(whole.b, whole_in.b);
 
     // The left half of a ramp rising left to right holds none of its top values.
     let left = CropPayload { cx: 0.25, cy: 0.5, w: 0.5, h: 1.0, angle: 0.0, quarter_turns: 0 };
     let view = crop_view(&left, 64, 8);
-    let h = compute_histograms_in(img.as_raw(), 64, 8, channels, &view);
+    let h = compute_histograms_in(img.as_raw(), 64, 8, channels, &view, &encoded_bins());
     assert_eq!(h.r.iter().sum::<u32>(), 32 * 8);
     assert_eq!(h.r[255], 0);
     assert!(whole.r[255] > 0);

@@ -79,7 +79,7 @@ pub type ImageState = Mutex<Option<OriginalImage>>;
 
 // ── Derived image data ────────────────────────────────────────────────────────
 
-/// Per-channel histograms of the full-resolution sRGB image.
+/// Per-channel histograms of the full-resolution image, binned in sRGB code values.
 pub struct Histograms {
     pub r: [u32; HIST_BINS],
     pub g: [u32; HIST_BINS],
@@ -222,17 +222,20 @@ fn resample(
     (u16_vec, new_w, new_h)
 }
 
-/// R/G/B histograms of the full-resolution image. u16 sRGB values (0–65535) are
-/// mapped to 8-bit bins (0–255) via `>> 8`. Alpha, where present, is not binned.
+/// R/G/B histograms of the full-resolution image. `bins` maps each u16 code
+/// value to its bin, as [`SourceSpace::histogram_bins`] builds it. Alpha, where
+/// present, is not binned.
 ///
 /// Each worker bins into its own set of counters and the partials are summed at
 /// the end, so the hot loop needs no atomics.
-pub fn compute_histograms(src: &[u16], channels: usize) -> Histograms {
+pub fn compute_histograms(src: &[u16], channels: usize, bins: &[u8]) -> Histograms {
     src.par_chunks(HIST_BLOCK_PIXELS * channels)
         .map(|block| {
-            let mut bins = empty_bins();
-            block.chunks_exact(channels).for_each(|px| bin_pixel(&mut bins, px));
-            bins
+            let mut counts = empty_bins();
+            block
+                .chunks_exact(channels)
+                .for_each(|px| bin_pixel(&mut counts, px, bins));
+            counts
         })
         .reduce(empty_bins, sum_bins)
         .into()
@@ -244,10 +247,10 @@ fn empty_bins() -> Bins {
     ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS])
 }
 
-fn bin_pixel(bins: &mut Bins, px: &[u16]) {
-    bins.0[(px[0] >> 8) as usize] += 1;
-    bins.1[(px[1] >> 8) as usize] += 1;
-    bins.2[(px[2] >> 8) as usize] += 1;
+fn bin_pixel(counts: &mut Bins, px: &[u16], bins: &[u8]) {
+    counts.0[bins[px[0] as usize] as usize] += 1;
+    counts.1[bins[px[1] as usize] as usize] += 1;
+    counts.2[bins[px[2] as usize] as usize] += 1;
 }
 
 fn sum_bins(mut acc: Bins, part: Bins) -> Bins {
@@ -273,6 +276,7 @@ pub fn compute_histograms_in(
     height: u32,
     channels: usize,
     view: &CropView,
+    bins: &[u8],
 ) -> Histograms {
     let [x0, y0, x1, y1] = view.source_texels(0..view.width, 0..view.height);
     let x0 = x0.clamp(0, width as i64) as u32;
@@ -282,12 +286,12 @@ pub fn compute_histograms_in(
 
     (y0..y1)
         .into_par_iter()
-        .fold(empty_bins, |mut bins, y| {
+        .fold(empty_bins, |mut counts, y| {
             for x in (x0..x1).filter(|&x| view.contains(x, y)) {
                 let at = (y as usize * width as usize + x as usize) * channels;
-                bin_pixel(&mut bins, &src[at..at + channels]);
+                bin_pixel(&mut counts, &src[at..at + channels], bins);
             }
-            bins
+            counts
         })
         .reduce(empty_bins, sum_bins)
         .into()
@@ -318,7 +322,7 @@ pub fn prepare_image(
 ) -> Result<PreparedImage, String> {
     // Histograms describe what is in the file, so they are binned off the
     // source code values before any conversion touches them.
-    let histograms = compute_histograms(src, channels);
+    let histograms = compute_histograms(src, channels, &space.histogram_bins());
 
     // A profile that could not be split into curves and a matrix is applied
     // here in full. There are no separable channels for the darkroom block to
@@ -584,13 +588,14 @@ pub(crate) async fn crop_histograms(
     state: tauri::State<'_, ImageState>,
     crop: CropPayload,
 ) -> Result<Response, String> {
-    let (pixels_u16, width, height, channels) = {
+    let (pixels_u16, width, height, channels, bins) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
-        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels)
+        let bins = img.space.histogram_bins();
+        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins)
     };
 
     let view = crop_view(&crop, width, height);
-    let histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view);
+    let histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins);
     Ok(Response::new(histogram_bytes(&histograms)))
 }
