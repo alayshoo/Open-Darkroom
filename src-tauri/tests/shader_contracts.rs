@@ -565,6 +565,7 @@ fn params_field_offsets_match_the_readback_accessors() {
     expect("shadows", 40);
     expect("whites", 41);
     expect("blacks", 42);
+    expect("dr_density", 43);
     expect("hueSat_matrix", 44);
     expect("vibrance", 60);
 }

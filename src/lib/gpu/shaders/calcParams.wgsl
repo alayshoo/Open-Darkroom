@@ -356,21 +356,31 @@ fn safe_range(range: f32) -> f32 {
 }
 
 // Maps each channel's black point to 0 and its white point to 1, flipping the
-// direction when the negative is being inverted. The output black/white pair is
-// deliberately *not* folded in here — it is applied after gamma, in step 3 of
-// the develop chain, so that the two output sliders remain the true endpoints of
-// the result. See the comment on `out_black` in main().
+// direction when the negative is being inverted. A negative is remapped in
+// density (log2 transmittance), where film responds linearly to scene stops.
+// The output black/white pair is deliberately *not* folded in here — it is
+// applied after gamma, in step 3 of the develop chain, so that the two output
+// sliders remain the true endpoints of the result. See `out_black` in main().
 fn calc_darkroom_matrix() -> mat4x4<f32> {
-    let rbp = srgb_to_linear(sliders.red_black_point   / 255.0);
-    let gbp = srgb_to_linear(sliders.green_black_point / 255.0);
-    let bbp = srgb_to_linear(sliders.blue_black_point  / 255.0);
-    let rwp = srgb_to_linear(sliders.red_white_point   / 255.0);
-    let gwp = srgb_to_linear(sliders.green_white_point / 255.0);
-    let bwp = srgb_to_linear(sliders.blue_white_point  / 255.0);
+    var rbp = srgb_to_linear(sliders.red_black_point   / 255.0);
+    var gbp = srgb_to_linear(sliders.green_black_point / 255.0);
+    var bbp = srgb_to_linear(sliders.blue_black_point  / 255.0);
+    var rwp = srgb_to_linear(sliders.red_white_point   / 255.0);
+    var gwp = srgb_to_linear(sliders.green_white_point / 255.0);
+    var bwp = srgb_to_linear(sliders.blue_white_point  / 255.0);
 
     let invert = sliders.invert > 0.5;
     let start  = select(0.0, 1.0, invert);
     let dir    = select(1.0, -1.0, invert);
+
+    if invert {
+        rbp = log2(max(rbp, MIN_TRANSMITTANCE));
+        gbp = log2(max(gbp, MIN_TRANSMITTANCE));
+        bbp = log2(max(bbp, MIN_TRANSMITTANCE));
+        rwp = log2(max(rwp, MIN_TRANSMITTANCE));
+        gwp = log2(max(gwp, MIN_TRANSMITTANCE));
+        bwp = log2(max(bwp, MIN_TRANSMITTANCE));
+    }
 
     let sR = dir / safe_range(rwp - rbp);
     let sG = dir / safe_range(gwp - gbp);
@@ -540,6 +550,7 @@ fn calc_hsl_bands() -> bool {
 @compute @workgroup_size(1)
 fn main() {
     params.dr_matrix     = calc_darkroom_matrix();
+    params.dr_density    = sliders.invert;
     params.red_gamma     = max(sliders.red_gamma,   MIN_GAMMA);
     params.green_gamma   = max(sliders.green_gamma, MIN_GAMMA);
     params.blue_gamma    = max(sliders.blue_gamma,  MIN_GAMMA);
@@ -581,7 +592,6 @@ fn main() {
     params.shadows       = sliders.shadows    / 100.0 * MAX_WIDE_REGION;
     params.whites        = sliders.whites     / 100.0 * MAX_NARROW_REGION;
     params.blacks        = sliders.blacks     / 100.0 * MAX_NARROW_REGION;
-    params._pad4         = 0.0;
     params.hueSat_matrix = calc_hue_sat_matrix();
     params.vibrance      = sliders.vibrance / 100.0;
     params.rolloff_start = 1.0 - clamp(tone_map.rolloff / 100.0, 0.0, 1.0) * MAX_ROLLOFF_SPAN;

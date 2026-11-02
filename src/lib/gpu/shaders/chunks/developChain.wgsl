@@ -84,8 +84,15 @@ fn darkroom_channels(source: vec3f) -> vec3f {
   var rgb = source;
 
   // 1. Darkroom matrix — black/white point remap + optional inversion,
-  //    normalised so the black point lands on 0 and the white point on 1
+  //    normalised so the black point lands on 0 and the white point on 1.
+  //    A negative is inverted in density and read back as an sRGB-encoded tone.
+  if (params.dr_density > 0.5) {
+    rgb = log2(max(rgb, vec3f(MIN_TRANSMITTANCE)));
+  }
   rgb = (params.dr_matrix * vec4f(rgb, 1.0)).xyz;
+  if (params.dr_density > 0.5) {
+    rgb = decode_srgb(rgb);
+  }
 
   // 2. Per-channel gamma
   return vec3f(

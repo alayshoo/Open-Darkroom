@@ -19,7 +19,7 @@ struct Params {
   shadows:        f32,          // 160
   whites:         f32,          // 164
   blacks:         f32,          // 168
-  _pad4:          f32,          // 172  (align hueSat_matrix to 16)
+  dr_density:     f32,          // 172  (1 = dr_matrix acts on log2 transmittance)
   hueSat_matrix:  mat4x4<f32>,  // 176 — 64 bytes
   vibrance:       f32,          // 240
   rolloff_start:  f32,          // 244  (1 = off)
@@ -36,3 +36,6 @@ struct Params {
   // z blue. w is unused.
   curve_lut:      array<vec4f, 256>, // 400 — 4096 bytes
 }                               // total: 4496 bytes
+
+// Floor on transmittance before it is taken to density, 16 stops below white.
+const MIN_TRANSMITTANCE: f32 = 1.0 / 65536.0;
