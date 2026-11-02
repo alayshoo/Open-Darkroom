@@ -19,6 +19,7 @@
     import { settings } from "$lib/settings/settings.svelte";
     import ColorModeToggle from "$lib/components/inputs/colorModeToggle.svelte";
     import InvertToggle from "$lib/components/inputs/invertToggle.svelte";
+    import AutoLevelsButton from "$lib/components/inputs/autoLevelsButton.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
     import CropButton from "$lib/components/inputs/cropButton.svelte";
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
@@ -62,6 +63,7 @@
         flipCrop,
     } from "$lib/types/crop";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
+    import { autoLevels } from "$lib/utils/autoLevels";
     import { openImage } from "$lib/utils/openImage";
     import { holdPageZoom } from "$lib/utils/pageZoomGuard";
     import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
@@ -609,6 +611,26 @@
         applySliderSet(next, curveValues);
     }
 
+    // Lands as one history step and shows the levels page it changed.
+    function handleAutoLevels() {
+        if (!isDarkroom || sidebarInactive || !inputHistograms) return;
+        const levels = autoLevels(inputHistograms);
+        if (Object.keys(levels).length === 0) return;
+        applySliderSet(levels);
+        const page = actionPage(
+            { type: "sliders", oldValues: {}, newValues: levels },
+            "darkroom",
+            activePageDarkroom,
+        );
+        if (page !== null) scrollToPage(page);
+    }
+
+    function handleInvertShortcut() {
+        if (!isDarkroom || sidebarInactive) return;
+        sliders.invert = !sliders.invert;
+        handleInvertToggle(sliders.invert);
+    }
+
     function handleResetAdjustments() {
         if (sidebarInactive) return;
         resetKeys(activeKeys, isDarkroom ? {} : defaultCurves());
@@ -658,6 +680,8 @@
             toggleCrop: toggleCrop,
             flipHorizontal: () => flipShortcut(true),
             flipVertical: () => flipShortcut(false),
+            autoLevels: handleAutoLevels,
+            toggleInvert: handleInvertShortcut,
             // Both diagnostics hang off the settings master switch, so neither
             // shortcut does anything until the debug tools are turned on.
             toggleDebugStats: () => {
@@ -906,8 +930,9 @@
                      and a plain opacity crossfade never touches layout at all,
                      where `slide` animated width/padding/margin and reflowed
                      the row on every frame. -->
-                <div class="invert-slot" class:shown={isDarkroom}>
+                <div class="invert-slot flex items-center gap-2" class:shown={isDarkroom}>
                     <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
+                    <AutoLevelsButton disabled={!inputHistograms} onauto={handleAutoLevels} />
                 </div>
                 <!-- Pushed to the far end of the row, opposite the toggles. -->
                 <div class="ml-auto">

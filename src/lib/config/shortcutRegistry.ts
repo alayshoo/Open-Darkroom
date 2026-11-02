@@ -150,6 +150,11 @@ export const shortcutGroups: readonly ShortcutGroup[] = [
     { id: "file", label: "File" },
     { id: "edit", label: "Edit" },
     {
+        id: "darkroom",
+        label: "Dark Room",
+        note: "Live only in Dark Room mode.",
+    },
+    {
         id: "debug",
         label: "Debug",
         note: "Live only while the debug tools are on.",
@@ -229,6 +234,19 @@ export const shortcutActions = [
         group: "edit",
         label: "Reset adjustments",
         defaults: ["ctrl+alt+r"],
+    },
+    {
+        id: "autoLevels",
+        group: "darkroom",
+        label: "Auto black and white points",
+        description: "Sets each channel's input black and white points from its histogram.",
+        defaults: ["e"],
+    },
+    {
+        id: "toggleInvert",
+        group: "darkroom",
+        label: "Invert",
+        defaults: ["i"],
     },
     {
         id: "toggleDebugStats",
