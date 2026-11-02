@@ -17,10 +17,17 @@
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { previewDebug } from "$lib/gpu/previewDebug.svelte";
-    import { type Crop } from "$lib/types/crop";
+    import { loupe } from "$lib/gpu/loupe.svelte";
+    import { cropView, type Crop } from "$lib/types/crop";
     import {
         MAX_ZOOM,
+        apply,
+        canvasToOutput,
+        clampCenter,
         cropLayout,
+        insideCrop,
+        loupeCenter,
+        loupeFrame,
         viewFrame,
         wholeLayout,
         zoomAbout,
@@ -158,6 +165,7 @@
         return () => {
             destroyed = true;
             loading++;
+            loupe.status = "none";
             source?.texture.destroy();
             renderer?.destroy();
             renderer = null;
@@ -174,6 +182,13 @@
         const localRenderer = renderer;
         const load = ++loading;
 
+        // A new image starts the loupe over at its centre.
+        untrack(() => {
+            savedView = null;
+            loupe.picking = false;
+            loupe.position = null;
+        });
+
         const preview = uploadRawPixelsToGPU(gpu.device, payload.pixels, payload.width, payload.height, true);
         untrack(() => source)?.texture.destroy();
         source = preview;
@@ -183,8 +198,10 @@
         // An image no larger than the preview already has every pixel.
         if (payload.width === payload.fullWidth && payload.height === payload.fullHeight) {
             previewDebug.stream = null;
+            loupe.status = "ready";
             return;
         }
+        loupe.status = "loading";
 
         const started = performance.now();
         previewDebug.stream = { rows: 0, total: payload.fullHeight, done: false };
@@ -207,6 +224,7 @@
                 localRenderer.requestRender();
                 preview.texture.destroy();
                 source = full;
+                loupe.status = "ready";
             })
             .catch((e) => {
                 if (load === loading) console.error("Failed to load the full-resolution image:", e);
@@ -257,6 +275,92 @@
         renderer.setSliders(sliders);
         renderer.requestRender();
     });
+
+    // ── The loupe ─────────────────────────────────────────────────────────────
+
+    // The crop's output, and the point of it the loupe is centred on.
+    let loupeView = $derived.by(() => {
+        if (!imagePayload || loupe.size <= 0) return null;
+        const view = cropView(crop, imagePayload.fullWidth, imagePayload.fullHeight);
+        return { view, center: loupeCenter(loupe.position, view, loupe.size) };
+    });
+
+    $effect(() => {
+        if (!renderer || !imagePayload) return;
+        const target = loupe.status === "ready" ? loupe.target : null;
+        const placed = loupeView;
+        const frame =
+            target && placed
+                ? loupeFrame(placed.view, placed.center, target.size, imagePayload.fullWidth, imagePayload.fullHeight)
+                : null;
+        renderer.setLoupe(target?.link ?? null, frame);
+        renderer.requestRender();
+    });
+
+    // A position the applied crop no longer reaches goes back to its centre.
+    $effect(() => {
+        if (showWhole || !imagePayload) return;
+        const view = cropView(crop, imagePayload.fullWidth, imagePayload.fullHeight);
+        untrack(() => {
+            if (loupe.position && !insideCrop(loupe.position, view)) loupe.position = null;
+        });
+    });
+
+    // Placing the loupe shows the whole crop, and puts back the view it
+    // replaced once done. The crop tool takes the preview over instead.
+    let savedView: { zoom: number | null; center: Point | null } | null = null;
+
+    $effect(() => {
+        const picking = loupe.picking;
+        untrack(() => {
+            if (picking && !savedView) {
+                savedView = { zoom, center };
+                zoom = null;
+            } else if (!picking && savedView) {
+                if (!showWhole) {
+                    center = savedView.center;
+                    zoom = savedView.zoom;
+                }
+                savedView = null;
+            }
+        });
+    });
+
+    $effect(() => {
+        if (showWhole) loupe.picking = false;
+    });
+
+    // Where the loupe's square sits on the frame, in CSS pixels.
+    let loupeSquare = $derived.by(() => {
+        if (!loupe.picking || !layout || !loupeView) return null;
+        const { view, center } = loupeView;
+        const k = layout.placement.scale / dpr;
+        const w = Math.min(loupe.size, view.width);
+        const h = Math.min(loupe.size, view.height);
+        return { left: (center[0] - w / 2) * k, top: (center[1] - h / 2) * k, width: w * k, height: h * k };
+    });
+
+    // The pointer's offset from the loupe's centre, in output pixels, while
+    // its square is being dragged.
+    let loupeGrab: Point | null = $state(null);
+
+    function placeLoupe(cursor: Point) {
+        if (!layout || !loupeView || !loupeGrab) return;
+        const { view } = loupeView;
+        const [x, y] = apply(canvasToOutput(layout.placement), cursor);
+        const target = clampCenter([x + loupeGrab[0], y + loupeGrab[1]], view);
+        loupe.position = apply(view, loupeCenter(apply(view, target), view, loupe.size));
+    }
+
+    function startLoupeDrag(cursor: Point) {
+        if (!layout || !loupeView) return;
+        const { center } = loupeView;
+        const [x, y] = apply(canvasToOutput(layout.placement), cursor);
+        const half = loupe.size / 2;
+        const onSquare = Math.abs(x - center[0]) <= half && Math.abs(y - center[1]) <= half;
+        loupeGrab = onSquare ? [center[0] - x, center[1] - y] : [0, 0];
+        placeLoupe(cursor);
+    }
 
     // ── Zoom and pan ──────────────────────────────────────────────────────────
 
@@ -314,7 +418,7 @@
         const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 33 : 1;
         if (e.ctrlKey) {
             e.preventDefault();
-            if (gestureStart !== null) return;
+            if (gestureStart !== null || loupe.picking) return;
             const stops = -Math.max(-100, Math.min(100, e.deltaY * lines)) / 100;
             zoomTo(layout.placement.scale * 2 ** stops, cursorOf(e));
         } else if (panning) {
@@ -335,6 +439,7 @@
         previewDebug.noteInput("gesturechange", describeGesture(g));
         if (!layout || showWhole || gestureStart === null) return;
         e.preventDefault();
+        if (loupe.picking) return;
         zoomTo(gestureStart * g.scale, gestureCursor(g));
     }
 
@@ -350,12 +455,22 @@
     let dragFrom: Point | null = $state(null);
 
     function onPointerDown(e: PointerEvent) {
-        if (!panning || e.button !== 0) return;
+        if (e.button !== 0) return;
+        if (loupe.picking) {
+            startLoupeDrag(cursorOf(e));
+            canvas.setPointerCapture(e.pointerId);
+            return;
+        }
+        if (!panning) return;
         dragFrom = cursorOf(e);
         canvas.setPointerCapture(e.pointerId);
     }
 
     function onPointerMove(e: PointerEvent) {
+        if (loupeGrab) {
+            placeLoupe(cursorOf(e));
+            return;
+        }
         if (!dragFrom) return;
         const to = cursorOf(e);
         panBy(to[0] - dragFrom[0], to[1] - dragFrom[1]);
@@ -364,6 +479,7 @@
 
     function onPointerUp() {
         dragFrom = null;
+        loupeGrab = null;
     }
 
     $effect(() => {
@@ -395,7 +511,8 @@
     <canvas
         bind:this={canvas}
         class:panning
-        class:dragging={dragFrom !== null}
+        class:dragging={dragFrom !== null || loupeGrab !== null}
+        class:placing={loupe.picking}
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
         onpointerup={onPointerUp}
@@ -403,6 +520,12 @@
     ></canvas>
     {#if layout}
         {@render overlay?.()}
+    {/if}
+    {#if loupeSquare}
+        <div
+            class="loupe-square"
+            style="left: {loupeSquare.left}px; top: {loupeSquare.top}px; width: {loupeSquare.width}px; height: {loupeSquare.height}px;"
+        ></div>
     {/if}
 </div>
 
@@ -428,7 +551,18 @@
         cursor: grab;
     }
 
+    canvas.placing {
+        cursor: crosshair;
+    }
+
     canvas.dragging {
         cursor: grabbing;
+    }
+
+    .loupe-square {
+        position: absolute;
+        border: 2px solid var(--loupeAccent);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+        pointer-events: none;
     }
 </style>

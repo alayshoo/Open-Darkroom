@@ -394,3 +394,39 @@ export function backdropScale(
 ): number {
     return Math.min(1, sourceScale, (width - 2 * apron - 4) / fullWidth, (height - 2 * apron - 4) / fullHeight);
 }
+
+// ── The loupe ─────────────────────────────────────────────────────────────────
+
+/** Whether image point `position` lands on the crop's output. */
+export function insideCrop(position: Point, view: CropView): boolean {
+    const [x, y] = apply(invert(view), position);
+    return x >= 0 && y >= 0 && x <= view.width && y <= view.height;
+}
+
+/**
+ * The output point a loupe `size` pixels across is centred on: image point
+ * `position` while it lands on the crop, or the crop's centre. Held in far
+ * enough that the loupe stays on the crop, and on whole pixels so it shows them.
+ */
+export function loupeCenter(position: Point | null, view: CropView, size: number): Point {
+    const at = position && insideCrop(position, view) ? apply(invert(view), position) : null;
+    const axis = (v: number | undefined, extent: number) => {
+        const c = extent <= size || v === undefined ? extent / 2 : Math.min(Math.max(v, size / 2), extent - size / 2);
+        return Math.round(c - size / 2) + size / 2;
+    };
+    return [axis(at?.[0], view.width), axis(at?.[1], view.height)];
+}
+
+/** The loupe's canvas, `size` pixels square, showing the output at 1:1 around `center`. */
+export function loupeFrame(view: CropView, center: Point, size: number, fullWidth: number, fullHeight: number): ViewFrame {
+    const placement: Placement = { view, scale: 1, center, anchor: [size / 2, size / 2] };
+    return {
+        canvasWidth: size,
+        canvasHeight: size,
+        toImage: canvasToImage(placement),
+        scale: 1,
+        clip: mapBox(invert(canvasToOutput(placement)), [0, 0, view.width, view.height]),
+        fullWidth,
+        fullHeight,
+    };
+}

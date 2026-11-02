@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import type { GPUCanvasLink, GPUSession, Renderer } from "$lib/types/gpuTypes";
 import { defaultSlidersRGB } from "$lib/types/imgParameters";
-import { FULL_FRAME, type Crop } from "$lib/types/crop";
+import { FULL_FRAME, cropView, type Crop } from "$lib/types/crop";
 import { SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
 import { createRenderer } from "$lib/gpu/renderer";
 import { ROWS_HEADER_BYTES, loadFullResolution } from "$lib/gpu/fullResolution";
@@ -20,6 +20,8 @@ import {
     apply,
     canvasToImage,
     cropLayout,
+    loupeCenter,
+    loupeFrame,
     viewFrame,
     type Point,
     type Slot,
@@ -209,6 +211,7 @@ describe("the preview renderer", () => {
     let renderer: Renderer;
     let passes: string[] = [];
     let backdropRuns = 0;
+    let loupeRuns = 0;
 
     beforeAll(async () => {
         // Record the label of every render pass in the frames the renderer
@@ -217,6 +220,7 @@ describe("the preview renderer", () => {
         gpu.device.createCommandEncoder = (descriptor?: GPUCommandEncoderDescriptor) => {
             const encoder = createEncoder(descriptor);
             if (descriptor?.label === "Render Backdrop") backdropRuns++;
+            if (descriptor?.label === "Render Loupe") loupeRuns++;
             if (descriptor?.label !== "Render Frame") return encoder;
             const begin = encoder.beginRenderPass.bind(encoder);
             encoder.beginRenderPass = (d: GPURenderPassDescriptor) => {
@@ -247,23 +251,28 @@ describe("the preview renderer", () => {
         await new Promise((r) => requestAnimationFrame(r));
 
         const recorded = [...passes];
-        const bytesPerRow = Math.ceil((CANVAS_W * 4) / 256) * 256;
+        const rgba = await read(target, CANVAS_W, CANVAS_H);
+        return { layout, rgba, passes: recorded };
+    }
+
+    async function read(texture: GPUTexture, width: number, height: number): Promise<Uint8Array> {
+        const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
         const staging = gpu.device.createBuffer({
-            size: bytesPerRow * CANVAS_H,
+            size: bytesPerRow * height,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
         const encoder = gpu.device.createCommandEncoder();
-        encoder.copyTextureToBuffer({ texture: target }, { buffer: staging, bytesPerRow }, { width: CANVAS_W, height: CANVAS_H });
+        encoder.copyTextureToBuffer({ texture }, { buffer: staging, bytesPerRow }, { width, height });
         gpu.device.queue.submit([encoder.finish()]);
         await staging.mapAsync(GPUMapMode.READ);
         const padded = new Uint8Array(staging.getMappedRange());
-        const rgba = new Uint8Array(CANVAS_W * CANVAS_H * 4);
-        for (let y = 0; y < CANVAS_H; y++) {
-            rgba.set(padded.subarray(y * bytesPerRow, y * bytesPerRow + CANVAS_W * 4), y * CANVAS_W * 4);
+        const rgba = new Uint8Array(width * height * 4);
+        for (let y = 0; y < height; y++) {
+            rgba.set(padded.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4);
         }
         staging.unmap();
         staging.destroy();
-        return { layout, rgba, passes: recorded };
+        return rgba;
     }
 
     /** The largest difference between the canvas and the source pixel it shows. */
@@ -453,5 +462,86 @@ describe("the preview renderer", () => {
             gpu.device.createTexture = createTexture;
             renderer.setFrame(viewFrame(cropLayout(FULL_FRAME, WIDTH, HEIGHT, slot, null, null), CANVAS_W, CANVAS_H, WIDTH, HEIGHT));
         }
+    });
+
+    describe("the loupe", () => {
+        const SIZE = 64;
+        const CENTER: Point = [300, 80];
+        let loupeTexture: GPUTexture;
+        let loupeLink: GPUCanvasLink;
+
+        beforeAll(() => {
+            loupeTexture = gpu.device.createTexture({
+                size: { width: SIZE, height: SIZE },
+                format: gpu.format,
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+            });
+            loupeLink = { canvasConfig: { getCurrentTexture: () => loupeTexture } } as unknown as GPUCanvasLink;
+        });
+
+        function placeLoupe(position: Point | null) {
+            const view = cropView(FULL_FRAME, WIDTH, HEIGHT);
+            renderer.setLoupe(loupeLink, loupeFrame(view, loupeCenter(position, view, SIZE), SIZE, WIDTH, HEIGHT));
+        }
+
+        it("shows the source's own pixels while the main view is fitted", async () => {
+            renderer.setSliders({ ...defaultSlidersRGB });
+            placeLoupe(CENTER);
+            await show(null, null);
+            const rgba = await read(loupeTexture, SIZE, SIZE);
+            let worst = 0;
+            for (let v = 0; v < SIZE; v++) {
+                for (let u = 0; u < SIZE; u++) {
+                    const [ix, iy] = [CENTER[0] - SIZE / 2 + u, CENTER[1] - SIZE / 2 + v];
+                    for (let c = 0; c < 3; c++) {
+                        worst = Math.max(worst, Math.abs(rgba[(v * SIZE + u) * 4 + c] - source[(iy * WIDTH + ix) * 3 + c]));
+                    }
+                }
+            }
+            expect(worst).toBeLessThanOrEqual(2);
+        });
+
+        it("with the blurs on, matches the main view at 1:1 over the same spot", async () => {
+            renderer.setSliders({ ...defaultSlidersRGB, clarity: 60, usmAmount: 120, usmRadius: 2 });
+            placeLoupe(CENTER);
+            const main = await show(1, CENTER);
+            const rgba = await read(loupeTexture, SIZE, SIZE);
+            const [dx, dy] = [CANVAS_W / 2 - SIZE / 2, CANVAS_H / 2 - SIZE / 2];
+            let worst = 0;
+            for (let v = 0; v < SIZE; v++) {
+                for (let u = 0; u < SIZE; u++) {
+                    for (let c = 0; c < 3; c++) {
+                        const a = rgba[(v * SIZE + u) * 4 + c];
+                        const b = main.rgba[((v + dy) * CANVAS_W + u + dx) * 4 + c];
+                        worst = Math.max(worst, Math.abs(a - b));
+                    }
+                }
+            }
+            expect(worst).toBeLessThanOrEqual(1);
+        });
+
+        it("re-renders only when what it shows has changed, and only while shown", async () => {
+            renderer.setSliders({ ...defaultSlidersRGB });
+            placeLoupe(CENTER);
+            await show(null, null);
+            const runs = loupeRuns;
+
+            await show(1, [200, 80]);
+            expect(loupeRuns).toBe(runs);
+
+            placeLoupe([400, 90]);
+            await show(1, [200, 80]);
+            expect(loupeRuns).toBe(runs + 1);
+
+            renderer.setLoupe(null, null);
+            renderer.setSliders({ ...defaultSlidersRGB, usmAmount: 50 });
+            await show(1, [200, 80]);
+            expect(loupeRuns).toBe(runs + 1);
+
+            placeLoupe([400, 90]);
+            await show(1, [200, 80]);
+            expect(loupeRuns).toBe(runs + 2);
+            renderer.setLoupe(null, null);
+        });
     });
 });

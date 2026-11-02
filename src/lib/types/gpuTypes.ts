@@ -86,6 +86,9 @@ export interface Renderer {
     setCurves: (lut: Float32Array | null) => void;
     // Where the image sits on the canvas, and what of it is drawn.
     setFrame: (frame: ViewFrame) => void;
+    // A second canvas showing the output at 1:1, or null while it is off
+    // screen. Only rendered when something it shows has changed.
+    setLoupe: (target: GPUCanvasLink | null, frame: ViewFrame | null) => void;
     // Marks the preview stale. The frame itself is drawn on the next animation
     // frame the GPU has capacity for, so this never blocks the caller.
     requestRender: () => void;
