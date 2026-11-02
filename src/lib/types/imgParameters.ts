@@ -162,6 +162,11 @@ export const sharedModeKeys = new Set<keyof Sliders>([
     "usmDetailThreshold",
 ]);
 
+/** Whether only the darkroom drives `key`; the shared keys are not. */
+export function isDarkroomKey(key: keyof Sliders): boolean {
+    return darkroomKeys.has(key);
+}
+
 export function modeKeys(isDarkroom: boolean): (keyof Sliders)[] {
     return (Object.keys(defaultSlidersRGB) as (keyof Sliders)[]).filter(
         (key) => sharedModeKeys.has(key) || darkroomKeys.has(key) === isDarkroom,

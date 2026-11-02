@@ -120,14 +120,14 @@
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-        
-        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            value = clampValue(value + step);
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            value = clampValue(value - step);
-        }
+        const inc = e.key === 'ArrowRight' || e.key === 'ArrowUp';
+        const dec = e.key === 'ArrowLeft' || e.key === 'ArrowDown';
+        if (!inc && !dec) return;
+        e.preventDefault();
+
+        onInteractionStart();
+        value = clampValue(value + (inc ? step : -step));
+        onCommit();
     }
 
     function interpolateColor(color1: string, color2: string, t: number): string {

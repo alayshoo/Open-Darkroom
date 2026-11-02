@@ -12,6 +12,7 @@
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
 import { wgslInclude } from "./scripts/wgslInclude.js";
@@ -43,7 +44,8 @@ export default defineConfig({
         // The pipelines report their timings into a runes-backed store, so the
         // `.svelte.ts` files they import have to be compiled rather than read
         // as plain TypeScript.
-        plugins: [wgslInclude({ shaderRoot }), svelte()],
+        // Tailwind lays the page out for the tests that mount it whole.
+        plugins: [wgslInclude({ shaderRoot }), tailwindcss(), svelte()],
         test: {
           name: "browser",
           include: ["tests/browser/**/*.test.ts"],

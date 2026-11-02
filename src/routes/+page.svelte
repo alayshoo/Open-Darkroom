@@ -74,6 +74,7 @@
     import { history } from "$lib/history/history.svelte";
     import { applyAction, undoAction, type StateAccessors, } from "$lib/history/historyDispatch";
     import type { Action } from "$lib/types/historyActions";
+    import { actionMode, actionPage } from "$lib/history/actionControls";
 
     import { createKeydownHandler, isTextField } from "$lib/config/keyboardShortcuts";
 
@@ -207,6 +208,17 @@
         }
         if (!isDarkroom) lastRestoredDarkroom = null;
     });
+
+    // Jumps without scrolling. A pager that is not mounted yet picks the page
+    // up from its active page when it is.
+    function jumpToPage(darkroom: boolean, index: number) {
+        if (darkroom) activePageDarkroom = index;
+        else activePageNormal = index;
+        const el = darkroom ? pagerElDarkroom : pagerElNormal;
+        if (el && darkroom === isDarkroom) {
+            el.scrollTo({ left: index * el.clientWidth, behavior: "instant" });
+        }
+    }
 
     function movePage(right?: boolean) {
         const next = right
@@ -498,15 +510,29 @@
         return discarded;
     }
 
+    // Stepping through the history shows the mode and page whose controls it
+    // changes. Controls both modes show stay in the mode the user is in.
+    function showControlsFor(a: Action) {
+        const mode = actionMode(a) ?? (isDarkroom ? "darkroom" : "lighter-room");
+        const darkroom = mode === "darkroom";
+        const page = actionPage(a, mode, darkroom ? activePageDarkroom : activePageNormal);
+        if (page !== null) jumpToPage(darkroom, page);
+        if (darkroom !== isDarkroom) handleModeToggle();
+    }
+
     function undo() {
         if (leaveCropForHistory()) return;
         const a = history.undo();
-        if (a) undoAction(a, stateAccessors);
+        if (!a) return;
+        showControlsFor(a);
+        undoAction(a, stateAccessors);
     }
     function redo() {
         if (leaveCropForHistory()) return;
         const a = history.redo();
-        if (a) applyAction(a, stateAccessors);
+        if (!a) return;
+        showControlsFor(a);
+        applyAction(a, stateAccessors);
     }
 
     // ===== Adjustments clipboard =====
@@ -1337,6 +1363,12 @@
                                         bind:valueA={sliders.redBlackPoint}
                                         bind:valueB={sliders.redGamma}
                                         bind:valueC={sliders.redWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1354,6 +1386,12 @@
                                         bind:valueA={sliders.greenBlackPoint}
                                         bind:valueB={sliders.greenGamma}
                                         bind:valueC={sliders.greenWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1371,6 +1409,12 @@
                                         bind:valueA={sliders.blueBlackPoint}
                                         bind:valueB={sliders.blueGamma}
                                         bind:valueC={sliders.blueWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1388,6 +1432,12 @@
                                         bind:valueA={sliders.masterBlackPoint}
                                         bind:valueB={sliders.masterGamma}
                                         bind:valueC={sliders.masterWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1404,6 +1454,10 @@
                                         name="RGB Output"
                                         bind:valueA={sliders.rgbOutputBlack}
                                         bind:valueB={sliders.rgbOutputWhite}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "rgbOutputBlack", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "rgbOutputWhite", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={255}
                                         min={0}

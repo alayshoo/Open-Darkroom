@@ -330,6 +330,30 @@ describe("the preview renderer", () => {
         expect(worstAt1to1(settled)).toBeLessThanOrEqual(2);
     });
 
+    it("keeps drawing after a frame fails to drain", async () => {
+        const queue = gpu.device.queue;
+        const drain = queue.onSubmittedWorkDone.bind(queue);
+        let failNext = false;
+        queue.onSubmittedWorkDone = () => {
+            if (!failNext) return drain();
+            failNext = false;
+            return Promise.reject(new DOMException("drain failed", "OperationError"));
+        };
+        try {
+            renderer.setSliders({ ...defaultSlidersRGB });
+            failNext = true;
+            renderer.requestRender();
+            await new Promise((r) => requestAnimationFrame(r));
+            expect(failNext, "the renderer drew no frame").toBe(false);
+
+            renderer.setSliders({ ...defaultSlidersRGB });
+            const shown = await show(1, [100, 70]);
+            expect(shown.passes).toContain("Develop Pass");
+        } finally {
+            delete (queue as Partial<GPUQueue>).onSubmittedWorkDone;
+        }
+    });
+
     it("re-runs the chain when the adjustments change", async () => {
         await show(1, [100, 70]);
         renderer.setSliders({ ...defaultSlidersRGB });
