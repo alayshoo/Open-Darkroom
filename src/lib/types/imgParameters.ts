@@ -155,6 +155,10 @@ const darkroomKeys = new Set<keyof Sliders>([
     "rgbOutputWhite",
 ]);
 
+export function isDarkroomKey(key: keyof Sliders): boolean {
+    return darkroomKeys.has(key);
+}
+
 export function modeKeys(isDarkroom: boolean): (keyof Sliders)[] {
     return (Object.keys(defaultSlidersRGB) as (keyof Sliders)[]).filter(
         (key) => darkroomKeys.has(key) === isDarkroom,

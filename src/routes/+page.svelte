@@ -37,6 +37,7 @@
         defaultSlidersBW,
         overridesBW,
         modeKeys,
+        isDarkroomKey,
         HSL_KEYS,
         SLIDER_TOLERANCE,
     } from "$lib/types/imgParameters";
@@ -488,15 +489,43 @@
         return discarded;
     }
 
+    // Which mode's controls an action belongs to, or null for one shared by both.
+    function actionMode(a: Action): "darkroom" | "lighter-room" | null {
+        switch (a.type) {
+            case "slider":
+                return isDarkroomKey(a.key) ? "darkroom" : "lighter-room";
+            case "sliders": {
+                if (a.newCurves) return "lighter-room";
+                const keys = Object.keys(a.newValues) as (keyof Sliders)[];
+                if (keys.length === 0) return null;
+                return keys.every(isDarkroomKey) ? "darkroom" : "lighter-room";
+            }
+            case "curves":
+                return "lighter-room";
+            case "crop":
+                return null;
+        }
+    }
+
+    // Stepping through the history shows the mode whose controls it changes.
+    function showModeFor(a: Action) {
+        const mode = actionMode(a);
+        if (mode && (mode === "darkroom") !== isDarkroom) handleModeToggle();
+    }
+
     function undo() {
         if (leaveCropForHistory()) return;
         const a = history.undo();
-        if (a) undoAction(a, stateAccessors);
+        if (!a) return;
+        showModeFor(a);
+        undoAction(a, stateAccessors);
     }
     function redo() {
         if (leaveCropForHistory()) return;
         const a = history.redo();
-        if (a) applyAction(a, stateAccessors);
+        if (!a) return;
+        showModeFor(a);
+        applyAction(a, stateAccessors);
     }
 
     // ===== Adjustments clipboard =====
@@ -1315,6 +1344,12 @@
                                         bind:valueA={sliders.redBlackPoint}
                                         bind:valueB={sliders.redGamma}
                                         bind:valueC={sliders.redWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "redWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1332,6 +1367,12 @@
                                         bind:valueA={sliders.greenBlackPoint}
                                         bind:valueB={sliders.greenGamma}
                                         bind:valueC={sliders.greenWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "greenWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1349,6 +1390,12 @@
                                         bind:valueA={sliders.blueBlackPoint}
                                         bind:valueB={sliders.blueGamma}
                                         bind:valueC={sliders.blueWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "blueWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1366,6 +1413,12 @@
                                         bind:valueA={sliders.masterBlackPoint}
                                         bind:valueB={sliders.masterGamma}
                                         bind:valueC={sliders.masterWhitePoint}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterBlackPoint", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterGamma", oldValue, newValue })}
+                                        onCommitC={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "masterWhitePoint", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={1}
                                         defaultValueC={255}
@@ -1382,6 +1435,10 @@
                                         name="RGB Output"
                                         bind:valueA={sliders.rgbOutputBlack}
                                         bind:valueB={sliders.rgbOutputWhite}
+                                        onCommitA={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "rgbOutputBlack", oldValue, newValue })}
+                                        onCommitB={(oldValue, newValue) =>
+                                            commit({ type: "slider", key: "rgbOutputWhite", oldValue, newValue })}
                                         defaultValueA={0}
                                         defaultValueB={255}
                                         min={0}
