@@ -880,6 +880,8 @@
             }
             return;
         }
+        // So does the custom ratio dialog, which answers its own keys.
+        if (customAspectOpen) return;
         if (loupe.picking && e.key === "Escape" && !settings.open && !isTextField(e.target)) {
             loupe.picking = false;
             e.preventDefault();
@@ -889,7 +891,6 @@
             isCropping &&
             !settings.open &&
             !exportMenuOpen &&
-            !customAspectOpen &&
             !isTextField(e.target);
         if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") applyCrop();
