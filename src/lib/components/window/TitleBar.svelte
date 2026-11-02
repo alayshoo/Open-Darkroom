@@ -253,7 +253,7 @@
         height: 38px;
         z-index: 1001;
 
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 16px;
 
         /* Only the drag layer and the two control groups take the pointer; the

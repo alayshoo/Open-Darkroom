@@ -43,7 +43,7 @@
     }
 
     .footer-note {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 11.5px;
         color: var(--color3);
     }
@@ -52,7 +52,7 @@
        than floating over the background. */
     .reset {
         background: var(--bg4);
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 12.5px;
         font-weight: 500;
         color: var(--color2);

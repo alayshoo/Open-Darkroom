@@ -42,7 +42,7 @@
     /* The label/value pair reads like a slider's: the name quiet on --color2,
        the figure beside it a size up and brighter. */
     .label {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 13px;
         font-weight: 400;
         line-height: 1.5;
@@ -50,14 +50,14 @@
     }
 
     .description {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 11.5px;
         line-height: 1.35;
         color: var(--color3);
     }
 
     .value {
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 14px;
         font-weight: 500;
         line-height: 1.4;

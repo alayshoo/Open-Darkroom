@@ -111,7 +111,7 @@
     .menu-button {
         background: transparent;
         color: var(--color2);
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 15px;
         /* The label sits straight on the title bar's gradient with nothing
            behind it, so it carries its own separation from bright pixels. The
@@ -166,7 +166,7 @@
     .menu-item {
         background: transparent;
         color: var(--color2);
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-size: 13px;
         text-align: left;
         transition:

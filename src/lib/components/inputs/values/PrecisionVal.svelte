@@ -198,7 +198,7 @@
         background: transparent;
         color: var(--color1s);
 
-        font-family: "Figtree", sans-serif;
+        font-family: var(--font-ui);
         font-weight: 500;
         font-size: 14px;
         line-height: 100%;
