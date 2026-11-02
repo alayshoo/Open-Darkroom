@@ -341,16 +341,24 @@
             if (payload) {
                 imagePayload = payload;
                 zoom = null;
-                // A crop describes one frame, so neither it nor its history
-                // carries over the way the adjustments do.
-                crop = { ...FULL_FRAME };
-                cancelCrop();
-                history.discard((a) => a.type === "crop");
+                resetEdit();
             }
         } catch (e) {
             imagePayload = null;
             console.error("Failed to open image:", e);
         }
+    }
+
+    // An edit belongs to one image, so a newly opened one starts from defaults
+    // with an empty history.
+    function resetEdit() {
+        sliders = { ...defaultSlidersRGB };
+        curves = defaultCurves();
+        isRgb = true;
+        savedColorValues = null;
+        crop = { ...FULL_FRAME };
+        cancelCrop();
+        history.clear();
     }
 
     // ===== Crop =====
