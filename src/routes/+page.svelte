@@ -62,6 +62,14 @@
         turnCrop,
         flipCrop,
     } from "$lib/types/crop";
+    import {
+        type AspectLock,
+        FREE_ASPECT,
+        aspectRatio,
+        aspectsMatch,
+        cropAspect,
+        cropWithAspect,
+    } from "$lib/types/cropAspect";
     import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
     import { autoLevels } from "$lib/utils/autoLevels";
     import { openImage } from "$lib/utils/openImage";
@@ -340,6 +348,12 @@
     let draftCrop: Crop = $state({ ...FULL_FRAME });
     let isCropping = $state(false);
     let isStraightening = $state(false);
+    // The crop tool's aspect lock, kept from one image to the next.
+    let aspectLock: AspectLock = $state({ ...FREE_ASPECT });
+    let aspectMenuOpen = $state(false);
+    let lockedAspect = $derived.by(() =>
+        imagePayload ? aspectRatio(aspectLock, imagePayload.fullWidth, imagePayload.fullHeight) : null,
+    );
 
     // Canvas pixels per image pixel, or null while the image is fitted to its
     // slot. The crop tool always shows the image fitted.
@@ -371,6 +385,41 @@
         zoom = null;
         draftCrop = { ...crop };
         isCropping = true;
+        holdAspectOnEntry();
+    }
+
+    // An uncropped frame takes on the lock. A crop already drawn to another
+    // shape is kept, and the lock lets go.
+    function holdAspectOnEntry() {
+        if (!imagePayload || aspectLock.preset === "free") return;
+        const { fullWidth, fullHeight } = imagePayload;
+        const shape = cropAspect(draftCrop, fullWidth, fullHeight);
+        const uncropped = draftCrop.w === 1 && draftCrop.h === 1;
+        const lock = { ...aspectLock, portrait: uncropped ? shape < 1 : aspectLock.portrait };
+        const ratio = aspectRatio(lock, fullWidth, fullHeight)!;
+        if (aspectsMatch(shape, ratio)) aspectLock = lock;
+        else if (aspectsMatch(shape, 1 / ratio)) aspectLock = { ...lock, portrait: !lock.portrait };
+        else if (uncropped) setAspect(lock);
+        else aspectLock = { ...FREE_ASPECT };
+    }
+
+    // A newly chosen ratio follows the box's current orientation; the draft is
+    // then refitted to it.
+    function setAspect(lock: AspectLock) {
+        if (!imagePayload) return;
+        const { fullWidth, fullHeight } = imagePayload;
+        if (lock.preset !== aspectLock.preset) {
+            lock = { ...lock, portrait: cropAspect(draftCrop, fullWidth, fullHeight) < 1 };
+        }
+        aspectLock = lock;
+        const ratio = aspectRatio(lock, fullWidth, fullHeight);
+        if (ratio === null || aspectsMatch(cropAspect(draftCrop, fullWidth, fullHeight), ratio)) return;
+        draftCrop = cropWithAspect(draftCrop, ratio, fullWidth, fullHeight);
+    }
+
+    function resetDraft() {
+        draftCrop = { ...FULL_FRAME };
+        aspectLock = { ...FREE_ASPECT };
     }
 
     function applyCrop() {
@@ -389,6 +438,7 @@
 
     function turnDraft(clockwise: boolean) {
         draftCrop = turnCrop(draftCrop, clockwise);
+        aspectLock = { ...aspectLock, portrait: !aspectLock.portrait };
     }
 
     function flipDraft(horizontal: boolean) {
@@ -719,6 +769,7 @@
             isCropping && !settings.open && !exportMenuOpen && !isTextField(e.target);
         if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") applyCrop();
+            else if (aspectMenuOpen) aspectMenuOpen = false;
             else if (isStraightening) isStraightening = false;
             else cancelCrop();
             e.preventDefault();
@@ -846,10 +897,14 @@
             <CropTools
                 visible={isCropping}
                 bind:straightening={isStraightening}
+                bind:aspectMenuOpen
+                aspect={aspectLock}
+                aspectRatio={lockedAspect}
                 canReset={!isFullFrame(draftCrop)}
                 onturn={turnDraft}
                 onflip={flipDraft}
-                onreset={() => (draftCrop = { ...FULL_FRAME })}
+                onaspect={setAspect}
+                onreset={resetDraft}
             />
         </div>
         <div
@@ -886,6 +941,7 @@
                         <CropOverlay
                             bind:crop={draftCrop}
                             bind:straightening={isStraightening}
+                            aspect={lockedAspect}
                             imageWidth={imagePayload.fullWidth}
                             imageHeight={imagePayload.fullHeight}
                         />
