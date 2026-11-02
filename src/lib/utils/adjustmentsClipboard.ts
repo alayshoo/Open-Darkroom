@@ -26,6 +26,26 @@ function formatCurve(points: CurvePoint[]): string {
     return points.map((p) => `${formatValue(p.x)},${formatValue(p.y)}`).join(" ");
 }
 
+/** One line per key that has a value, then one per curve channel given. */
+export function formatAdjustments(
+    sliders: Partial<Sliders>,
+    keys: (keyof Sliders)[],
+    curves?: Partial<Curves>,
+): string[] {
+    const lines: string[] = [];
+    for (const key of keys) {
+        const value = sliders[key];
+        if (value !== undefined) lines.push(`${key}: ${formatValue(value)}`);
+    }
+    if (curves) {
+        for (const channel of CURVE_CHANNELS) {
+            const points = curves[channel];
+            if (points) lines.push(`${curveKey(channel)}: ${formatCurve(points)}`);
+        }
+    }
+    return lines;
+}
+
 // Callers pass the keys their mode owns, so a document never carries — or
 // applies — adjustments belonging to the other mode. Curves are only passed
 // by the mode that owns them.
@@ -34,16 +54,11 @@ export async function copyAdjustments(
     keys: (keyof Sliders)[],
     curves?: Curves,
 ): Promise<void> {
-    const lines = keys.map((key) => `${key}: ${formatValue(sliders[key])}`);
-    if (curves) {
-        for (const channel of CURVE_CHANNELS) {
-            lines.push(`${curveKey(channel)}: ${formatCurve(curves[channel])}`);
-        }
-    }
+    const lines = formatAdjustments(sliders, keys, curves);
     await writeText(`${lines.join("\n")}\n`);
 }
 
-function readDocument(text: string): Map<string, string> {
+export function readDocument(text: string): Map<string, string> {
     const entries = new Map<string, string>();
 
     for (const rawLine of text.split(/\r?\n/)) {
@@ -58,16 +73,15 @@ function readDocument(text: string): Map<string, string> {
         const key = line.slice(0, colon).trim();
         let value = line.slice(colon + 1).trim();
 
-        const comment = value.indexOf(" #");
-        if (comment >= 0) value = value.slice(0, comment).trim();
-
+        // A quoted value runs to its last matching quote, so it may hold a
+        // " #" of its own; anything after the closing quote is ignored.
         const first = value[0];
-        if (
-            value.length >= 2 &&
-            (first === '"' || first === "'") &&
-            value.endsWith(first)
-        ) {
-            value = value.slice(1, -1);
+        const close = first === '"' || first === "'" ? value.lastIndexOf(first) : -1;
+        if (close > 0) {
+            value = value.slice(1, close);
+        } else {
+            const comment = value.indexOf(" #");
+            if (comment >= 0) value = value.slice(0, comment).trim();
         }
 
         if (key) entries.set(key, value);
@@ -76,7 +90,7 @@ function readDocument(text: string): Map<string, string> {
     return entries;
 }
 
-function readSliders(entries: Map<string, string>, keys: (keyof Sliders)[]): Partial<Sliders> {
+export function readSliders(entries: Map<string, string>, keys: (keyof Sliders)[]): Partial<Sliders> {
     const values: Partial<Sliders> = {};
 
     for (const key of keys) {
@@ -114,7 +128,7 @@ function parseCurve(raw: string): CurvePoint[] | null {
     return points;
 }
 
-function readCurves(entries: Map<string, string>): Partial<Curves> {
+export function readCurves(entries: Map<string, string>): Partial<Curves> {
     const curves: Partial<Curves> = {};
     for (const channel of CURVE_CHANNELS) {
         const raw = entries.get(curveKey(channel));

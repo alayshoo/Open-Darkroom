@@ -114,7 +114,7 @@ pub(crate) async fn export_image(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
+pub(crate) fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
     if path.extension().map(|e| e.to_ascii_lowercase()) != Some(ext.into()) {
         path.with_extension(ext)
     } else {
