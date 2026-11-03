@@ -308,6 +308,8 @@
             renderer.sourceChanged();
             renderer.requestRender();
         }
+        handedOver = null;
+        if (untrack(() => stroke?.live)) queuePaint();
     });
 
     // ── The loupe ─────────────────────────────────────────────────────────────
@@ -537,8 +539,13 @@
     let hover = $state<Point | null>(null);
 
     // A stroke being painted, in image pixels, and where it takes its pixels
-    // from, or null to find out once it is done.
-    let stroke = $state<{ points: Point[]; offset: Point | null } | null>(null);
+    // from, or null to find out once it is done. A stroke whose source is
+    // known is painted into the image as it is drawn.
+    let stroke = $state<{ points: Point[]; offset: Point | null; live: boolean } | null>(null);
+    // A live stroke just finished, kept painted until the strokes synced take it.
+    let handedOver: Retouch | null = null;
+    let painting = false;
+    let paintQueued = false;
     // Strokes waiting on their source to be found.
     let pending = $state<{ id: number; points: Point[]; radius: number }[]>([]);
     let pendingId = 0;
@@ -565,7 +572,10 @@
         }
         const { fullWidth, fullHeight } = imagePayload;
         if (point[0] < 0 || point[1] < 0 || point[0] >= fullWidth || point[1] >= fullHeight) return;
-        stroke = { points: [point], offset: retouchTool.offsetFor(point) };
+        const offset = retouchTool.offsetFor(point);
+        // Behind a stroke still finding its source, it waits its turn as an outline.
+        stroke = { points: [point], offset, live: offset !== null && pending.length === 0 };
+        if (stroke.live) queuePaint();
     }
 
     function moveBrush(e: PointerEvent) {
@@ -582,12 +592,48 @@
         const spacing = Math.max(0.5, retouchTool.radius * 0.15);
         if (Math.hypot(point[0] - last[0], point[1] - last[1]) >= spacing) {
             stroke.points.push(point);
+            if (stroke.live) queuePaint();
         }
     }
 
     function cancelStroke() {
+        if (stroke?.live) queuePaint();
         stroke = null;
         resizing = null;
+    }
+
+    /** The stroke as it is stored, from image pixels. */
+    function strokeRetouch(points: Point[], offset: Point | null): Retouch {
+        const { fullWidth, fullHeight } = imagePayload!;
+        return {
+            mode: retouchTool.mode ?? "heal",
+            points: points.map(([x, y]) => [x / fullWidth, y / fullHeight]),
+            radius: retouchTool.radius / Math.max(fullWidth, fullHeight),
+            feather: retouchTool.feather / 100,
+            opacity: retouchTool.opacity / 100,
+            offset: offset ? [offset[0] / fullWidth, offset[1] / fullHeight] : [0, 0],
+        };
+    }
+
+    function queuePaint() {
+        if (paintQueued) return;
+        paintQueued = true;
+        requestAnimationFrame(paintStroke);
+    }
+
+    // At most once a frame, and not before the GPU is done with the last one.
+    function paintStroke() {
+        paintQueued = false;
+        if (painting || !retouchLayer || !renderer || !source || !imagePayload) return;
+        const next = stroke?.live ? strokeRetouch(stroke.points, stroke.offset) : handedOver;
+        if (!retouchLayer.paint(source, next)) return;
+        renderer.sourceChanged();
+        renderer.requestRender();
+        painting = true;
+        gpu.device.queue.onSubmittedWorkDone().then(() => {
+            painting = false;
+            queuePaint();
+        });
     }
 
     // Strokes are added in the order they were painted, however long each
@@ -595,21 +641,19 @@
     function finishStroke() {
         const done = stroke;
         stroke = null;
-        if (!done || !imagePayload || !onretouch) return;
-        const { fullWidth, fullHeight } = imagePayload;
-        const mode = retouchTool.mode ?? "heal";
+        if (!done || !imagePayload || !onretouch) {
+            if (done?.live) queuePaint();
+            return;
+        }
+        const base = strokeRetouch(done.points, done.offset);
+        if (done.live) {
+            handedOver = base;
+            onretouch(base);
+            return;
+        }
         const radius = retouchTool.radius;
         const id = ++pendingId;
         pending = [...pending, { id, points: done.points, radius }];
-
-        const base: Retouch = {
-            mode,
-            points: done.points.map(([x, y]) => [x / fullWidth, y / fullHeight]),
-            radius: radius / Math.max(fullWidth, fullHeight),
-            feather: retouchTool.feather / 100,
-            opacity: retouchTool.opacity / 100,
-            offset: done.offset ? [done.offset[0] / fullWidth, done.offset[1] / fullHeight] : [0, 0],
-        };
         const image = source;
         const emit = onretouch;
 
@@ -665,7 +709,8 @@
         const anchor = resizing?.at ?? (spaceHeld || dragFrom ? null : hover);
         const at = anchor ? apply(toImage, anchor) : null;
         const offset = stroke ? stroke.offset : retouchTool.offset;
-        const strokes = [...pending, ...(stroke ? [{ points: stroke.points, radius: retouchTool.radius }] : [])];
+        const drawing = stroke && !stroke.live ? [{ points: stroke.points, radius: retouchTool.radius }] : [];
+        const strokes = [...pending, ...drawing];
         return {
             cursor: anchor ? ([anchor[0] / dpr, anchor[1] / dpr] as Point) : null,
             radius,

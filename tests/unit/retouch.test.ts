@@ -74,7 +74,8 @@ describe("blurSpan", () => {
     it("strides a wide blur rather than tapping every texel", () => {
         const span = blurSpan(300);
         expect(span.taps).toBeLessThanOrEqual(64);
-        expect(span.taps * span.step).toBeGreaterThanOrEqual(span.reach);
+        expect(span.taps * span.step).toBe(span.reach);
+        expect(span.reach).toBeGreaterThanOrEqual(Math.ceil(3 * span.sigma));
     });
 });
 

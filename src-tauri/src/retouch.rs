@@ -97,9 +97,11 @@ pub struct BlurSpan {
 
 pub fn blur_span(radius: f64) -> BlurSpan {
     let sigma = (radius * 0.5).max(1.0);
-    let reach = (3.0 * sigma).ceil() as i64;
-    let step = (reach + MAX_BLUR_TAPS - 1) / MAX_BLUR_TAPS;
-    BlurSpan { sigma, reach, step, taps: (reach + step - 1) / step }
+    let needed = (3.0 * sigma).ceil() as i64;
+    let step = (needed + MAX_BLUR_TAPS - 1) / MAX_BLUR_TAPS;
+    let taps = (needed + step - 1) / step;
+    // Every tap lands inside the margin, so a texel blurs the same whichever tile it is in.
+    BlurSpan { sigma, reach: taps * step, step, taps }
 }
 
 fn clamp_box([x0, y0, x1, y1]: TexelBox, width: u32, height: u32) -> Option<TexelBox> {

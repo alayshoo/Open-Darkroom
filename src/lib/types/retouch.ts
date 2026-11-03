@@ -125,9 +125,11 @@ export interface BlurSpan {
 
 export function blurSpan(radius: number): BlurSpan {
     const sigma = blurSigma(radius);
-    const reach = Math.ceil(3 * sigma);
-    const step = Math.ceil(reach / MAX_BLUR_TAPS);
-    return { sigma, reach, step, taps: Math.ceil(reach / step) };
+    const needed = Math.ceil(3 * sigma);
+    const step = Math.ceil(needed / MAX_BLUR_TAPS);
+    const taps = Math.ceil(needed / step);
+    // Every tap lands inside the margin, so a texel blurs the same whichever tile it is in.
+    return { sigma, reach: taps * step, step, taps };
 }
 
 function clampBox([x0, y0, x1, y1]: TexelBox, width: number, height: number): TexelBox | null {
@@ -192,26 +194,42 @@ export interface RetouchTile {
     segments: number[][];
 }
 
+/** Texels the heal's blur reads past each side of a tile. */
+export function retouchMargin(r: PlacedRetouch): number {
+    return r.mode === "heal" ? blurSpan(r.radius).reach : 0;
+}
+
+/** The pass that writes `target`, or null when the stroke does not reach it. */
+export function retouchTile(
+    r: PlacedRetouch,
+    segments: number[][],
+    target: TexelBox,
+    width: number,
+    height: number,
+): RetouchTile | null {
+    const near = segments.filter((s) => segmentNearBox(s, target, r.radius + 1));
+    if (near.length === 0) return null;
+    const margin = retouchMargin(r);
+    const work = clampBox(
+        [target[0] - margin, target[1] - margin, target[2] + margin, target[3] + margin],
+        width,
+        height,
+    )!;
+    // The blur reads the stroke's mask across the whole work box.
+    const reaching = margin > 0 ? segments.filter((s) => segmentNearBox(s, work, r.radius + 1)) : near;
+    return { target, work, segments: reaching };
+}
+
 export function retouchTiles(r: PlacedRetouch, width: number, height: number): RetouchTile[] {
     const bounds = retouchBounds(r, width, height);
     if (!bounds) return [];
-    const { reach } = blurSpan(r.radius);
-    const margin = r.mode === "heal" ? reach : 0;
     const segments = strokeSegments(r.points);
     const tiles: RetouchTile[] = [];
     for (let y = bounds[1]; y < bounds[3]; y += RETOUCH_TILE) {
         for (let x = bounds[0]; x < bounds[2]; x += RETOUCH_TILE) {
             const target: TexelBox = [x, y, Math.min(x + RETOUCH_TILE, bounds[2]), Math.min(y + RETOUCH_TILE, bounds[3])];
-            const near = segments.filter((s) => segmentNearBox(s, target, r.radius + 1));
-            if (near.length === 0) continue;
-            const work = clampBox(
-                [target[0] - margin, target[1] - margin, target[2] + margin, target[3] + margin],
-                width,
-                height,
-            )!;
-            // The blur reads the stroke's mask across the whole work box.
-            const reaching = margin > 0 ? segments.filter((s) => segmentNearBox(s, work, r.radius + 1)) : near;
-            tiles.push({ target, work, segments: reaching });
+            const tile = retouchTile(r, segments, target, width, height);
+            if (tile) tiles.push(tile);
         }
     }
     return tiles;

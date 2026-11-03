@@ -135,6 +135,132 @@ describe("retouchLayer", () => {
     });
 });
 
+/** Where two levels differ: how many words, and the first texel. */
+function differences(a: { width: number; words: Uint16Array }, b: { width: number; words: Uint16Array }) {
+    let count = 0;
+    let first: number[] | null = null;
+    for (let i = 0; i < a.words.length; i++) {
+        if (a.words[i] === b.words[i]) continue;
+        count++;
+        first ??= [Math.floor(i / 4) % a.width, Math.floor(i / 4 / a.width)];
+    }
+    return { count, first };
+}
+
+const same = { count: 0, first: null };
+
+describe("a stroke painted live", () => {
+    const W = 1300;
+    const H = 700;
+    // Texture enough that a heal's tone match and a clone's copy both show.
+    const grain = (x: number, y: number) => [
+        0.2 + 0.6 * (x / W) + 0.05 * Math.sin(x * 0.7 + y * 1.3),
+        0.3 + 0.4 * (y / H) + 0.05 * Math.cos(x * 1.1 - y * 0.5),
+        0.5 + 0.1 * Math.sin((x + y) * 0.21),
+    ];
+
+    // Crosses several tiles, and its source overlaps where it has already been.
+    const stroke = (mode: "heal" | "clone"): Retouch => ({
+        mode,
+        points: [
+            [200, 150], [420, 230], [640, 300], [700, 520], [980, 560], [1150, 420],
+        ].map(([x, y]) => [x / W, y / H]),
+        // Wide enough that the heal's blur strides across the image.
+        radius: 50 / W,
+        feather: 0.5,
+        opacity: 0.9,
+        offset: [-60 / W, 40 / H],
+    });
+    const under: Retouch = { ...stroke("clone"), points: [[500 / W, 300 / H], [800 / W, 320 / H]], radius: 30 / W, offset: [0, -120 / H] };
+
+    const prefix = (r: Retouch, n: number): Retouch => ({ ...r, points: r.points.slice(0, n) });
+
+    for (const mode of ["heal", "clone"] as const) {
+        it(`ends as the same ${mode} applied whole, mip levels and all`, async () => {
+            const painted = positionImage(W, H, grain);
+            const whole = positionImage(W, H, grain);
+            const live = createRetouchLayer(device);
+            const once = createRetouchLayer(device);
+            const r = stroke(mode);
+
+            live.sync(painted, [under]);
+            device.pushErrorScope("validation");
+            for (let n = 1; n <= r.points.length; n++) expect(live.paint(painted, prefix(r, n))).toBe(true);
+            expect(live.paint(painted, r)).toBe(false);
+            live.sync(painted, [under, r]);
+            expect(await device.popErrorScope()).toBeNull();
+            once.sync(whole, [under, r]);
+
+            for (const level of [0, 1, 3]) {
+                const a = await readLevel(painted.texture, level);
+                const b = await readLevel(whole.texture, level);
+                expect(differences(a, b)).toEqual(same);
+            }
+            live.destroy();
+            once.destroy();
+            painted.texture.destroy();
+            whole.texture.destroy();
+        });
+    }
+
+    it("is handed over with the points it had not painted yet", async () => {
+        const painted = positionImage(W, H, grain);
+        const whole = positionImage(W, H, grain);
+        const live = createRetouchLayer(device);
+        const once = createRetouchLayer(device);
+        const r = stroke("heal");
+        live.sync(painted, []);
+        live.paint(painted, prefix(r, 3));
+        live.sync(painted, [r]);
+        once.sync(whole, [r]);
+        expect(differences(await readLevel(painted.texture, 0), await readLevel(whole.texture, 0))).toEqual(same);
+        live.destroy();
+        once.destroy();
+        painted.texture.destroy();
+        whole.texture.destroy();
+    });
+
+    it("leaves the image as it was when taken away", async () => {
+        const image = positionImage(W, H, grain);
+        const layer = createRetouchLayer(device);
+        layer.sync(image, [under]);
+        const before = await readLevel(image.texture, 0);
+        const beforeMip = await readLevel(image.texture, 2);
+        const r = stroke("heal");
+        for (let n = 1; n <= r.points.length; n++) layer.paint(image, prefix(r, n));
+        expect(layer.paint(image, null)).toBe(true);
+        expect(differences(await readLevel(image.texture, 0), before)).toEqual(same);
+        expect(differences(await readLevel(image.texture, 2), beforeMip)).toEqual(same);
+
+        // Or when the strokes synced are not it.
+        layer.paint(image, r);
+        layer.sync(image, []);
+        layer.sync(image, [under]);
+        expect(differences(await readLevel(image.texture, 0), before)).toEqual(same);
+        layer.destroy();
+        image.texture.destroy();
+    });
+
+    it("starts again when its brush changes", async () => {
+        const painted = positionImage(W, H, grain);
+        const whole = positionImage(W, H, grain);
+        const live = createRetouchLayer(device);
+        const once = createRetouchLayer(device);
+        const clone_ = stroke("clone");
+        const heal = stroke("heal");
+        live.sync(painted, []);
+        live.paint(painted, prefix(clone_, 4));
+        live.paint(painted, heal);
+        live.sync(painted, [heal]);
+        once.sync(whole, [heal]);
+        expect(differences(await readLevel(painted.texture, 0), await readLevel(whole.texture, 0))).toEqual(same);
+        live.destroy();
+        once.destroy();
+        painted.texture.destroy();
+        whole.texture.destroy();
+    });
+});
+
 describe("the histogram's overview", () => {
     it("takes strokes the way the preview does", async () => {
         // The overview is uploaded without mip levels, as Histogram.svelte does.

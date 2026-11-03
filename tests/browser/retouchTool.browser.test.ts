@@ -154,6 +154,15 @@ describe("the retouch brushes", () => {
         expect(offsets[0]![1]).toBeCloseTo(-0.4, 2);
         expect(offsets[1]).toEqual(offsets[0]);
 
+        // With its source known, a stroke shows in the image as it is painted, not as an outline.
+        pointer("pointerdown", on(0.6, 0.3));
+        pointer("pointermove", on(0.65, 0.3));
+        await vi.waitFor(() => expect(document.querySelector(".retouch-brush circle.ring")).not.toBeNull());
+        expect(document.querySelector(".retouch-brush path.stroke")).toBeNull();
+        await userEvent.keyboard("{Escape}");
+        pointer("pointerup", on(0.65, 0.3));
+        expect(history.stack).toHaveLength(2);
+
         await userEvent.keyboard("{Control>}z{/Control}");
         expect(history.pointer).toBe(0);
     });
