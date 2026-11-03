@@ -11,7 +11,8 @@ use image::{ImageBuffer, Rgba};
 use open_darkroom_lib::crop::CropPayload;
 use open_darkroom_lib::export_rendering::{render_cropped_with_chunk_rows, SlidersPayload};
 use open_darkroom_lib::icc::SourceSpace;
-use open_darkroom_lib::image_opening::Rgba16Image;
+use open_darkroom_lib::crop::crop_view;
+use open_darkroom_lib::image_opening::{compute_histograms_in, compute_retouched_histograms_in, Rgba16Image};
 use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::retouch::{
     apply_retouch, blur_span, place_retouch, retouch_tiles, retouch_uniform, LinearSource, RetouchMode,
@@ -184,7 +185,7 @@ fn the_preview_source_search_compiles() {
         label: Some("retouchSource"),
         source: wgpu::ShaderSource::Wgsl(open_darkroom_lib::shaders::RETOUCH_SOURCE_WGSL.into()),
     });
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let _ = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: None,
         layout: None,
         module: &module,
@@ -194,6 +195,32 @@ fn the_preview_source_search_compiles() {
     });
     let error = pollster::block_on(device.pop_error_scope());
     assert!(error.is_none(), "retouchSource.wgsl: {error:?}");
+}
+
+// ── Histograms ────────────────────────────────────────────────────────────────
+
+#[test]
+fn the_input_histograms_count_a_healed_speck_as_what_replaced_it() {
+    // Mid grey with a bright speck, healed from more of the same grey.
+    let mut img = grey(128, 64, 0x6000);
+    for y in 30..34 {
+        for x in 94..98 {
+            img.put_pixel(x, y, Rgba([0xF000, 0xF000, 0xF000, u16::MAX]));
+        }
+    }
+    let bins: Vec<u8> = (0..=u16::MAX as u32).map(|i| (i >> 8) as u8).collect();
+    let view = crop_view(&CropPayload::FULL_FRAME, 128, 64);
+    let luts = identity_luts();
+    let (device, queue) = device();
+    let r = stroke(RetouchMode::Heal, &[[96.0 / 128.0, 32.0 / 64.0]], 6.0 / 128.0, [-40.0 / 128.0, 0.0]);
+
+    let before = compute_histograms_in(img.as_raw(), 128, 64, 4, &view, &bins);
+    let after =
+        compute_retouched_histograms_in(device, queue, img.as_raw(), 128, 64, 4, &view, &bins, &luts, &[r]).unwrap();
+    assert_eq!(before.r[0xF0], 16);
+    assert_eq!(after.r[0xF0], 0);
+    assert_eq!(after.r.iter().sum::<u32>(), 128 * 64);
+    assert_eq!(after.r[0x60] - before.r[0x60], 16);
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────

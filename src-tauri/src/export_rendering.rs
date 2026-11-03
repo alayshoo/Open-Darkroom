@@ -508,6 +508,33 @@ pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
 
 // ── Core GPU render ───────────────────────────────────────────────────────────
 
+/// A device on the fastest adapter there is, for one export or one retouched
+/// histogram.
+pub async fn request_device(label: &'static str) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    let adapter = wgpu::Instance::default()
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        })
+        .await
+        .map_err(|e| format!("No GPU adapter found: {e}"))?;
+
+    let info = adapter.get_info();
+    println!("{label}: adapter = {} ({:?})", info.name, info.backend);
+
+    adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some(label),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        })
+        .await
+        .map_err(|e| format!("GPU device creation failed: {e}"))
+}
+
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
 ///
 /// See [`render_image_with_chunk_rows`]; this uses the default [`CHUNK_ROWS`].
@@ -676,30 +703,7 @@ pub async fn render_cropped_with_chunk_rows(
 
     // ── 1. Initialise wgpu ────────────────────────────────────────────────────
 
-    let instance = wgpu::Instance::default();
-
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        })
-        .await
-        .map_err(|e| format!("No GPU adapter found: {e}"))?;
-
-    let info = adapter.get_info();
-    println!("export: adapter = {} ({:?})", info.name, info.backend);
-
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("export_device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        })
-        .await
-        .map_err(|e| format!("GPU device creation failed: {e}"))?;
+    let (device, queue) = request_device("export_device").await?;
 
     // ── 2. Slider uniform + params storage buffers ────────────────────────────
 

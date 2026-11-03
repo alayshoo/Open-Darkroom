@@ -12,6 +12,7 @@ import type { Retouch } from "$lib/types/retouch";
 import { placeRetouch } from "$lib/types/retouch";
 import { generateMipmaps, sourceTexture } from "$lib/gpu/fullResolution";
 import { createRetouchLayer } from "$lib/gpu/retouchLayer";
+import { uploadRawPixelsToGPU } from "$lib/gpu/gpuTextureUpload";
 import { findSource } from "$lib/gpu/retouchSearch";
 
 let device: GPUDevice;
@@ -129,6 +130,24 @@ describe("retouchLayer", () => {
         layer.sync(image, [{ mode: "heal", points: [[96 / 128, 32 / 64]], radius: 6 / 128, feather: 0, opacity: 1, offset: [-72 / 128, 0] }]);
         const after = await readLevel(image.texture, 0);
         expect(at(after, 96, 32)[0]).toBe(toHalf(0.4));
+        layer.destroy();
+        image.texture.destroy();
+    });
+});
+
+describe("the histogram's overview", () => {
+    it("takes strokes the way the preview does", async () => {
+        // The overview is uploaded without mip levels, as Histogram.svelte does.
+        const words = new Uint16Array(64 * 64 * 4);
+        for (let i = 0; i < 64 * 64; i++) words.set([toHalf((i % 64) / 64), toHalf(0.5), toHalf(0.5), toHalf(1)], i * 4);
+        const image = uploadRawPixelsToGPU(device, new Uint8Array(words.buffer), 64, 64);
+        const before = await readLevel(image.texture, 0);
+        const layer = createRetouchLayer(device);
+        device.pushErrorScope("validation");
+        expect(layer.sync(image, [clone(48, 32, -32, 0, 64)])).toBe(true);
+        expect(await device.popErrorScope()).toBeNull();
+        const after = await readLevel(image.texture, 0);
+        expect(at(after, 48, 32)).toEqual(at(before, 16, 32));
         layer.destroy();
         image.texture.destroy();
     });

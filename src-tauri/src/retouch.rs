@@ -313,6 +313,15 @@ impl<'a> LinearSource<'a> {
         out
     }
 
+    /// Every block a stroke has written, as its box `[x0, y0, w, h]` and its
+    /// pixels in LE f32 RGBA.
+    pub fn blocks(&self) -> impl Iterator<Item = ([u32; 4], &[u8])> + '_ {
+        self.blocks.iter().map(|(&(bx, by), data)| {
+            let (x, y, w, h) = self.block_box(bx, by);
+            ([x, y, w, h], data.as_slice())
+        })
+    }
+
     fn write(&mut self, x0: u32, y0: u32, w: u32, h: u32, data: &[u8]) {
         let px = LINEAR_F32_BYTES_PER_PIXEL;
         for by in y0 / CACHE_TILE..=(y0 + h - 1) / CACHE_TILE {

@@ -13,6 +13,8 @@
     import { type ImagePayload } from "$lib/types/imagePayload";
     import type { CurveChannel } from "$lib/types/curves";
     import type { Crop } from "$lib/types/crop";
+    import type { Retouch } from "$lib/types/retouch";
+    import { createRetouchLayer, type RetouchLayer } from "$lib/gpu/retouchLayer";
 
     let {
         sliders,
@@ -22,6 +24,7 @@
         curveChannel = "master",
         masterCanvas = null,
         crop,
+        retouch = [],
     }: {
         sliders: Sliders;
         // The baked point curves, or null while every curve is the identity.
@@ -34,6 +37,8 @@
         // The darkroom's master input slider, drawn from the bins at its input.
         masterCanvas?: HTMLCanvasElement | null;
         crop: Crop;
+        // The heal and clone strokes, baked into the overview it bins.
+        retouch?: Retouch[];
     } = $props();
 
     // Get the shared GPU session from layout context
@@ -44,7 +49,8 @@
     let curveLink: GPUCanvasLink | null = $state(null);
     let masterLink: GPUCanvasLink | null = $state(null);
     let histPipeline: HistogramPipeline | null = $state(null);
-    let image: GPUImage | null = $state(null);
+    let image: GPUImage | null = $state.raw(null);
+    let retouchLayer: RetouchLayer | null = null;
 
     // The bins are binned, normalised and drawn without ever reaching the CPU,
     // so a redraw needs nothing kept on this side — not the last data, and not
@@ -168,6 +174,7 @@
 
         let destroyed = false;
         histPipeline = createHistogramPipeline(gpu);
+        retouchLayer = createRetouchLayer(gpu.device);
 
         // Premultiplied so the panel's own background shows through wherever
         // the curves do not reach, as it did behind the 2D canvas. sRGB because
@@ -185,6 +192,8 @@
             image?.texture.destroy();
             histPipeline?.destroy();
             histPipeline = null;
+            retouchLayer?.destroy();
+            retouchLayer = null;
             canvasLink = null;
             image = null;
             if (frameHandle !== null) {
@@ -213,6 +222,11 @@
         );
         histPipeline.setSourceSpace(imagePayload.srcToWorking);
         requestRender();
+    });
+
+    $effect(() => {
+        if (!histPipeline || !image || !retouchLayer) return;
+        if (retouchLayer.sync(image, retouch)) requestRender();
     });
 
     // The bins are taken after the output transform, so they follow the same

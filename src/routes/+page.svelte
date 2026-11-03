@@ -490,18 +490,19 @@
     // left outside it stops weighing on the black and white points.
     let inputHistograms: ChannelHistograms | null = $state(null);
     let histogramRequest = 0;
-    // One binning in flight at a time; crops arriving meanwhile collapse into the latest.
+    // One binning in flight at a time; requests arriving meanwhile collapse into the latest.
     let histogramBinning = false;
-    let histogramPending: Crop | null = null;
+    let histogramPending: HistogramInput | null = null;
+    type HistogramInput = { crop: Crop; strokes: Retouch[] };
 
-    function binCrop(kept: Crop) {
+    function binCrop(input: HistogramInput) {
         if (histogramBinning) {
-            histogramPending = kept;
+            histogramPending = input;
             return;
         }
         histogramBinning = true;
         const request = histogramRequest;
-        cropHistograms(kept)
+        cropHistograms(input.crop, input.strokes)
             .then((h) => {
                 if (request === histogramRequest) inputHistograms = h;
             })
@@ -517,15 +518,16 @@
     $effect(() => {
         const payload = imagePayload;
         const kept = { ...edit.crop };
+        const strokes = $state.snapshot(edit.retouch) as Retouch[];
         ++histogramRequest;
         histogramPending = null;
 
         if (!payload) {
             inputHistograms = null;
-        } else if (isFullFrame(kept)) {
+        } else if (isFullFrame(kept) && strokes.length === 0) {
             inputHistograms = { r: payload.histR, g: payload.histG, b: payload.histB };
         } else {
-            binCrop(kept);
+            binCrop({ crop: kept, strokes });
         }
     });
 
@@ -1206,6 +1208,7 @@
                     curveLut={shownCurveLut}
                     {imagePayload}
                     crop={edit.crop}
+                    retouch={edit.retouch}
                     curveCanvas={curveHistogramCanvas}
                     masterCanvas={masterHistogramCanvas}
                     curveChannel={edit.isRgb ? curveChannel : "master"}

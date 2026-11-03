@@ -12,9 +12,12 @@ use half::f16;
 use image::{ImageBuffer, ImageDecoder, Rgba};
 
 use crate::color::{
-    linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
+    linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LINEAR_F32_BYTES_PER_PIXEL,
+    LUT_SIZE,
 };
 use crate::crop::{crop_view, CropPayload, CropView};
+use crate::export_rendering::request_device;
+use crate::retouch::{apply_retouch, LinearSource, RetouchPayload};
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
 
@@ -295,6 +298,55 @@ pub fn compute_histograms_in(
         })
         .reduce(empty_bins, sum_bins)
         .into()
+}
+
+/// The source code whose linearised value is nearest `v`, on a curve that
+/// never falls.
+fn encode_linear(lut: &[f32], v: f32) -> u16 {
+    let above = lut.partition_point(|&l| l < v).min(lut.len() - 1);
+    let below = above.saturating_sub(1);
+    let nearest = if (lut[above] - v).abs() < (v - lut[below]).abs() { above } else { below };
+    nearest as u16
+}
+
+/// [`compute_histograms_in`] with `strokes` laid over the image first. Only
+/// the blocks the strokes wrote are binned again: their untouched pixels come
+/// out of the counts and the retouched ones, encoded back through `luts`, go in.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_retouched_histograms_in(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    view: &CropView,
+    bins: &[u8],
+    luts: &[Vec<f32>; 3],
+    strokes: &[RetouchPayload],
+) -> Result<Histograms, String> {
+    let mut histograms = compute_histograms_in(src, width, height, channels, view, bins);
+    if strokes.is_empty() {
+        return Ok(histograms);
+    }
+    let mut source = LinearSource::new(src, width, height, channels, luts);
+    apply_retouch(device, queue, &mut source, strokes)?;
+
+    let px = LINEAR_F32_BYTES_PER_PIXEL;
+    for ([x0, y0, w, h], data) in source.blocks() {
+        for y in y0..y0 + h {
+            for x in (x0..x0 + w).filter(|&x| view.contains(x, y)) {
+                let at = (y as usize * width as usize + x as usize) * channels;
+                let texel = ((y - y0) as usize * w as usize + (x - x0) as usize) * px;
+                let channel = |c: usize| f32::from_le_bytes(data[texel + c * 4..texel + c * 4 + 4].try_into().unwrap());
+                for (c, counts) in [&mut histograms.r, &mut histograms.g, &mut histograms.b].into_iter().enumerate() {
+                    counts[bins[src[at + c] as usize] as usize] -= 1;
+                    counts[bins[encode_linear(&luts[c], channel(c)) as usize] as usize] += 1;
+                }
+            }
+        }
+    }
+    Ok(histograms)
 }
 
 /// R, G, B bins as u32 LE, end to end — the tail of the open payload.
@@ -582,18 +634,24 @@ pub(crate) async fn open_image_file(
     Ok(Response::new(payload))
 }
 
-/// The open image's per-channel histograms, binned over only what a crop keeps.
+/// The open image's per-channel histograms, binned over only what a crop
+/// keeps, with any heal and clone strokes laid over it.
 #[tauri::command]
 pub(crate) async fn crop_histograms(
     state: tauri::State<'_, ImageState>,
     crop: CropPayload,
+    retouch: Option<Vec<RetouchPayload>>,
 ) -> Result<Response, String> {
-    let (pixels_u16, width, height, channels, bins) = {
+    let (pixels_u16, width, height, channels, bins, luts) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
         let bins = img.space.histogram_bins();
-        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins)
+        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins, img.space.luts(|v| v))
     };
+
+    let strokes = retouch.unwrap_or_default();
+    // Strokes are laid over the image on the GPU, so they need a device first.
+    let gpu = if strokes.is_empty() { None } else { Some(request_device("histogram_device").await?) };
 
     // One pass at a time: overlapping rayon jobs nest on the workers' stacks
     // while they wait on each other, and enough of them overflow it.
@@ -601,9 +659,14 @@ pub(crate) async fn crop_histograms(
     let histograms = tauri::async_runtime::spawn_blocking(move || {
         let _binning = BINNING.lock().unwrap_or_else(|e| e.into_inner());
         let view = crop_view(&crop, width, height);
-        compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins)
+        match gpu {
+            None => Ok(compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins)),
+            Some((device, queue)) => compute_retouched_histograms_in(
+                &device, &queue, &pixels_u16, width, height, channels, &view, &bins, &luts, &strokes,
+            ),
+        }
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())??;
     Ok(Response::new(histogram_bytes(&histograms)))
 }

@@ -222,7 +222,7 @@ export const shortcutActions = [
         group: "edit",
         label: "Heal brush",
         description: "Takes up the heal brush, and puts it down again.",
-        defaults: ["j"],
+        defaults: ["x"],
     },
     {
         id: "cloneTool",

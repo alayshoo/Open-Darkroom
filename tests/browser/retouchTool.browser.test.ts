@@ -110,7 +110,7 @@ describe("the retouch brushes", () => {
     });
 
     it("draws the stroke and the brush while it is painted", async () => {
-        await userEvent.keyboard("j");
+        await userEvent.keyboard("x");
         pointer("pointerdown", on(0.4, 0.5));
         pointer("pointermove", on(0.45, 0.5));
         await vi.waitFor(() => {
@@ -141,7 +141,7 @@ describe("the retouch brushes", () => {
     });
 
     it("sizes the brush across an Alt + drag and softens it upwards", async () => {
-        await userEvent.keyboard("j");
+        await userEvent.keyboard("x");
         const { radius, feather } = retouchTool;
         const start = on(0.5, 0.5);
         pointer("pointerdown", start, { altKey: true });
