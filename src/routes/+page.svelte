@@ -588,6 +588,15 @@
 
     let isRetouching = $derived(retouchTool.mode !== null);
 
+    let leftPanel = $derived<"presets" | "retouch" | null>(
+        isRetouching ? "retouch" : presets.open ? "presets" : null,
+    );
+    // Held while the column slides shut, so its panel leaves with it.
+    let shownLeftPanel = $state<"presets" | "retouch">("presets");
+    $effect(() => {
+        if (leftPanel) shownLeftPanel = leftPanel;
+    });
+
     function toggleRetouch(mode: RetouchMode) {
         if (!canRetouch) return;
         presets.open = false;
@@ -1099,27 +1108,35 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="chrome-scrim" class:shifted={presets.open || isRetouching}>
+    <div class="chrome-scrim" class:shifted={leftPanel !== null}>
         <div class="scrim-fill"></div>
     </div>
-    <div class="left-column shrink-0" class:open={presets.open} inert={!presets.open}>
+    <div class="left-column shrink-0" class:open={leftPanel !== null} inert={leftPanel === null}>
         <div class="left-column-slide h-full">
-            <PresetsPanel
-                list={presets.list}
-                canApply={!sidebarInactive}
-                onapply={applyPreset}
-                onhover={(preset) => (hoveredPresetId = preset?.id ?? null)}
-                onadd={openNewPreset}
-                onimport={importPresets}
-                onedit={openEditPreset}
-                onexport={exportPreset}
-                ondelete={deletePreset}
-            />
-        </div>
-    </div>
-    <div class="left-column shrink-0" class:open={isRetouching} inert={!isRetouching}>
-        <div class="left-column-slide h-full">
-            <RetouchPanel strokes={edit.retouch.length} onclear={clearRetouch} />
+            <div
+                class="left-panel"
+                class:shown={shownLeftPanel === "presets"}
+                inert={shownLeftPanel !== "presets"}
+            >
+                <PresetsPanel
+                    list={presets.list}
+                    canApply={!sidebarInactive}
+                    onapply={applyPreset}
+                    onhover={(preset) => (hoveredPresetId = preset?.id ?? null)}
+                    onadd={openNewPreset}
+                    onimport={importPresets}
+                    onedit={openEditPreset}
+                    onexport={exportPreset}
+                    ondelete={deletePreset}
+                />
+            </div>
+            <div
+                class="left-panel"
+                class:shown={shownLeftPanel === "retouch"}
+                inert={shownLeftPanel !== "retouch"}
+            >
+                <RetouchPanel strokes={edit.retouch.length} onclear={clearRetouch} />
+            </div>
         </div>
     </div>
     <!-- The empty parts of the icon column drag the window; Tauri matches the
@@ -2069,9 +2086,9 @@
         transition: opacity 0.2s ease;
     }
 
-    /* The presets, or the brush in hand, each in a column of its own that
-       pushes the toolbar right. Closed, its negative margin cancels the shell's
-       gap; open, it also covers the toolbar's bleed to the edge. */
+    /* The column that holds the presets or the brush in hand, pushing the
+       toolbar right. Closed, its negative margin cancels the shell's gap; open,
+       it also covers the toolbar's bleed to the edge. */
     .left-column {
         width: 0;
         margin-right: -12px;
@@ -2100,6 +2117,28 @@
 
     .left-column.open .left-column-slide {
         transform: translateX(0);
+    }
+
+    /* Both panels share the column's one cell, and swap in place. */
+    .left-column-slide {
+        display: grid;
+        grid-template: 100% / 100%;
+    }
+
+    .left-panel {
+        grid-area: 1 / 1;
+        min-height: 0;
+        opacity: 0;
+        visibility: hidden;
+        transition:
+            opacity 0.15s ease,
+            visibility 0s linear 0.15s;
+    }
+
+    .left-panel.shown {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.15s ease 0.1s;
     }
 
     .toolbar-tools {

@@ -102,7 +102,7 @@ describe("the retouch brushes", () => {
     it("are taken up from the toolbar and by shortcut, one at a time", async () => {
         button("Heal").click();
         // The brush's controls open beside the toolbar, and the side bar steps out of the way.
-        await vi.waitFor(() => expect(document.querySelector(".left-column.open .retouch-panel")).not.toBeNull());
+        await vi.waitFor(() => expect(document.querySelector(".left-column.open .left-panel.shown .retouch-panel")).not.toBeNull());
         const sideBar = document.querySelector<HTMLElement>(".side-bar")!;
         expect(sideBar.classList.contains("away")).toBe(true);
         expect(sideBar.inert).toBe(true);
@@ -119,6 +119,11 @@ describe("the retouch brushes", () => {
         expect(retouchTool.mode).toBe("heal");
         button("Presets").click();
         await vi.waitFor(() => expect(retouchTool.mode).toBeNull());
+        // The column stays open, and only the presets show in it.
+        expect(document.querySelectorAll(".left-column.open")).toHaveLength(1);
+        expect(document.querySelectorAll(".left-panel.shown")).toHaveLength(1);
+        await vi.waitFor(() => expect(document.querySelector(".left-panel.shown .presets-panel")).not.toBeNull());
+        expect(document.querySelector<HTMLElement>(".retouch-panel")!.closest<HTMLElement>(".left-panel")!.inert).toBe(true);
         button("Hide presets").click();
     });
 
