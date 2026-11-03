@@ -595,7 +595,15 @@ pub(crate) async fn crop_histograms(
         (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins)
     };
 
-    let view = crop_view(&crop, width, height);
-    let histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins);
+    // One pass at a time: overlapping rayon jobs nest on the workers' stacks
+    // while they wait on each other, and enough of them overflow it.
+    static BINNING: Mutex<()> = Mutex::new(());
+    let histograms = tauri::async_runtime::spawn_blocking(move || {
+        let _binning = BINNING.lock().unwrap_or_else(|e| e.into_inner());
+        let view = crop_view(&crop, width, height);
+        compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(Response::new(histogram_bytes(&histograms)))
 }
