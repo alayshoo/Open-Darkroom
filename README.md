@@ -6,7 +6,10 @@
 
 **An open source darkroom for film scans and digital photos.**
 
+Open the door to your darkroom!\* Ditch the taxes of the monopolists on your photography.
 Open a negative, press one button, and get a clean, balanced positive. Then finish it with a full set of develop tools, all rendered on the GPU in real time.
+
+<sub>\* - Not financial advice.</sub>
 
 [![Latest release](https://img.shields.io/github/v/release/alayshoo/Open-Darkroom?label=download&color=f5a623)](https://github.com/alayshoo/Open-Darkroom/releases/latest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/alayshoo/Open-Darkroom/tests.yml?branch=main&label=tests)](https://github.com/alayshoo/Open-Darkroom/actions/workflows/tests.yml)
