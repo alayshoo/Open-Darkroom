@@ -218,6 +218,20 @@ export const shortcutActions = [
         defaults: ["r"],
     },
     {
+        id: "healTool",
+        group: "edit",
+        label: "Heal brush",
+        description: "Takes up the heal brush, and puts it down again.",
+        defaults: ["j"],
+    },
+    {
+        id: "cloneTool",
+        group: "edit",
+        label: "Clone brush",
+        description: "Takes up the clone brush, and puts it down again.",
+        defaults: ["c"],
+    },
+    {
         id: "flipHorizontal",
         group: "edit",
         label: "Flip horizontally",

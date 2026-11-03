@@ -16,6 +16,7 @@ flattened!(CALC_SHARP_TEXTURE_WGSL, "calcSharpTexture.wgsl");
 flattened!(COMPOSITE_WGSL, "composite.wgsl");
 flattened!(COLOR_SPACE_ENCODE_WGSL, "colorSpaceEncode.wgsl");
 flattened!(HISTOGRAM_WGSL, "histogram.wgsl");
+flattened!(RETOUCH_WGSL, "retouch.wgsl");
 
 // Frontend-only colour-space tools, flattened so shader_contracts.rs can check
 // them against the shared develop chain.
@@ -23,3 +24,7 @@ flattened!(COLOR_SPACE_WGSL, "colorSpace.wgsl");
 flattened!(COLOR_SPACE_SCALE_WGSL, "colorSpaceScale.wgsl");
 flattened!(CHROMATICITY_DRAW_WGSL, "chromaticityDraw.wgsl");
 flattened!(COLOR_VOLUME_DRAW_WGSL, "colorVolumeDraw.wgsl");
+
+// The preview's search for where a stroke takes its pixels from, flattened so
+// the GPU suite can check it compiles.
+flattened!(RETOUCH_SOURCE_WGSL, "retouchSource.wgsl");

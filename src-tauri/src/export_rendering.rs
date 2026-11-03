@@ -12,10 +12,11 @@
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
-use crate::color::{linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL};
+use crate::color::LINEAR_F32_BYTES_PER_PIXEL;
 use crate::crop::{crop_view, crop_view_to_bytes, CropPayload};
 use crate::icc::{Matrix3, SourceSpace};
 use crate::output_space::OutputSpace;
+use crate::retouch::{apply_retouch, LinearSource, RetouchPayload};
 
 pub use crate::shaders::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
@@ -529,6 +530,7 @@ pub async fn render_image(
         channels,
         sliders,
         &CropPayload::FULL_FRAME,
+        &[],
         space,
         output,
         bit_depth,
@@ -545,7 +547,8 @@ pub struct RenderedImage {
     pub height: u32,
 }
 
-/// Run the GPU pipeline over the cropped region only.
+/// Run the GPU pipeline over the cropped region only, with `retouch` laid
+/// over the source first.
 #[allow(clippy::too_many_arguments)]
 pub async fn render_cropped_image(
     pixels_u16: &[u16],
@@ -554,6 +557,7 @@ pub async fn render_cropped_image(
     channels: usize,
     sliders: &SlidersPayload,
     crop: &CropPayload,
+    retouch: &[RetouchPayload],
     space: &SourceSpace,
     output: OutputSpace,
     bit_depth: u8,
@@ -566,6 +570,7 @@ pub async fn render_cropped_image(
         channels,
         sliders,
         crop,
+        retouch,
         space,
         output,
         bit_depth,
@@ -609,6 +614,7 @@ pub async fn render_image_with_chunk_rows(
         channels,
         sliders,
         &CropPayload::FULL_FRAME,
+        &[],
         space,
         output,
         bit_depth,
@@ -630,6 +636,7 @@ pub async fn render_cropped_with_chunk_rows(
     channels: usize,
     sliders: &SlidersPayload,
     crop: &CropPayload,
+    retouch: &[RetouchPayload],
     space: &SourceSpace,
     output: OutputSpace,
     bit_depth: u8,
@@ -1123,6 +1130,11 @@ pub async fn render_cropped_with_chunk_rows(
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
     let luts = space.luts(|v| v);
+
+    // The strokes are laid over the whole source before any chunk renders, so
+    // a stroke taking its pixels from outside a chunk still finds them.
+    let mut source = LinearSource::new(pixels_u16, width, height, channels, &luts);
+    apply_retouch(&device, &queue, &mut source, retouch)?;
     let total_pixels = (out_width * out_height) as usize;
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
@@ -1167,23 +1179,7 @@ pub async fn render_cropped_with_chunk_rows(
             let region_width = region_x1 - region_x0;
             let region_height = region_y1 - region_y0;
 
-            let chunk_bytes = if region_width == width {
-                let pixel_start = (region_y0 * width) as usize;
-                let pixel_count = (region_height * width) as usize;
-                linearize_u16_f32(
-                    &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels],
-                    channels,
-                    &luts,
-                )
-            } else {
-                let row_len = region_width as usize * channels;
-                let mut region = Vec::with_capacity(row_len * region_height as usize);
-                for y in region_y0..region_y1 {
-                    let at = (y as usize * width as usize + region_x0 as usize) * channels;
-                    region.extend_from_slice(&pixels_u16[at..at + row_len]);
-                }
-                linearize_u16_f32(&region, channels, &luts)
-            };
+            let chunk_bytes = source.read(region_x0, region_y0, region_width, region_height);
 
             let region_size = wgpu::Extent3d {
                 width: region_width,

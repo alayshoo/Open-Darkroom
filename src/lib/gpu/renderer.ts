@@ -748,7 +748,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     setOutputSpace(gpu.displaySpace, null);
 
     return {
-        loadImage, setSource, setSliders, setOutputSpace, setToneMap, setCurves, setFrame, setLoupe,
+        loadImage, setSource, sourceChanged: markStale, setSliders, setOutputSpace, setToneMap, setCurves, setFrame, setLoupe,
         requestRender, destroy,
     };
 }

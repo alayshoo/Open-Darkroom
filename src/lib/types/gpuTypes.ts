@@ -77,6 +77,8 @@ export interface Renderer {
     loadImage: (image: GPUImage, srcToWorking: Float32Array) => void;
     // Swaps in a finer copy of the same image, once it has arrived.
     setSource: (image: GPUImage) => void;
+    // The source's pixels changed in place, as a stroke being retouched in.
+    sourceChanged: () => void;
     setSliders: (sliders: Sliders) => void;
     // Where the preview is being encoded to, and the export space it is being
     // proofed against — `null` for a preview showing the display's own gamut.

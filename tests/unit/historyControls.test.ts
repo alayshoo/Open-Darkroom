@@ -159,7 +159,7 @@ describe("page maps", () => {
             expect(panels.length).toBe(pages.length);
             panels.forEach((markup, i) => {
                 const bound = new Set(
-                    [...markup.matchAll(/bind:value[ABC]?=\{sliders\.(\w+)\}/g)].map((m) => m[1]),
+                    [...markup.matchAll(/bind:value[ABC]?=\{edit\.sliders\.(\w+)\}/g)].map((m) => m[1]),
                 );
                 if (markup.includes("<HslBandGroup")) HSL_KEYS.forEach((k) => bound.add(k));
                 expect(bound, `${mode} page ${i}`).toEqual(new Set(pages[i]));
@@ -184,7 +184,7 @@ describe("darkroom history wiring", () => {
             /<(TripleValSliderHistGroup|TripleValSliderGroup|DoubleValSliderGroup)\b([\s\S]*?)><\/\1>/g,
         )) {
             const group = `${tag} "${body.match(/name="([^"]*)"/)?.[1] ?? "?"}"`;
-            for (const [, slot, bound] of body.matchAll(/bind:value([ABC])=\{sliders\.(\w+)\}/g)) {
+            for (const [, slot, bound] of body.matchAll(/bind:value([ABC])=\{edit\.sliders\.(\w+)\}/g)) {
                 const handler = body.match(new RegExp(`onCommit${slot}=\\{[^}]*key:\\s*"(\\w+)"`));
                 out.push({ group, slot, bound, committed: handler?.[1] ?? "" });
             }
