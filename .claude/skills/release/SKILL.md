@@ -15,7 +15,14 @@ ONLY use this skill when the user prompts you. Invoking it is explicit permissio
 
 1. **Sync.** `git fetch origin main release`. Stop and report if `main` has nothing `release` does not (`git log origin/release..origin/main` is empty).
 
-2. **Check the version.** Read `version` from `src-tauri/tauri.conf.json` and see whether a `v<version>` tag already exists (`git ls-remote --tags origin v<version>`). The release workflow skips a version that is already released, so if it exists the version must be bumped. If the user named a version, use it; otherwise ask whether this is a patch, minor or major release.
+2. **Check the version.** Read `version` from `src-tauri/tauri.conf.json` and see whether a `v<version>` tag already exists (`git ls-remote --tags origin v<version>`). The release workflow skips a version that is already released, so if it exists the version must be bumped.
+
+   Unless the user already named a version, ask them which kind of release this is before bumping anything, and show what each choice would produce from the current version `X.Y.Z`:
+   - **Major** (big or breaking changes): `X` goes up, `Y` and `Z` reset to 0, e.g. `1.4.2` → `2.0.0`.
+   - **Minor** (new features): `Y` goes up, `Z` resets to 0, e.g. `1.4.2` → `1.5.0`.
+   - **Patch** (fixes only): `Z` goes up, e.g. `1.4.2` → `1.4.3`.
+
+   If the current version has no release yet, also offer to release it as it is.
 
 3. **Bump, if needed**, on `main`. The version lives in four places and they must agree:
    - `package.json`
