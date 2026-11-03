@@ -492,22 +492,42 @@
     // left outside it stops weighing on the black and white points.
     let inputHistograms: ChannelHistograms | null = $state(null);
     let histogramRequest = 0;
+    // One binning in flight at a time; crops arriving meanwhile collapse into the latest.
+    let histogramBinning = false;
+    let histogramPending: Crop | null = null;
+
+    function binCrop(kept: Crop) {
+        if (histogramBinning) {
+            histogramPending = kept;
+            return;
+        }
+        histogramBinning = true;
+        const request = histogramRequest;
+        cropHistograms(kept)
+            .then((h) => {
+                if (request === histogramRequest) inputHistograms = h;
+            })
+            .catch((e) => console.error("Failed to bin the crop:", e))
+            .finally(() => {
+                histogramBinning = false;
+                const next = histogramPending;
+                histogramPending = null;
+                if (next) binCrop(next);
+            });
+    }
 
     $effect(() => {
         const payload = imagePayload;
         const kept = { ...crop };
-        const request = ++histogramRequest;
+        ++histogramRequest;
+        histogramPending = null;
 
         if (!payload) {
             inputHistograms = null;
         } else if (isFullFrame(kept)) {
             inputHistograms = { r: payload.histR, g: payload.histG, b: payload.histB };
         } else {
-            cropHistograms(kept)
-                .then((h) => {
-                    if (request === histogramRequest) inputHistograms = h;
-                })
-                .catch((e) => console.error("Failed to bin the crop:", e));
+            binCrop(kept);
         }
     });
 
