@@ -1,11 +1,11 @@
 ---
 name: release
-description: A skill to be used when prompted only. Merges main into the release branch, which triggers the GitHub release build of the Windows installer.
+description: A skill to be used when prompted only. Merges main into the release branch, which triggers the GitHub release build of the Windows and macOS installers.
 ---
 
 # Release
 
-Day to day work merges into `main`, the nightly build. A release is `main` merged into `release`: every push to `release` runs `.github/workflows/release.yml`, which builds the `.msi` and publishes it as a GitHub release tagged `v<version>`.
+Day to day work merges into `main`, the nightly build. A release is `main` merged into `release`: every push to `release` runs `.github/workflows/release.yml`, which builds the Windows `.msi` and a universal macOS `.dmg` and publishes them as a GitHub release tagged `v<version>`.
 
 ## When to use
 
