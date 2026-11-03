@@ -6,7 +6,7 @@
 
 **An open source darkroom for film scans and digital photos.**
 
-Invert negatives the way a Hasselblad scanner does, with black, white and gamma points for each channel, then finish the image with Lightroom-style sliders. Everything renders on the GPU in real time.
+Open a negative, press one button, and get a clean, balanced positive. Then finish it with a full set of develop tools, all rendered on the GPU in real time.
 
 [![Latest release](https://img.shields.io/github/v/release/alayshoo/Open-Darkroom?label=download&color=f5a623)](https://github.com/alayshoo/Open-Darkroom/releases/latest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/alayshoo/Open-Darkroom/tests.yml?branch=main&label=tests)](https://github.com/alayshoo/Open-Darkroom/actions/workflows/tests.yml)
@@ -19,19 +19,24 @@ Invert negatives the way a Hasselblad scanner does, with black, white and gamma 
 
 ---
 
-## Why Open Darkroom?
+## Automatic negative inversion
 
-Converting colour negatives usually means paying for Lightroom plus a plugin like Negative Lab Pro. Open Darkroom is a free, standalone alternative built around the scanner workflow: set the film base and the clip points per channel, and the conversion is yours to control rather than a black box.
+Open Darkroom inverts negatives with the same technique as the Hasselblad Flextight scanning software: every colour channel gets its own black point, white point and gamma. Each layer of a colour negative has a different density range on top of the orange film base, so setting the channels separately removes the cast at its source instead of correcting it afterwards.
+
+**It does this for you.** Turn on invert and press auto: Open Darkroom reads the histogram of each channel and places its black and white points to span exactly what the film holds. The orange mask disappears and the colours come out neutral, ready to edit, without sampling the film base or picking a grey point.
+
+- Works on colour and black and white negatives
+- Reads only what the crop keeps, so once the film border and sprocket holes are cropped out they can't throw it off
+- Every point it sets stays on a slider: fine-tune red, green and blue individually, or all three at once with the master set
+- Per-channel histograms sit behind the sliders, so you can see what each one is doing
+
+## Replaces Lightroom plus Negative Lab Pro
+
+Converting film usually means a Lightroom subscription and a paid plugin on top. Open Darkroom does both jobs in one free, open source app: the inversion and the editing that follows it.
 
 It edits regular photos too, so a roll of film and a folder of digital shots go through the same tool.
 
 ## Features
-
-### Negative inversion
-- One-click **invert** for colour and black and white negatives
-- **Black point, gamma and white point** for red, green and blue individually, plus a master set over all three
-- Per-channel histograms behind the level sliders
-- **Auto levels** to find the black and white points for you
 
 ### Develop
 - **Light:** exposure, contrast, brightness, highlights, shadows, whites, blacks
