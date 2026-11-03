@@ -15,7 +15,8 @@ use common::{
     HIST_VOTE,
 };
 
-use open_darkroom_lib::export_rendering::SlidersPayload;
+use open_darkroom_lib::export_rendering::{render_image, SlidersPayload};
+use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::image_opening::{Rgba16Image, HIST_BINS};
 use open_darkroom_lib::icc::{Matrix3, SourceSpace, SRGB_TO_WORKING};
 
@@ -389,6 +390,38 @@ fn inversion_reverses_the_tone_order() {
 
     assert!(out[0] > 250, "black input becomes white, got {}", out[0]);
     assert!(out[63 * 3] < 5, "white input becomes black, got {}", out[63 * 3]);
+}
+
+/// On a negative, a channel denser than its black point is white for that
+/// channel, however far past it the noise floor reaches. Over-range values
+/// would otherwise leak into the other channels through the source matrix.
+#[test]
+fn inversion_holds_tones_past_the_black_point_at_white() {
+    let sliders = SlidersPayload {
+        invert: true,
+        red_black_point: 37.0,
+        green_black_point: 15.5,
+        blue_black_point: 4.0,
+        red_white_point: 164.1,
+        green_white_point: 117.6,
+        blue_white_point: 94.2,
+        ..Default::default()
+    };
+    let at_black = |slider: f64| (common::srgb_to_linear(slider / 255.0) * 65535.0).round() as u16;
+    let highlight = [at_black(37.0), at_black(15.5), at_black(4.0), u16::MAX];
+    let noise_floor = [highlight[0], highlight[1], 0, u16::MAX];
+    let img = Rgba16Image::from_fn(2, 1, |x, _| image::Rgba(if x == 0 { highlight } else { noise_floor }));
+
+    let space = SourceSpace::linear_with_matrix(CAMERA_LIKE);
+    let out = pollster::block_on(render_image(img.as_raw(), 2, 1, 4, &sliders, &space, OutputSpace::Srgb, 8, |_| {}))
+        .expect("render should succeed");
+
+    assert!(out[..3].iter().all(|&c| c > 250), "the black points should develop to white, got {:?}", &out[..3]);
+    assert!(
+        out[3..6].iter().all(|&c| c > 250),
+        "blue past its black point should stay white, got {:?}",
+        &out[3..6]
+    );
 }
 
 #[test]
