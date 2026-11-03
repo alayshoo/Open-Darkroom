@@ -1,5 +1,6 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
+    import { untrack } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { slide } from "svelte/transition";
@@ -25,6 +26,7 @@
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
     import CropTools from "$lib/components/inputs/cropTools.svelte";
     import RetouchTools from "$lib/components/inputs/retouchTools.svelte";
+    import RetouchPanel from "$lib/components/retouch/RetouchPanel.svelte";
     import { retouchTool } from "$lib/retouch/retouchTool.svelte";
     import type { Retouch, RetouchMode } from "$lib/types/retouch";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
@@ -579,6 +581,13 @@
         if (!canRetouch) retouchTool.mode = null;
     });
 
+    // The brushes and the presets share the column beside the toolbar.
+    $effect(() => {
+        if (presets.open) untrack(() => (retouchTool.mode = null));
+    });
+
+    let isRetouching = $derived(retouchTool.mode !== null);
+
     function toggleRetouch(mode: RetouchMode) {
         if (!canRetouch) return;
         presets.open = false;
@@ -1090,11 +1099,11 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="chrome-scrim" class:shifted={presets.open}>
+    <div class="chrome-scrim" class:shifted={presets.open || isRetouching}>
         <div class="scrim-fill"></div>
     </div>
-    <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
-        <div class="presets-slide h-full">
+    <div class="left-column shrink-0" class:open={presets.open} inert={!presets.open}>
+        <div class="left-column-slide h-full">
             <PresetsPanel
                 list={presets.list}
                 canApply={!sidebarInactive}
@@ -1106,6 +1115,11 @@
                 onexport={exportPreset}
                 ondelete={deletePreset}
             />
+        </div>
+    </div>
+    <div class="left-column shrink-0" class:open={isRetouching} inert={!isRetouching}>
+        <div class="left-column-slide h-full">
+            <RetouchPanel strokes={edit.retouch.length} onclear={clearRetouch} />
         </div>
     </div>
     <!-- The empty parts of the icon column drag the window; Tauri matches the
@@ -1131,12 +1145,7 @@
                 oncustom={() => (customAspectOpen = true)}
                 onreset={resetDraft}
             />
-            <RetouchTools
-                disabled={!canRetouch}
-                strokes={edit.retouch.length}
-                ontoggle={toggleRetouch}
-                onclear={clearRetouch}
-            />
+            <RetouchTools disabled={!canRetouch} ontoggle={toggleRetouch} />
             <PresetsButton
                 active={presets.open}
                 disabled={isCropping}
@@ -1193,7 +1202,12 @@
             <DebugStatsOverlay />
         {/if}
     </div>
-    <div class="side-bar flex w-[23%] flex-col gap-3" onpointerdowncapture={endLoupeOnPress}>
+    <div
+        class="side-bar flex w-[23%] flex-col gap-3"
+        class:away={isRetouching}
+        inert={isRetouching}
+        onpointerdowncapture={endLoupeOnPress}
+    >
         <div
             class="histogram-panel glass shrink-0 rounded-[12px]"
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
@@ -2055,10 +2069,10 @@
         transition: opacity 0.2s ease;
     }
 
-    /* Opens as a column of its own, pushing the toolbar right and re-centring
-       the image in what is left. Closed, its negative margin cancels the
-       shell's gap; open, it also covers the toolbar's bleed to the edge. */
-    .presets-column {
+    /* The presets, or the brush in hand, each in a column of its own that
+       pushes the toolbar right. Closed, its negative margin cancels the shell's
+       gap; open, it also covers the toolbar's bleed to the edge. */
+    .left-column {
         width: 0;
         margin-right: -12px;
         position: relative;
@@ -2069,14 +2083,14 @@
             margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .presets-column.open {
+    .left-column.open {
         width: var(--presets-width);
         margin-right: 12px;
     }
 
     /* The panel keeps its width and slides in with the toolbar rather than
        being squeezed, so its list never reflows mid-animation. */
-    .presets-slide {
+    .left-column-slide {
         /* Laps 4px into the shell's edge inset, so the names sit 18px in. */
         width: calc(var(--presets-width) + 4px);
         margin-left: -4px;
@@ -2084,7 +2098,7 @@
         transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .presets-column.open .presets-slide {
+    .left-column.open .left-column-slide {
         transform: translateX(0);
     }
 
@@ -2129,6 +2143,17 @@
         position: relative;
         z-index: 10;
         pointer-events: auto;
+        transition:
+            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1),
+            transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    /* Out past the window's right edge while a brush is in hand, giving its
+       room and its gap to the image. Pushed a little further so the panels'
+       shadows go with it. */
+    .side-bar.away {
+        margin-right: calc(-1 * max(23%, 300px) - 12px);
+        transform: translateX(40px);
     }
 
     .quick-actions {

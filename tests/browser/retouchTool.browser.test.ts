@@ -101,12 +101,25 @@ beforeEach(() => {
 describe("the retouch brushes", () => {
     it("are taken up from the toolbar and by shortcut, one at a time", async () => {
         button("Heal").click();
-        await vi.waitFor(() => expect(document.querySelector(".retouch-options")).not.toBeNull());
+        // The brush's controls open beside the toolbar, and the side bar steps out of the way.
+        await vi.waitFor(() => expect(document.querySelector(".left-column.open .retouch-panel")).not.toBeNull());
+        const sideBar = document.querySelector<HTMLElement>(".side-bar")!;
+        expect(sideBar.classList.contains("away")).toBe(true);
+        expect(sideBar.inert).toBe(true);
         expect(button("Heal").getAttribute("aria-pressed")).toBe("true");
         await userEvent.keyboard("c");
         expect(retouchTool.mode).toBe("clone");
         await userEvent.keyboard("{Escape}");
         expect(retouchTool.mode).toBeNull();
+        expect(document.querySelector(".side-bar")!.classList.contains("away")).toBe(false);
+    });
+
+    it("gives the column back to the presets", async () => {
+        await userEvent.keyboard("x");
+        expect(retouchTool.mode).toBe("heal");
+        button("Presets").click();
+        await vi.waitFor(() => expect(retouchTool.mode).toBeNull());
+        button("Hide presets").click();
     });
 
     it("draws the stroke and the brush while it is painted", async () => {
@@ -158,7 +171,7 @@ describe("the retouch brushes", () => {
         pointer("pointerdown", on(0.2, 0.2), { ctrlKey: true });
         paint([[0.6, 0.6]]);
         await vi.waitFor(() => expect(history.stack).toHaveLength(1));
-        [...document.querySelectorAll<HTMLButtonElement>(".retouch-options .action")]
+        [...document.querySelectorAll<HTMLButtonElement>(".retouch-panel .action")]
             .find((b) => b.textContent?.includes("Clear all"))!
             .click();
         expect(history.stack.map((a) => a.type)).toEqual(["retouchAdd", "retouchClear"]);
