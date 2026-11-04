@@ -44,6 +44,8 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml
         env:
           XDG_RUNTIME_DIR: /tmp/xdg-runtime
+          # Full debug info makes every test binary hundreds of MB, more than the runner's disk holds.
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
   frontend:
     name: pnpm test:unit
