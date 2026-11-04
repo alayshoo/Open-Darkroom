@@ -88,7 +88,7 @@
 </div>
 
 <style>
-	/* Across the foot of the window, under the toolbar's own column. */
+	/* Across the foot of the window, over the image and under the toolbar. */
 	.retouch-bar {
 		position: fixed;
 		left: 0;

@@ -1168,7 +1168,7 @@
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
-        <div class="canvas-center absolute flex items-center justify-center" class:raised={isRetouching}>
+        <div class="canvas-center absolute flex items-center justify-center">
             <PreviewImageCanvas
                 sliders={shownSliders}
                 curveLut={shownCurveLut}
@@ -1935,13 +1935,6 @@
         inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
-        transition: bottom 0.25s cubic-bezier(0.2, 0, 0, 1);
-    }
-
-    /* Clear of the brush bar, rising with it once the side bar has gone. */
-    .canvas-center.raised {
-        bottom: 76px;
-        transition: bottom 0.3s cubic-bezier(0.2, 0, 0, 1) 0.35s;
     }
 
     /* ===== Glass panels =====
