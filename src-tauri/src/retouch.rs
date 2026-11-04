@@ -270,6 +270,7 @@ pub struct LinearSource<'a> {
     channels: usize,
     luts: &'a [Vec<f32>; 3],
     blocks: RetouchedBlocks,
+    bytes: usize,
     journal: Option<BlockJournal>,
 }
 
@@ -300,11 +301,17 @@ impl<'a> LinearSource<'a> {
         luts: &'a [Vec<f32>; 3],
         blocks: RetouchedBlocks,
     ) -> Self {
-        Self { pixels, width, height, channels, luts, blocks, journal: None }
+        let bytes = blocks.values().map(Vec::len).sum();
+        Self { pixels, width, height, channels, luts, blocks, bytes, journal: None }
     }
 
     pub fn into_blocks(self) -> RetouchedBlocks {
         self.blocks
+    }
+
+    /// Bytes of the blocks strokes have written.
+    pub fn bytes(&self) -> usize {
+        self.bytes
     }
 
     /// What block `key` holds, or None while no stroke has written it.
@@ -325,15 +332,18 @@ impl<'a> LinearSource<'a> {
     /// Puts back what `journal` recorded.
     fn roll_back(&mut self, journal: BlockJournal) {
         for (key, held) in journal {
-            match held {
+            self.bytes += held.as_ref().map_or(0, Vec::len);
+            let replaced = match held {
                 Some(data) => self.blocks.insert(key, data),
                 None => self.blocks.remove(&key),
             };
+            self.bytes -= replaced.map_or(0, |data| data.len());
         }
     }
 
     fn clear_blocks(&mut self) {
         self.blocks.clear();
+        self.bytes = 0;
     }
 
     fn untouched(&self, x0: u32, y0: u32, w: u32, h: u32) -> Vec<u8> {
@@ -395,6 +405,7 @@ impl<'a> LinearSource<'a> {
                 }
                 if !self.blocks.contains_key(&(bx, by)) {
                     let fresh = self.untouched(bx0, by0, bw, bh);
+                    self.bytes += fresh.len();
                     self.blocks.insert((bx, by), fresh);
                 }
                 let block = self.blocks.get_mut(&(bx, by)).unwrap();
@@ -837,20 +848,17 @@ impl StrokeJournal {
         &self.strokes
     }
 
-    pub fn cap(&self) -> usize {
-        self.cap
-    }
-
     /// Bytes of overwritten blocks held.
     pub fn bytes(&self) -> usize {
         self.bytes
     }
 
-    fn push(&mut self, stroke: RetouchPayload, journal: BlockJournal) {
+    /// Records `stroke`, letting the oldest go to keep within the cap and `room`.
+    fn push(&mut self, stroke: RetouchPayload, journal: BlockJournal, room: usize) {
         self.strokes.push(stroke);
         self.bytes += journal_bytes(&journal);
         self.entries.push_back(journal);
-        while self.bytes > self.cap {
+        while self.bytes > self.cap.min(room) {
             let Some(oldest) = self.entries.pop_front() else { break };
             self.bytes -= journal_bytes(&oldest);
             self.floor += 1;
@@ -878,6 +886,8 @@ pub enum Followed {
 /// `strokes`: the strokes after the start the two share are rolled back, then
 /// the rest are applied. `touched` is given each block that changes, with what
 /// it held just before, at least once and first with what it held on entry.
+/// The journal lets its oldest strokes go to keep it and the blocks within `budget`.
+#[allow(clippy::too_many_arguments)]
 pub fn follow_strokes(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -885,10 +895,14 @@ pub fn follow_strokes(
     source: &mut LinearSource,
     journal: &mut StrokeJournal,
     strokes: &[RetouchPayload],
+    budget: usize,
     mut touched: impl FnMut((u32, u32), Option<&[u8]>),
 ) -> Result<Followed, String> {
     let shared = journal.strokes.iter().zip(strokes).take_while(|(a, b)| a == b).count();
     let followed = if shared < journal.floor {
+        for (key, held) in source.blocks() {
+            touched(key, Some(held));
+        }
         source.clear_blocks();
         *journal = StrokeJournal::with_cap(journal.cap);
         Followed::Restarted
@@ -914,7 +928,7 @@ pub fn follow_strokes(
         for (key, held) in &undo {
             touched(*key, held.as_deref());
         }
-        journal.push(stroke.clone(), undo);
+        journal.push(stroke.clone(), undo, budget.saturating_sub(source.bytes()));
     }
     Ok(followed)
 }

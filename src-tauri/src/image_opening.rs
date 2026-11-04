@@ -20,7 +20,7 @@ use crate::crop::{crop_view, CropPayload, CropView};
 use crate::export_rendering::request_device;
 use crate::retouch::{
     apply_retouch, block_box, follow_strokes, Followed, LinearSource, RetouchPasses, RetouchPayload, RetouchedBlocks,
-    StrokeJournal, MAX_JOURNAL_BYTES,
+    StrokeJournal,
 };
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
@@ -391,8 +391,8 @@ pub fn compute_retouched_histograms_in(
     Ok(histograms)
 }
 
-/// Bytes of retouched blocks and journal kept between histogram requests;
-/// past it nothing is kept, and the next request lays the strokes afresh.
+/// Bytes of retouched blocks and journal kept between histogram requests. The
+/// journal gives way first; once the blocks alone pass it nothing is kept.
 pub const MAX_RETOUCHED_BYTES: usize = 512 << 20;
 
 /// The retouched histograms of one image, kept between requests: the strokes
@@ -400,6 +400,7 @@ pub const MAX_RETOUCHED_BYTES: usize = 512 << 20;
 pub struct RetouchedHistograms {
     journal: StrokeJournal,
     blocks: RetouchedBlocks,
+    blocks_bytes: usize,
     crop: Option<CropPayload>,
     histograms: Option<Histograms>,
     budget: usize,
@@ -412,8 +413,9 @@ impl RetouchedHistograms {
 
     pub fn with_budget(budget: usize) -> Self {
         Self {
-            journal: StrokeJournal::with_cap(MAX_JOURNAL_BYTES.min(budget)),
+            journal: StrokeJournal::new(),
             blocks: RetouchedBlocks::new(),
+            blocks_bytes: 0,
             crop: None,
             histograms: None,
             budget,
@@ -422,7 +424,7 @@ impl RetouchedHistograms {
 
     /// Bytes of retouched blocks and journal held for the next request.
     pub fn held_bytes(&self) -> usize {
-        self.journal.bytes() + self.blocks.values().map(Vec::len).sum::<usize>()
+        self.journal.bytes() + self.blocks_bytes
     }
 
     /// The histograms of `src` within `crop` with `strokes` laid over it. Only
@@ -452,7 +454,8 @@ impl RetouchedHistograms {
         let mut source = LinearSource::with_blocks(src, width, height, channels, luts, blocks);
         // Each block that changes comes out of the counts as it was, and goes back in as it ends up.
         let mut changed = HashSet::new();
-        let followed = follow_strokes(device, queue, passes, &mut source, &mut self.journal, strokes, |key, held| {
+        let journal = &mut self.journal;
+        let followed = follow_strokes(device, queue, passes, &mut source, journal, strokes, self.budget, |key, held| {
             if let Some(counts) = &mut counts {
                 if changed.insert(key) {
                     binning.count_block(counts, key, held, false);
@@ -476,11 +479,12 @@ impl RetouchedHistograms {
                 return Err(e);
             }
         };
-        self.blocks = source.into_blocks();
-        if self.held_bytes() > self.budget {
+        if source.bytes() > self.budget {
             *self = Self::with_budget(self.budget);
             return Ok(histograms);
         }
+        self.blocks_bytes = source.bytes();
+        self.blocks = source.into_blocks();
         self.crop = Some(*crop);
         self.histograms = Some(histograms.clone());
         Ok(histograms)

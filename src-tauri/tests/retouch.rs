@@ -260,7 +260,7 @@ fn follow_through(img: &Rgba16Image, cap: usize, steps: &[Vec<RetouchPayload>]) 
     let mut outcomes = Vec::new();
     for strokes in steps {
         let mut source = LinearSource::with_blocks(img.as_raw(), w, h, 4, &luts, blocks);
-        outcomes.push(follow_strokes(device, queue, &passes, &mut source, &mut journal, strokes, |_, _| {}).unwrap());
+        outcomes.push(follow_strokes(device, queue, &passes, &mut source, &mut journal, strokes, usize::MAX, |_, _| {}).unwrap());
         assert_eq!(source.read(0, 0, w, h), retouched(img, strokes), "after following {} strokes", strokes.len());
         assert_eq!(journal.strokes(), strokes.as_slice());
         blocks = source.into_blocks();
@@ -324,6 +324,7 @@ fn follow_histograms(budget: usize) -> Vec<usize> {
         let fresh =
             compute_retouched_histograms_in(device, queue, img.as_raw(), w, h, 4, &view, &bins, &luts, strokes).unwrap();
         assert!(same_counts(&got, &fresh), "{} strokes in {crop:?}", strokes.len());
+        assert!(kept.held_bytes() <= budget, "{} bytes held under a {budget} budget", kept.held_bytes());
         held.push(kept.held_bytes());
     }
     held
@@ -332,6 +333,12 @@ fn follow_histograms(budget: usize) -> Vec<usize> {
 #[test]
 fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
     assert!(follow_histograms(MAX_RETOUCHED_BYTES).iter().all(|&bytes| bytes > 0));
+}
+
+#[test]
+fn under_a_tight_budget_the_journal_gives_way_before_the_blocks() {
+    // Room for every block the strokes write, but little of what they wrote over.
+    assert!(follow_histograms(400_000).iter().all(|&bytes| bytes > 0));
 }
 
 #[test]
