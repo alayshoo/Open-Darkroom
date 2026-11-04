@@ -175,6 +175,14 @@ describe("the retouch brushes", () => {
         expect(history.pointer).toBe(0);
     });
 
+    it("picks no source from an Alt-click off the image", async () => {
+        await userEvent.keyboard("c");
+        pointer("pointerdown", on(-0.1, 0.5), { altKey: true });
+        pointer("pointerup", on(-0.1, 0.5), { altKey: true });
+        expect(retouchTool.pickedSource).toBeNull();
+        expect(retouchTool.hasSource).toBe(false);
+    });
+
     it("sizes the brush across an Alt + drag and softens it upwards", async () => {
         await userEvent.keyboard("x");
         const { radius, feather } = retouchTool;

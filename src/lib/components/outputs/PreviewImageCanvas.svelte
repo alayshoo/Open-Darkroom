@@ -526,7 +526,7 @@
         dragFrom = null;
         loupeGrab = null;
         // An Alt press that never moved far enough to size the brush picks a source.
-        if (resizing && !resizing.moved) retouchTool.pickSource(resizing.point);
+        if (resizing && !resizing.moved && onImage(resizing.point)) retouchTool.pickSource(resizing.point);
         resizing = null;
         if (stroke) finishStroke();
     }
@@ -561,6 +561,10 @@
     let toImage = $derived(layout ? canvasToImage(layout.placement) : null);
     let fromImage = $derived(toImage ? invert(toImage) : null);
 
+    function onImage([x, y]: Point): boolean {
+        return !!imagePayload && x >= 0 && y >= 0 && x < imagePayload.fullWidth && y < imagePayload.fullHeight;
+    }
+
     function startBrush(e: PointerEvent) {
         if (!toImage || !imagePayload) return;
         const cursor = cursorOf(e);
@@ -570,8 +574,7 @@
             resizing = { at: cursor, point, radius: retouchTool.radius, feather: retouchTool.feather, moved: false };
             return;
         }
-        const { fullWidth, fullHeight } = imagePayload;
-        if (point[0] < 0 || point[1] < 0 || point[0] >= fullWidth || point[1] >= fullHeight) return;
+        if (!onImage(point)) return;
         const offset = retouchTool.offsetFor(point);
         // Behind a stroke still finding its source, it waits its turn as an outline.
         stroke = { points: [point], offset, live: offset !== null && pending.length === 0 };

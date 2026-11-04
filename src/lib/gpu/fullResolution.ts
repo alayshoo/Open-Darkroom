@@ -103,7 +103,7 @@ export function sourceTexture(device: GPUDevice, label: string, width: number, h
         size: { width, height },
         format: SOURCE_FORMAT,
         mipLevelCount: mipLevelCount(width, height),
-        // Copied out only by the browser tests, which read the levels back.
+        // Copied out of to back up the texels a retouch stroke overwrites.
         usage:
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.COPY_DST |
