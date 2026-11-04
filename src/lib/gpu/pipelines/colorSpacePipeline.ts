@@ -108,7 +108,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
 
     const scale = device.createBuffer({
         label: "Colour Space Scale",
-        size: 8,
+        size: 4,
         usage: GPUBufferUsage.STORAGE,
     });
 
@@ -138,13 +138,12 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         },
     });
 
-    // ── Scale: the fullest cell of each grid ─────────────────────────────────
+    // ── Scale: the fullest cell of the volume ─────────────────────────────────
     const scaleLayout = device.createBindGroupLayout({
         label: "Colour Space Scale Bind Group Layout",
         entries: [
             { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
-            { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
         ],
     });
 
@@ -164,9 +163,8 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         label: "Colour Space Scale Bind Group",
         layout: scaleLayout,
         entries: [
-            { binding: 0, resource: { buffer: xyBins } },
-            { binding: 1, resource: { buffer: volBins } },
-            { binding: 2, resource: { buffer: scale } },
+            { binding: 0, resource: { buffer: volBins } },
+            { binding: 1, resource: { buffer: scale } },
         ],
     });
 
@@ -214,7 +212,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         layout: chromaticity.layout,
         entries: [
             { binding: 0, resource: { buffer: xyBins } },
-            { binding: 1, resource: { buffer: scale } },
+            { binding: 1, resource: { buffer: stats } },
             { binding: 2, resource: { buffer: overlay.buffer } },
         ],
     });

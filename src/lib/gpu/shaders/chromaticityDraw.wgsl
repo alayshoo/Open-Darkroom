@@ -1,7 +1,8 @@
 // src/lib/gpu/shaders/chromaticityDraw.wgsl
 //
 // The CIE 1931 diagram: the filled spectral locus, the image's chromaticities
-// as a density cloud, and a triangle for every enabled gamut.
+// as a cloud coloured by each cell's share of the pixels, and a triangle for
+// every enabled gamut.
 
 //!include "chunks/luma.wgsl"
 //!include "chunks/tone.wgsl"
@@ -9,15 +10,21 @@
 //!include "chunks/gamutGrids.wgsl"
 
 @group(0) @binding(0) var<storage, read> xyBins:  array<u32, XY_TOTAL>;
-@group(0) @binding(1) var<storage, read> scale:   array<u32, 2>;
+@group(0) @binding(1) var<storage, read> stats:   array<u32, STAT_WORDS>;
 @group(0) @binding(2) var<storage, read> overlay: GamutOverlay;
 
 // The locus is dimmed so the data cloud stands out over it.
-const LOCUS_LEVEL: f32 = 0.62;
+const LOCUS_LEVEL: f32 = 0.4;
 const LOCUS_FILL: f32 = 0.95;
 
 const GRID_TINT = vec3f(0.42, 0.44, 0.48);
-const DATA_TINT = vec3f(1.0, 0.96, 0.90);
+// A cell's share of the measured pixels, by decade: 10^-6 at the bottom of the
+// ramp, 10^-1 at the top. Mirrored by the legend in ColorSpacePanel.svelte.
+const SHARE_DECADE_MIN: f32 = -6.0;
+const SHARE_DECADES: f32 = 5.0;
+
+// Opacity of the rarest cell, so a lone pixel stays visible but recedes.
+const CLOUD_FLOOR: f32 = 0.7;
 
 struct VertexOut {
   @builtin(position) position: vec4f,
@@ -101,33 +108,40 @@ fn triangle_edge(space: GamutSpace, xy: vec2f) -> f32 {
   );
 }
 
-fn unpack_tint(packed: u32) -> vec3f {
-  return vec3f(
-    f32((packed >> 16u) & 255u),
-    f32((packed >> 8u) & 255u),
-    f32(packed & 255u),
-  ) / 255.0;
+// Violet for the rarest cells through to near white for the most common.
+fn heat(t: f32) -> vec3f {
+  let c0 = vec3f(0.36, 0.22, 0.85);
+  let c1 = vec3f(0.85, 0.22, 0.55);
+  let c2 = vec3f(0.98, 0.50, 0.15);
+  let c3 = vec3f(1.00, 0.98, 0.82);
+  if (t < 1.0 / 3.0) { return mix(c0, c1, t * 3.0); }
+  if (t < 2.0 / 3.0) { return mix(c1, c2, t * 3.0 - 1.0); }
+  return mix(c2, c3, t * 3.0 - 2.0);
 }
 
-// How full a cell is, on a log scale.
-fn cell_density(cell: vec2i) -> f32 {
+// A cell's colour and coverage, premultiplied, from its share of the pixels.
+fn cell_cloud(cell: vec2i) -> vec4f {
   if (cell.x < 0 || cell.y < 0 || cell.x >= i32(XY_BINS) || cell.y >= i32(XY_BINS)) {
-    return 0.0;
+    return vec4f(0.0);
   }
   let count = xyBins[u32(cell.y) * XY_BINS + u32(cell.x)];
-  if (count == 0u) { return 0.0; }
-  return 0.35 + 0.65 * log(1.0 + f32(count)) / log(1.0 + f32(scale[0]));
+  if (count == 0u) { return vec4f(0.0); }
+
+  let share = f32(count) / f32(max(stats[STAT_COUNTED], 1u));
+  let t = clamp((log(share) / log(10.0) - SHARE_DECADE_MIN) / SHARE_DECADES, 0.0, 1.0);
+  let a = mix(CLOUD_FLOOR, 1.0, t);
+  return vec4f(heat(t) * a, a);
 }
 
 // Bilinear between cells, so the cloud does not read as a grid.
-fn density_at(uv: vec2f) -> f32 {
+fn cloud_at(uv: vec2f) -> vec4f {
   let t = uv * f32(XY_BINS) - vec2f(0.5);
   let base = vec2i(floor(t));
   let f = fract(t);
 
   return mix(
-    mix(cell_density(base), cell_density(base + vec2i(1, 0)), f.x),
-    mix(cell_density(base + vec2i(0, 1)), cell_density(base + vec2i(1, 1)), f.x),
+    mix(cell_cloud(base), cell_cloud(base + vec2i(1, 0)), f.x),
+    mix(cell_cloud(base + vec2i(0, 1)), cell_cloud(base + vec2i(1, 1)), f.x),
     f.y,
   );
 }
@@ -156,9 +170,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
   colour = mix(colour, GRID_TINT, grid * 0.35);
   alpha = max(alpha, grid * 0.25);
 
-  let density = density_at(in.uv);
-  colour = mix(colour, DATA_TINT, density);
-  alpha = max(alpha, density);
+  let cloud = cloud_at(in.uv);
+  if (cloud.a > 0.0) {
+    colour = mix(colour, cloud.rgb / cloud.a, cloud.a);
+    alpha = max(alpha, cloud.a);
+  }
 
   // Gamut triangles, drawn over everything else.
   for (var s = 0u; s < GAMUT_SPACES; s++) {

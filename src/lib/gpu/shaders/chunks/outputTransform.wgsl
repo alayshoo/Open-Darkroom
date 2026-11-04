@@ -39,7 +39,23 @@ struct OutputSpace {
   curve: u32,
   // Non-zero while the preview is being proofed against an export space.
   proof: u32,
+  // Preview only, zero on export: paint the pixels outside a gamut. One of the
+  // MASK_ ids below.
+  mask: u32,
+  // The mask's colour, 0xRRGGBB.
+  mask_tint: u32,
+  // Linear working space, or linear destination for MASK_AFTER → the masked
+  // space, each row scaled by its primary's X+Y+Z.
+  to_mask: mat3x3<f32>,
+  // The masked triangle's height in xy above the edge opposite each primary.
+  mask_heights: vec3f,
 }
+
+const MASK_OFF: u32 = 0u;
+// Test the signal the adjustments ask for, before the output transform.
+const MASK_BEFORE: u32 = 1u;
+// Test what the output transform produces.
+const MASK_AFTER: u32 = 2u;
 
 // Pull an out-of-gamut colour along a straight line towards the neutral of its
 // own luminance, keeping hue. Luminance outside 0..1 resolves to white or black.
