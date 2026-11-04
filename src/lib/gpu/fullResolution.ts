@@ -103,7 +103,7 @@ export function sourceTexture(device: GPUDevice, label: string, width: number, h
         size: { width, height },
         format: SOURCE_FORMAT,
         mipLevelCount: mipLevelCount(width, height),
-        // Copied out only by the browser tests, which read the levels back.
+        // Copied out of to back up the texels a retouch stroke overwrites.
         usage:
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.COPY_DST |
@@ -128,6 +128,18 @@ const mipmapPipelines = new WeakMap<GPUDevice, { pipeline: GPURenderPipeline; sa
 
 /** Fills every level of `texture` below the first from the one above it. */
 export function generateMipmaps(device: GPUDevice, texture: GPUTexture) {
+    const encoder = device.createCommandEncoder({ label: "Generate Mipmaps" });
+    recordMipmaps(device, encoder, texture);
+    device.queue.submit([encoder.finish()]);
+}
+
+/** Records the mip levels below the first, or only the part of each that `region`, in level 0 texels, reaches. */
+export function recordMipmaps(
+    device: GPUDevice,
+    encoder: GPUCommandEncoder,
+    texture: GPUTexture,
+    region?: [number, number, number, number],
+) {
     let cached = mipmapPipelines.get(device);
     if (!cached) {
         const module = device.createShaderModule({ label: "Mipmap Shader", code: mipmapSource });
@@ -150,8 +162,21 @@ export function generateMipmaps(device: GPUDevice, texture: GPUTexture) {
     }
     const { pipeline, sampler } = cached;
 
-    const encoder = device.createCommandEncoder({ label: "Generate Mipmaps" });
+    let box = region;
     for (let level = 1; level < texture.mipLevelCount; level++) {
+        const width = Math.max(1, texture.width >> level);
+        const height = Math.max(1, texture.height >> level);
+        // Halved outwards and grown by a texel, since an odd parent is not
+        // sampled on exact quarters.
+        if (box) {
+            box = [
+                Math.max(0, Math.floor(box[0] / 2) - 1),
+                Math.max(0, Math.floor(box[1] / 2) - 1),
+                Math.min(width, Math.ceil(box[2] / 2) + 1),
+                Math.min(height, Math.ceil(box[3] / 2) + 1),
+            ];
+            if (box[2] <= box[0] || box[3] <= box[1]) break;
+        }
         const bindGroup = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
             entries: [
@@ -163,15 +188,15 @@ export function generateMipmaps(device: GPUDevice, texture: GPUTexture) {
             colorAttachments: [
                 {
                     view: texture.createView({ baseMipLevel: level, mipLevelCount: 1 }),
-                    loadOp: "clear",
+                    loadOp: box ? "load" : "clear",
                     storeOp: "store",
                 },
             ],
         });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
+        if (box) pass.setScissorRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
         pass.draw(6);
         pass.end();
     }
-    device.queue.submit([encoder.finish()]);
 }

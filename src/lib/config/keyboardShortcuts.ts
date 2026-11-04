@@ -14,6 +14,8 @@ interface ShortcutDeps {
     handlers: Record<ShortcutId, () => void>;
     closeSettings: () => void;
     isSettingsOpen: () => boolean;
+    /** Whether an action's shortcut may run now; those it refuses do nothing. */
+    allows?: (id: ShortcutId) => boolean;
 }
 
 export function isTextField(target: EventTarget | null) {
@@ -34,7 +36,7 @@ function standsAsideFor(id: ShortcutId, e: KeyboardEvent) {
     return e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey;
 }
 
-export function createKeydownHandler({ handlers, closeSettings, isSettingsOpen }: ShortcutDeps) {
+export function createKeydownHandler({ handlers, closeSettings, isSettingsOpen, allows }: ShortcutDeps) {
     return (e: KeyboardEvent) => {
         // A row in the shortcuts tab is waiting for this press, not us.
         if (shortcuts.recording) return;
@@ -52,6 +54,7 @@ export function createKeydownHandler({ handlers, closeSettings, isSettingsOpen }
         }
 
         if (!id || standsAsideFor(id, e)) return;
+        if (allows && !allows(id)) return;
 
         handlers[id]();
         e.preventDefault();

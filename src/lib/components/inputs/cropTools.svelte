@@ -66,12 +66,12 @@
 	}
 </script>
 
-<!-- Opens out under the crop button, pushing the tools below it down. -->
+<!-- Opens out under the crop button, over the tools below it once they have faded. -->
 <div class="crop-tools-slot">
 	{#if visible}
 		<div
 			class="crop-tools flex flex-col items-center gap-1"
-			in:slide={{ duration: 260, easing: cubicOut }}
+			in:slide={{ delay: 180, duration: 260, easing: cubicOut }}
 			out:slide={{ duration: 180, easing: cubicIn }}
 		>
 			<GlassButton size={34} label="Rotate left" onclick={() => onturn?.(false)}>
@@ -205,26 +205,30 @@
 </div>
 
 <style>
-	/* Cancels the column's gap above it, so it takes no room while closed. */
 	.crop-tools-slot {
-		margin-top: -4px;
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		z-index: 1;
 	}
 
 	.crop-tools {
 		padding-top: 4px;
 	}
 
-	/* Each tool pops in a beat after the one above it. */
+	/* Each tool pops in a beat after the one above it, once the toolbar's
+	   other tools have faded. */
 	.crop-tools > :global(*) {
-		animation: toolIn 0.26s cubic-bezier(0.2, 0, 0, 1) backwards;
+		animation: toolIn 0.26s cubic-bezier(0.2, 0, 0, 1) 0.18s backwards;
 	}
-	.crop-tools > :global(:nth-child(2)) { animation-delay: 0.025s; }
-	.crop-tools > :global(:nth-child(3)) { animation-delay: 0.05s; }
-	.crop-tools > :global(:nth-child(4)) { animation-delay: 0.075s; }
-	.crop-tools > :global(:nth-child(5)) { animation-delay: 0.1s; }
-	.crop-tools > :global(:nth-child(6)) { animation-delay: 0.125s; }
-	.crop-tools > :global(:nth-child(7)) { animation-delay: 0.15s; }
-	.crop-tools > :global(:nth-child(8)) { animation-delay: 0.175s; }
+	.crop-tools > :global(:nth-child(2)) { animation-delay: 0.205s; }
+	.crop-tools > :global(:nth-child(3)) { animation-delay: 0.23s; }
+	.crop-tools > :global(:nth-child(4)) { animation-delay: 0.255s; }
+	.crop-tools > :global(:nth-child(5)) { animation-delay: 0.28s; }
+	.crop-tools > :global(:nth-child(6)) { animation-delay: 0.305s; }
+	.crop-tools > :global(:nth-child(7)) { animation-delay: 0.33s; }
+	.crop-tools > :global(:nth-child(8)) { animation-delay: 0.355s; }
 
 	@keyframes toolIn {
 		from {

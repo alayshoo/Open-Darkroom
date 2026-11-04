@@ -23,6 +23,8 @@ use open_darkroom_lib::export_rendering::{
 };
 use open_darkroom_lib::export_rendering::OUTPUT_SPACE_BYTES;
 use open_darkroom_lib::crop::CROP_VIEW_BYTES;
+use open_darkroom_lib::retouch::{MAX_BLUR_TAPS, RETOUCH_TILE, RETOUCH_UNIFORM_BYTES};
+use open_darkroom_lib::shaders::RETOUCH_WGSL;
 use open_darkroom_lib::icc::SRGB_TO_WORKING;
 use open_darkroom_lib::output_space::{OutputSpace, Transfer};
 use open_darkroom_lib::image_opening::{OPEN_CANCELLED, PAYLOAD_HEADER_BYTES};
@@ -429,6 +431,25 @@ fn crop_view_struct_matches_the_declared_size_everywhere() {
         common::CROP_TS.contains(&format!("CROP_VIEW_BUFFER_SIZE = {CROP_VIEW_BYTES};")),
         "crop.ts does not declare CROP_VIEW_BUFFER_SIZE = {CROP_VIEW_BYTES}"
     );
+}
+
+/// The preview and the export cut a stroke into the same tiles and pack the
+/// same uniform, so the constants behind both have to agree.
+#[test]
+fn retouch_geometry_and_uniform_match_everywhere() {
+    let fields = wgsl_struct(RETOUCH_WGSL, "RetouchPass");
+    assert_eq!(
+        struct_size(&fields).next_multiple_of(16),
+        RETOUCH_UNIFORM_BYTES,
+        "RETOUCH_UNIFORM_BYTES disagrees with the WGSL RetouchPass struct"
+    );
+    for decl in [
+        format!("RETOUCH_UNIFORM_SIZE = {RETOUCH_UNIFORM_BYTES};"),
+        format!("RETOUCH_TILE = {RETOUCH_TILE};"),
+        format!("MAX_BLUR_TAPS = {MAX_BLUR_TAPS};"),
+    ] {
+        assert!(common::RETOUCH_TS.contains(&decl), "retouch.ts does not declare {decl}");
+    }
 }
 
 /// `SlidersPayload::default()` exists so the tests can express "neutral". It is

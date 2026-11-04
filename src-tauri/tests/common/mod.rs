@@ -44,6 +44,7 @@ pub const OUTPUT_SPACE_BUFFER_TS: &str =
     include_str!("../../../src/lib/gpu/outputSpaceBuffer.ts");
 pub const EXPORT_SETTINGS_TS: &str = include_str!("../../../src/lib/types/exportSettings.ts");
 pub const CROP_TS: &str = include_str!("../../../src/lib/types/crop.ts");
+pub const RETOUCH_TS: &str = include_str!("../../../src/lib/types/retouch.ts");
 
 // ── The working space ─────────────────────────────────────────────────
 

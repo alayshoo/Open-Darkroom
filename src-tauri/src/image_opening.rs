@@ -3,7 +3,8 @@
 use fast_image_resize as fir;
 use fast_image_resize::images::{Image, ImageRef};
 use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 use tauri::ipc::Response;
 use tauri_plugin_dialog::DialogExt;
@@ -12,9 +13,15 @@ use half::f16;
 use image::{ImageBuffer, ImageDecoder, Rgba};
 
 use crate::color::{
-    linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LUT_SIZE,
+    linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LINEAR_F32_BYTES_PER_PIXEL,
+    LUT_SIZE,
 };
 use crate::crop::{crop_view, CropPayload, CropView};
+use crate::export_rendering::request_device;
+use crate::retouch::{
+    apply_retouch, block_box, follow_strokes, Followed, LinearSource, RetouchPasses, RetouchPayload, RetouchedBlocks,
+    StrokeJournal,
+};
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
 
@@ -80,6 +87,7 @@ pub type ImageState = Mutex<Option<OriginalImage>>;
 // ── Derived image data ────────────────────────────────────────────────────────
 
 /// Per-channel histograms of the full-resolution image, binned in sRGB code values.
+#[derive(Clone)]
 pub struct Histograms {
     pub r: [u32; HIST_BINS],
     pub g: [u32; HIST_BINS],
@@ -295,6 +303,174 @@ pub fn compute_histograms_in(
         })
         .reduce(empty_bins, sum_bins)
         .into()
+}
+
+/// The source code whose linearised value is nearest `v`, on a curve that
+/// never falls.
+fn encode_linear(lut: &[f32], v: f32) -> u16 {
+    let above = lut.partition_point(|&l| l < v).min(lut.len() - 1);
+    let below = above.saturating_sub(1);
+    let nearest = if (lut[above] - v).abs() < (v - lut[below]).abs() { above } else { below };
+    nearest as u16
+}
+
+/// What binning an image's pixels within a crop takes, with the curves
+/// retouched pixels are encoded back through.
+struct Binning<'a> {
+    src: &'a [u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    view: &'a CropView,
+    bins: &'a [u8],
+    luts: &'a [Vec<f32>; 3],
+}
+
+impl Binning<'_> {
+    /// Adds block `key`'s pixels within the crop to `histograms`, or takes
+    /// them out: as `held` has them, or untouched when it is None.
+    fn count_block(&self, histograms: &mut Histograms, key: (u32, u32), held: Option<&[u8]>, add: bool) {
+        let [x0, y0, w, h] = block_box(key, self.width, self.height);
+        let px = LINEAR_F32_BYTES_PER_PIXEL;
+        for y in y0..y0 + h {
+            for x in (x0..x0 + w).filter(|&x| self.view.contains(x, y)) {
+                let at = (y as usize * self.width as usize + x as usize) * self.channels;
+                let texel = ((y - y0) as usize * w as usize + (x - x0) as usize) * px;
+                for (c, counts) in [&mut histograms.r, &mut histograms.g, &mut histograms.b].into_iter().enumerate() {
+                    let code = match held {
+                        Some(data) => {
+                            let v = f32::from_le_bytes(data[texel + c * 4..texel + c * 4 + 4].try_into().unwrap());
+                            encode_linear(&self.luts[c], v)
+                        }
+                        None => self.src[at + c],
+                    };
+                    let bin = &mut counts[self.bins[code as usize] as usize];
+                    if add {
+                        *bin += 1;
+                    } else {
+                        *bin -= 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Takes the untouched pixels of every block `source`'s strokes wrote out
+    /// of `histograms`, and puts the retouched ones in.
+    fn rebin_retouched(&self, histograms: &mut Histograms, source: &LinearSource) {
+        for (key, data) in source.blocks() {
+            self.count_block(histograms, key, None, false);
+            self.count_block(histograms, key, Some(data), true);
+        }
+    }
+}
+
+/// [`compute_histograms_in`] with `strokes` laid over the image first. Only
+/// the blocks the strokes wrote are binned again: their untouched pixels come
+/// out of the counts and the retouched ones, encoded back through `luts`, go in.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_retouched_histograms_in(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    src: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    view: &CropView,
+    bins: &[u8],
+    luts: &[Vec<f32>; 3],
+    strokes: &[RetouchPayload],
+) -> Result<Histograms, String> {
+    let mut histograms = compute_histograms_in(src, width, height, channels, view, bins);
+    if strokes.is_empty() {
+        return Ok(histograms);
+    }
+    let mut source = LinearSource::new(src, width, height, channels, luts);
+    apply_retouch(device, queue, &mut source, strokes)?;
+    Binning { src, width, height, channels, view, bins, luts }.rebin_retouched(&mut histograms, &source);
+    Ok(histograms)
+}
+
+/// The retouched histograms of one image, kept between requests: the strokes
+/// laid over it with what each wrote over, and the counts for the last crop.
+pub struct RetouchedHistograms {
+    journal: StrokeJournal,
+    blocks: RetouchedBlocks,
+    crop: Option<CropPayload>,
+    histograms: Option<Histograms>,
+}
+
+impl RetouchedHistograms {
+    pub fn new() -> Self {
+        Self::with_journal(StrokeJournal::new())
+    }
+
+    pub fn with_journal(journal: StrokeJournal) -> Self {
+        Self { journal, blocks: RetouchedBlocks::new(), crop: None, histograms: None }
+    }
+
+    /// The histograms of `src` within `crop` with `strokes` laid over it. Only
+    /// what differs from the last call is applied: strokes no longer asked for
+    /// are rolled back, and for the same crop only the blocks that changed are
+    /// binned again.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        passes: &RetouchPasses,
+        src: &[u16],
+        width: u32,
+        height: u32,
+        channels: usize,
+        crop: &CropPayload,
+        bins: &[u8],
+        luts: &[Vec<f32>; 3],
+        strokes: &[RetouchPayload],
+    ) -> Result<Histograms, String> {
+        let view = crop_view(crop, width, height);
+        let binning = Binning { src, width, height, channels, view: &view, bins, luts };
+        let mut counts = self.histograms.take().filter(|_| self.crop.as_ref() == Some(crop));
+
+        let blocks = std::mem::take(&mut self.blocks);
+        let mut source = LinearSource::with_blocks(src, width, height, channels, luts, blocks);
+        // Each block that changes comes out of the counts as it was, and goes back in as it ends up.
+        let mut changed = HashSet::new();
+        let followed = follow_strokes(device, queue, passes, &mut source, &mut self.journal, strokes, |key, held| {
+            if let Some(counts) = &mut counts {
+                if changed.insert(key) {
+                    binning.count_block(counts, key, held, false);
+                }
+            }
+        });
+        let histograms = match (followed, counts) {
+            (Ok(Followed::Stepped), Some(mut counts)) => {
+                for key in changed {
+                    binning.count_block(&mut counts, key, source.block(key), true);
+                }
+                counts
+            }
+            (Ok(_), _) => {
+                let mut counts = compute_histograms_in(src, width, height, channels, &view, bins);
+                binning.rebin_retouched(&mut counts, &source);
+                counts
+            }
+            (Err(e), _) => {
+                *self = Self::with_journal(StrokeJournal::with_cap(self.journal.cap()));
+                return Err(e);
+            }
+        };
+        self.blocks = source.into_blocks();
+        self.crop = Some(*crop);
+        self.histograms = Some(histograms.clone());
+        Ok(histograms)
+    }
+}
+
+impl Default for RetouchedHistograms {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// R, G, B bins as u32 LE, end to end — the tail of the open payload.
@@ -557,6 +733,7 @@ pub(crate) async fn open_image_file(
     // `prepare_image` so the buffer can be moved into the state rather than
     // cloned — preparation only needed to borrow it.
     {
+        *RETOUCHED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let mut guard = state.lock().unwrap();
         *guard = Some(OriginalImage {
             pixels_u16: Arc::new(samples),
@@ -582,28 +759,76 @@ pub(crate) async fn open_image_file(
     Ok(Response::new(payload))
 }
 
-/// The open image's per-channel histograms, binned over only what a crop keeps.
+/// The open image's per-channel histograms, binned over only what a crop
+/// keeps, with any heal and clone strokes laid over it.
 #[tauri::command]
 pub(crate) async fn crop_histograms(
     state: tauri::State<'_, ImageState>,
     crop: CropPayload,
+    retouch: Option<Vec<RetouchPayload>>,
 ) -> Result<Response, String> {
-    let (pixels_u16, width, height, channels, bins) = {
+    let (pixels_u16, width, height, channels, bins, luts) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
         let bins = img.space.histogram_bins();
-        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins)
+        (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, bins, img.space.luts(|v| v))
     };
+
+    let strokes = retouch.unwrap_or_default();
+    // Strokes are laid over the image on the GPU, so they need a device first.
+    let gpu = if strokes.is_empty() { None } else { Some(histogram_gpu().await?) };
 
     // One pass at a time: overlapping rayon jobs nest on the workers' stacks
     // while they wait on each other, and enough of them overflow it.
     static BINNING: Mutex<()> = Mutex::new(());
-    let histograms = tauri::async_runtime::spawn_blocking(move || {
+    let histograms = tauri::async_runtime::spawn_blocking(move || -> Result<Histograms, String> {
         let _binning = BINNING.lock().unwrap_or_else(|e| e.into_inner());
-        let view = crop_view(&crop, width, height);
-        compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins)
+        let Some(gpu) = gpu else {
+            let view = crop_view(&crop, width, height);
+            return Ok(compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins));
+        };
+        let mut cache = RETOUCHED.lock().unwrap_or_else(|e| e.into_inner());
+        let held = cache.take().filter(|c| std::ptr::eq(c.image.as_ptr(), Arc::as_ptr(&pixels_u16)));
+        let mut retouched = held.map_or_else(RetouchedHistograms::new, |c| c.histograms);
+        let histograms = retouched.update(
+            &gpu.device, &gpu.queue, &gpu.passes, &pixels_u16, width, height, channels, &crop, &bins, &luts, &strokes,
+        )?;
+        *cache = Some(Retouched { image: Arc::downgrade(&pixels_u16), histograms: retouched });
+        Ok(histograms)
     })
     .await
     .map_err(|e| e.to_string())?;
-    Ok(Response::new(histogram_bytes(&histograms)))
+    // A failed pass may mean the device was lost, so the next one starts afresh.
+    if histograms.is_err() {
+        *HISTOGRAM_GPU.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    Ok(Response::new(histogram_bytes(&histograms?)))
+}
+
+/// The device the retouched histograms are binned on, made the first time one is needed.
+struct HistogramGpu {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    passes: RetouchPasses,
+}
+
+static HISTOGRAM_GPU: Mutex<Option<Arc<HistogramGpu>>> = Mutex::new(None);
+
+/// The retouched histograms of the image last binned with strokes.
+struct Retouched {
+    image: Weak<Vec<u16>>,
+    histograms: RetouchedHistograms,
+}
+
+static RETOUCHED: Mutex<Option<Retouched>> = Mutex::new(None);
+
+async fn histogram_gpu() -> Result<Arc<HistogramGpu>, String> {
+    if let Some(gpu) = HISTOGRAM_GPU.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Ok(gpu);
+    }
+    let (device, queue) = request_device("histogram_device").await?;
+    let passes = RetouchPasses::new(&device);
+    let gpu = Arc::new(HistogramGpu { device, queue, passes });
+    // Two first requests may race; the device stored first is the one kept.
+    Ok(Arc::clone(HISTOGRAM_GPU.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(gpu)))
 }

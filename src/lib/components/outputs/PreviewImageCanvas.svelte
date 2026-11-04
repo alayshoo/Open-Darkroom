@@ -19,12 +19,20 @@
     import { previewDebug } from "$lib/gpu/previewDebug.svelte";
     import { loupe } from "$lib/gpu/loupe.svelte";
     import { cropView, type Crop } from "$lib/types/crop";
+    import { placeRetouch, type Retouch } from "$lib/types/retouch";
+    import { createRetouchLayer, type RetouchLayer } from "$lib/gpu/retouchLayer";
+    import { findSource } from "$lib/gpu/retouchSearch";
+    import { retouchTool } from "$lib/retouch/retouchTool.svelte";
+    import { isTextField } from "$lib/config/keyboardShortcuts";
+    import RetouchBrush from "./RetouchBrush.svelte";
     import {
         MAX_ZOOM,
         apply,
+        canvasToImage,
         canvasToOutput,
         clampCenter,
         cropLayout,
+        invert,
         insideCrop,
         loupeCenter,
         loupeFrame,
@@ -44,6 +52,9 @@
         showWhole = false,
         zoom = $bindable(null),
         zoomable = $bindable(false),
+        retouch = [],
+        onretouch,
+        retouchReady = $bindable(false),
         overlay,
     }: {
         sliders: Sliders;
@@ -58,6 +69,12 @@
         zoom?: number | null;
         // Whether 1:1 is any closer than the fit.
         zoomable?: boolean;
+        // The heal and clone strokes baked into the source.
+        retouch?: Retouch[];
+        // A stroke painted with the brush, ready to be added.
+        onretouch?: (stroke: Retouch) => void;
+        // Whether the brushes can paint: only once every pixel has arrived.
+        retouchReady?: boolean;
         // Drawn over the frame, sized to it.
         overlay?: Snippet;
     } = $props();
@@ -68,6 +85,7 @@
     let canvas: HTMLCanvasElement;
     let frame: HTMLDivElement;
     let renderer: Renderer | null = $state(null);
+    let retouchLayer: RetouchLayer | null = null;
     let canvasLink: GPUCanvasLink | null = $state(null);
     // The texture the renderer is reading: the preview from the open payload,
     // then the full-resolution image once it has streamed in.
@@ -159,6 +177,7 @@
         linkCanvas2GPU(canvas, gpu, "premultiplied").then((link) => {
             if (destroyed) return;
             canvasLink = link;
+            retouchLayer = createRetouchLayer(gpu.device);
             renderer = createRenderer(gpu, canvasLink);
         });
 
@@ -169,6 +188,8 @@
             source?.texture.destroy();
             renderer?.destroy();
             renderer = null;
+            retouchLayer?.destroy();
+            retouchLayer = null;
             canvasLink = null;
             source = null;
         };
@@ -199,9 +220,11 @@
         if (payload.width === payload.fullWidth && payload.height === payload.fullHeight) {
             previewDebug.stream = null;
             loupe.status = "ready";
+            retouchReady = true;
             return;
         }
         loupe.status = "loading";
+        retouchReady = false;
 
         const started = performance.now();
         previewDebug.stream = { rows: 0, total: payload.fullHeight, done: false };
@@ -225,6 +248,7 @@
                 preview.texture.destroy();
                 source = full;
                 loupe.status = "ready";
+                retouchReady = true;
             })
             .catch((e) => {
                 if (load === loading) console.error("Failed to load the full-resolution image:", e);
@@ -280,6 +304,18 @@
         const _ = { ...sliders };
         renderer.setSliders(sliders);
         renderer.requestRender();
+    });
+
+    // The strokes are baked into whichever source is showing, so the preview
+    // carries them before the full resolution arrives, and again once it has.
+    $effect(() => {
+        if (!renderer || !source || !retouchLayer) return;
+        if (retouchLayer.sync(source, retouch)) {
+            renderer.sourceChanged();
+            renderer.requestRender();
+        }
+        handedOver = null;
+        if (untrack(() => stroke?.live)) queuePaint();
     });
 
     // ── The loupe ─────────────────────────────────────────────────────────────
@@ -467,14 +503,23 @@
             canvas.setPointerCapture(e.pointerId);
             return;
         }
+        if (brushing && !spaceHeld) {
+            startBrush(e);
+            return;
+        }
         if (!panning) return;
         dragFrom = cursorOf(e);
         canvas.setPointerCapture(e.pointerId);
     }
 
     function onPointerMove(e: PointerEvent) {
+        hover = cursorOf(e);
         if (loupeGrab) {
             placeLoupe(cursorOf(e));
+            return;
+        }
+        if (resizing || stroke) {
+            moveBrush(e);
             return;
         }
         if (!dragFrom) return;
@@ -486,7 +531,217 @@
     function onPointerUp() {
         dragFrom = null;
         loupeGrab = null;
+        // An Alt press that never moved far enough to size the brush picks a source.
+        if (resizing && !resizing.moved && onImage(resizing.point)) retouchTool.pickSource(resizing.point);
+        resizing = null;
+        if (stroke) finishStroke();
     }
+
+    // ── The heal and clone brushes ────────────────────────────────────────────
+
+    // CSS pixels of Alt + drag per percent of feather.
+    const RESIZE_PX_PER_FEATHER = 2;
+    // CSS pixels an Alt press may wander and still count as a click.
+    const CLICK_SLOP_PX = 3;
+
+    let brushing = $derived(retouchTool.mode !== null && retouchReady && !showWhole && !loupe.picking);
+    let spaceHeld = $state(false);
+    let hover = $state<Point | null>(null);
+
+    // A stroke being painted, in image pixels, and where it takes its pixels
+    // from, or null to find out once it is done. A stroke whose source is
+    // known is painted into the image as it is drawn.
+    let stroke = $state<{ points: Point[]; offset: Point | null; live: boolean } | null>(null);
+    // A live stroke just finished, kept painted until the strokes synced take it.
+    let handedOver: Retouch | null = null;
+    let painting = false;
+    let paintQueued = false;
+    // Strokes waiting on their source to be found.
+    let pending = $state<{ id: number; points: Point[]; radius: number }[]>([]);
+    let pendingId = 0;
+    let queue: Promise<void> = Promise.resolve();
+
+    // Alt + drag: across sizes the brush, up softens it. Alt + click picks a source.
+    let resizing = $state<{ at: Point; point: Point; radius: number; feather: number; moved: boolean } | null>(null);
+
+    let toImage = $derived(layout ? canvasToImage(layout.placement) : null);
+    let fromImage = $derived(toImage ? invert(toImage) : null);
+
+    function onImage([x, y]: Point): boolean {
+        return !!imagePayload && x >= 0 && y >= 0 && x < imagePayload.fullWidth && y < imagePayload.fullHeight;
+    }
+
+    function startBrush(e: PointerEvent) {
+        if (!toImage || !imagePayload) return;
+        const cursor = cursorOf(e);
+        const point = apply(toImage, cursor);
+        canvas.setPointerCapture(e.pointerId);
+        if (e.altKey) {
+            resizing = { at: cursor, point, radius: retouchTool.radius, feather: retouchTool.feather, moved: false };
+            return;
+        }
+        if (!onImage(point)) return;
+        const offset = retouchTool.offsetFor(point);
+        // Behind a stroke still finding its source, it waits its turn as an outline.
+        stroke = { points: [point], offset, live: offset !== null && pending.length === 0 };
+        if (stroke.live) queuePaint();
+    }
+
+    function moveBrush(e: PointerEvent) {
+        if (resizing) {
+            const dx = (e.clientX * dpr - resizing.at[0]) / dpr;
+            const dy = (e.clientY * dpr - resizing.at[1]) / dpr;
+            if (!resizing.moved && Math.hypot(dx, dy) < CLICK_SLOP_PX) return;
+            resizing.moved = true;
+            retouchTool.setRadius(resizing.radius + (dx * dpr) / (layout?.placement.scale ?? 1));
+            retouchTool.setFeather(resizing.feather - dy / RESIZE_PX_PER_FEATHER);
+            return;
+        }
+        if (!stroke || !toImage) return;
+        const point = apply(toImage, cursorOf(e));
+        const last = stroke.points[stroke.points.length - 1];
+        const spacing = Math.max(0.5, retouchTool.radius * 0.15);
+        if (Math.hypot(point[0] - last[0], point[1] - last[1]) >= spacing) {
+            stroke.points.push(point);
+            if (stroke.live) queuePaint();
+        }
+    }
+
+    function cancelStroke() {
+        if (stroke?.live) queuePaint();
+        stroke = null;
+        resizing = null;
+    }
+
+    /** The stroke as it is stored, from image pixels. */
+    function strokeRetouch(points: Point[], offset: Point | null): Retouch {
+        const { fullWidth, fullHeight } = imagePayload!;
+        return {
+            mode: retouchTool.mode ?? "heal",
+            points: points.map(([x, y]) => [x / fullWidth, y / fullHeight]),
+            radius: retouchTool.radius / Math.max(fullWidth, fullHeight),
+            feather: retouchTool.feather / 100,
+            opacity: retouchTool.opacity / 100,
+            offset: offset ? [offset[0] / fullWidth, offset[1] / fullHeight] : [0, 0],
+        };
+    }
+
+    function queuePaint() {
+        if (paintQueued) return;
+        paintQueued = true;
+        requestAnimationFrame(paintStroke);
+    }
+
+    // At most once a frame, and not before the GPU is done with the last one.
+    function paintStroke() {
+        paintQueued = false;
+        if (painting || !retouchLayer || !renderer || !source || !imagePayload) return;
+        const next = stroke?.live ? strokeRetouch(stroke.points, stroke.offset) : handedOver;
+        if (!retouchLayer.paint(source, next)) return;
+        renderer.sourceChanged();
+        renderer.requestRender();
+        painting = true;
+        gpu.device.queue.onSubmittedWorkDone().then(() => {
+            painting = false;
+            queuePaint();
+        });
+    }
+
+    // Strokes are added in the order they were painted, however long each
+    // takes to find its source.
+    function finishStroke() {
+        const done = stroke;
+        stroke = null;
+        if (!done || !imagePayload || !onretouch) {
+            if (done?.live) queuePaint();
+            return;
+        }
+        const base = strokeRetouch(done.points, done.offset);
+        if (done.live) {
+            handedOver = base;
+            onretouch(base);
+            return;
+        }
+        const radius = retouchTool.radius;
+        const id = ++pendingId;
+        pending = [...pending, { id, points: done.points, radius }];
+        const image = source;
+        const emit = onretouch;
+        // A stroke belongs to the image it was painted on, so one opened since drops it.
+        const opened = imagePayload;
+        const stillOpen = () => imagePayload === opened && source === image;
+
+        queue = queue.then(async () => {
+            try {
+                if (!stillOpen()) return;
+                let finished = base;
+                if (!done.offset && image) {
+                    const found = await findSource(gpu.device, image, placeRetouch(base, image.width, image.height));
+                    if (!found || !stillOpen()) return;
+                    finished = { ...base, offset: [found[0] / image.width, found[1] / image.height] };
+                }
+                emit(finished);
+            } catch (e) {
+                console.error("Failed to find a source for the stroke:", e);
+            } finally {
+                pending = pending.filter((p) => p.id !== id);
+            }
+        });
+    }
+
+    const SPACE_CONTROLS = "button, a[href], select, summary, [role='button'], [role='checkbox'], [role='switch'], [role='menuitem'], [role='tab']";
+
+    function onBrushKey(e: KeyboardEvent) {
+        if (!brushing || isTextField(e.target)) return;
+        if (e.code === "Space") {
+            // A focused control keeps Space for itself.
+            if (e.target instanceof Element && e.target.closest(SPACE_CONTROLS)) {
+                spaceHeld = false;
+                return;
+            }
+            spaceHeld = e.type === "keydown";
+            e.preventDefault();
+        } else if (e.key === "Alt" && e.type === "keydown") {
+            // Stops the window menu taking the key on Windows.
+            e.preventDefault();
+        } else if (e.key === "Escape" && e.type === "keydown" && (stroke || resizing)) {
+            cancelStroke();
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }
+
+    $effect(() => {
+        if (!brushing) {
+            cancelStroke();
+            spaceHeld = false;
+        }
+    });
+
+    const toCss = (p: Point): Point => {
+        const [x, y] = apply(fromImage!, p);
+        return [x / dpr, y / dpr];
+    };
+
+    // The brush, in CSS pixels, while it is over the image.
+    let brushView = $derived.by(() => {
+        if (!brushing || !fromImage || !toImage || !layout || !imagePayload) return null;
+        const scale = layout.placement.scale / dpr;
+        const radius = retouchTool.radius * scale;
+        const anchor = resizing?.at ?? (spaceHeld || dragFrom ? null : hover);
+        const at = anchor ? apply(toImage, anchor) : null;
+        const offset = stroke ? stroke.offset : retouchTool.offset;
+        const drawing = stroke && !stroke.live ? [{ points: stroke.points, radius: retouchTool.radius }] : [];
+        const strokes = [...pending, ...drawing];
+        return {
+            cursor: anchor ? ([anchor[0] / dpr, anchor[1] / dpr] as Point) : null,
+            radius,
+            feather: retouchTool.feather / 100,
+            source: at && offset ? toCss([at[0] + offset[0], at[1] + offset[1]]) : null,
+            picked: retouchTool.pickedSource ? toCss(retouchTool.pickedSource) : null,
+            strokes: strokes.map((s) => ({ points: s.points.map(toCss), radius: s.radius * scale })),
+        };
+    });
 
     $effect(() => {
         if (!canvas) return;
@@ -497,7 +752,14 @@
         window.addEventListener("gesturechange", onGestureChange, active);
         window.addEventListener("gestureend", onGestureEnd, active);
         window.addEventListener("pointermove", onWindowPointer);
+        window.addEventListener("keydown", onBrushKey, true);
+        window.addEventListener("keyup", onBrushKey, true);
+        const releaseSpace = () => (spaceHeld = false);
+        window.addEventListener("blur", releaseSpace);
         return () => {
+            window.removeEventListener("keydown", onBrushKey, true);
+            window.removeEventListener("keyup", onBrushKey, true);
+            window.removeEventListener("blur", releaseSpace);
             canvas.removeEventListener("wheel", onWheel);
             window.removeEventListener("gesturestart", onGestureStart);
             window.removeEventListener("gesturechange", onGestureChange);
@@ -516,16 +778,27 @@
 >
     <canvas
         bind:this={canvas}
-        class:panning
+        class:panning={panning && (!brushing || spaceHeld)}
         class:dragging={dragFrom !== null || loupeGrab !== null}
         class:placing={loupe.picking}
+        class:brushing={brushing && !spaceHeld && !dragFrom}
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
         onpointerup={onPointerUp}
-        onpointercancel={onPointerUp}
+        onpointercancel={() => {
+            cancelStroke();
+            onPointerUp();
+        }}
+        onpointerleave={() => (hover = null)}
+        oncontextmenu={(e) => {
+            if (brushing) e.preventDefault();
+        }}
     ></canvas>
     {#if layout}
         {@render overlay?.()}
+    {/if}
+    {#if brushView}
+        <RetouchBrush {...brushView} />
     {/if}
     {#if loupeSquare}
         <div
@@ -559,6 +832,10 @@
 
     canvas.placing {
         cursor: crosshair;
+    }
+
+    canvas.brushing {
+        cursor: none;
     }
 
     canvas.dragging {

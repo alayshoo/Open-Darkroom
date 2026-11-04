@@ -24,6 +24,7 @@ fn render(img: &Rgba16Image, sliders: &SlidersPayload, crop: &CropPayload, chunk
         4,
         sliders,
         crop,
+        &[],
         &SourceSpace::default(),
         OutputSpace::Srgb,
         8,

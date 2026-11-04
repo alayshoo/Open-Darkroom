@@ -13,6 +13,7 @@ use crate::export_encoding::{encode_and_save, ExportFormat, ExportSettings};
 use crate::crop::CropPayload;
 use crate::export_rendering::{render_cropped_image, SlidersPayload};
 use crate::image_opening::ImageState;
+use crate::retouch::RetouchPayload;
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ pub(crate) async fn export_image(
     state: tauri::State<'_, ImageState>,
     sliders: SlidersPayload,
     crop: CropPayload,
+    retouch: Vec<RetouchPayload>,
     settings: ExportSettings,
 ) -> Result<(), String> {
     println!(
@@ -83,6 +85,7 @@ pub(crate) async fn export_image(
         channels,
         &sliders,
         &crop,
+        &retouch,
         &space,
         settings.output_space,
         bit_depth,
