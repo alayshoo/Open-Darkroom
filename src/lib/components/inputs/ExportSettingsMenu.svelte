@@ -19,17 +19,19 @@
     // What the format last defaulted from. A plain variable rather than state:
     // it is bookkeeping for the effect below, and tracking it would make the
     // effect retrigger on its own write.
-    let lastDefaultedFor = `${settings.format}:${exportBitDepth(settings)}`;
+    // Keyed on whether the depth is past 8 bits, so dragging a depth slider
+    // does not keep overriding a space chosen by hand.
+    const defaultingKey = () => `${settings.format}:${exportBitDepth(settings) > 8}`;
+    let lastDefaultedFor = defaultingKey();
 
     // Changing format or bit depth re-picks the space, so 8-bit lands on sRGB
-    // and 16-bit on the working space without anyone having to think about
-    // it. An explicit choice then stands until the format moves again.
+    // and deeper files on the working space without anyone having to think
+    // about it. An explicit choice then stands until the format moves again.
     $effect(() => {
-        const bitDepth = exportBitDepth(settings);
-        const key = `${settings.format}:${bitDepth}`;
+        const key = defaultingKey();
         if (key === lastDefaultedFor) return;
         lastDefaultedFor = key;
-        settings.outputSpace = defaultOutputSpace(bitDepth);
+        settings.outputSpace = defaultOutputSpace(exportBitDepth(settings));
     });
 </script>
 
@@ -175,21 +177,22 @@
                     Lossy
                 </button>
             </div>
-            <div class="format-row flex flex-row gap-2">
-                <button
-                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-                    class:active={settings.jxlBitDepth === 8}
-                    onclick={() => (settings.jxlBitDepth = 8)}
-                >
-                    {isRgb ? "RGB" : "Greyscale"} 8-bit
-                </button>
-                <button
-                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
-                    class:active={settings.jxlBitDepth === 16}
-                    onclick={() => (settings.jxlBitDepth = 16)}
-                >
-                    {isRgb ? "RGB" : "Greyscale"} 16-bit
-                </button>
+        </div>
+        <div class="setting flex flex-col gap-1.5">
+            <div class="setting-header flex justify-between items-baseline">
+                <span class="setting-label">{isRgb ? "RGB" : "Greyscale"} bit depth</span>
+                <span class="setting-value">{settings.jxlBitDepth}-bit</span>
+            </div>
+            <SingleValSliderInt
+                min={8}
+                max={16}
+                step={1}
+                defaultValue={16}
+                bind:value={settings.jxlBitDepth}
+                ></SingleValSliderInt>
+            <div class="setting-hints flex justify-between -mt-2">
+                <span>Small</span>
+                <span>Smooth gradients</span>
             </div>
         </div>
         {#if !settings.jxlLossless}

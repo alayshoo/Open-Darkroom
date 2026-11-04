@@ -17,7 +17,8 @@ pub struct JxlOptions {
     pub quality: u8,
     /// Encoder effort, 1 (fastest) – 9 (smallest).
     pub effort: u8,
-    /// 8 or 16 bits per sample.
+    /// Bits per sample stored in the file, 8 – 16. The input is 8-bit at 8 and
+    /// 16-bit above, which libjxl rescales to this depth.
     pub bit_depth: u8,
     pub greyscale: bool,
 }
@@ -63,7 +64,8 @@ pub fn distance_from_quality(quality: u8) -> f32 {
     unsafe { JxlEncoderDistanceFromQuality(f32::from(quality.clamp(1, 100))) }
 }
 
-/// Encode RGB samples (8-bit, or 16-bit little-endian) to a JPEG XL file.
+/// Encode RGB samples (8-bit, or 16-bit little-endian for depths above 8) to a
+/// JPEG XL file.
 pub fn encode_jxl(
     rgb_bytes: Vec<u8>,
     width: u32,
@@ -74,7 +76,7 @@ pub fn encode_jxl(
 ) -> Result<(), String> {
     let bytes_per_sample = match options.bit_depth {
         8 => 1,
-        16 => 2,
+        9..=16 => 2,
         other => return Err(format!("Unsupported JPEG XL bit depth: {other}")),
     };
 

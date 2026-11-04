@@ -38,6 +38,7 @@ tauri-plugin-store = "2.4.4"
 lcms2 = { version = "6.2.0", features = ["static"] }
 rawler = "0.8"
 jxl-sys = "0.1.12"
+png = "0.18"
 
 [dev-dependencies]
 jxl-oxide = { version = "0.12.6", features = ["lcms2"] }

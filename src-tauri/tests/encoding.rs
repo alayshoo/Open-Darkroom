@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use image::GenericImageView;
 
-use open_darkroom_lib::export_encoding::{encode_and_save, ExportFormat, ExportSettings};
+use open_darkroom_lib::export_encoding::{
+    encode_and_save, encode_and_save_with_progress, ExportFormat, ExportSettings,
+};
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::output_space::OutputSpace;
 
@@ -491,15 +493,75 @@ fn jxl_lossy_keeps_the_grain_and_is_smaller_than_lossless() {
     );
 }
 
+/// Depths between 8 and 16 take 16-bit input and store it requantised, so the
+/// file must hold exactly the input rounded to that many bits.
+#[test]
+fn jxl_lossless_at_twelve_bits_keeps_twelve_bits() {
+    let (w, h) = (23u32, 9);
+    let source = grainy16(w, h);
+    let scratch = Scratch::new("jxl12", "jxl");
+
+    let mut s = settings(ExportFormat::Jxl);
+    s.jxl_bit_depth = 12;
+    assert_eq!(s.bit_depth(), 16, "a 12-bit JPEG XL is rendered at 16");
+    encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+
+    let image = jxl_oxide::JxlImage::builder().open(scratch.path()).expect("decode");
+    assert_eq!(image.image_header().metadata.bit_depth.bits_per_sample(), 12);
+
+    let (_, _, _, decoded) = decode_jxl(scratch.path(), 4095.0);
+    let worst = source
+        .chunks_exact(2)
+        .map(|c| (f64::from(u16::from_le_bytes([c[0], c[1]])) * 4095.0 / 65535.0).round() as i32)
+        .zip(&decoded)
+        .map(|(expected, &got)| (expected - i32::from(got)).abs())
+        .max()
+        .unwrap();
+    assert!(worst <= 1, "12-bit samples drifted by up to {worst} codes");
+}
+
 #[test]
 fn an_unsupported_jxl_bit_depth_is_reported() {
     let scratch = Scratch::new("jxlbad", "jxl");
     let mut s = settings(ExportFormat::Jxl);
-    s.jxl_bit_depth = 12;
+    s.jxl_bit_depth = 17;
 
     let err = encode_and_save(rgb8(4, 4), 4, 4, &s, scratch.path())
-        .expect_err("12-bit JPEG XL input is not supported");
-    assert!(err.contains("12"), "error should name the bit depth: {err}");
+        .expect_err("17-bit JPEG XL is not supported");
+    assert!(err.contains("17"), "error should name the bit depth: {err}");
+}
+
+// ── Encode progress ───────────────────────────────────────────────────────────
+
+/// The formats that report progress must climb to completion, so the bar's
+/// encoding phase ends where the file does.
+#[test]
+fn png_and_tiff_report_progress_up_to_completion() {
+    // Large enough for TIFF to need several strips.
+    let (w, h) = (600u32, 1000);
+
+    for (format, ext) in [(ExportFormat::Png, "png"), (ExportFormat::Tiff, "tiff")] {
+        let scratch = Scratch::new(&format!("progress-{ext}"), ext);
+        let mut seen = Vec::new();
+        encode_and_save_with_progress(
+            rgb8(w, h),
+            w,
+            h,
+            &settings(format),
+            scratch.path(),
+            &mut |p| seen.push(p),
+        )
+        .expect("encode");
+
+        assert!(seen.len() > 1, "{format:?} reported {seen:?}");
+        assert!(seen.windows(2).all(|p| p[1] >= p[0]), "{format:?} went backwards: {seen:?}");
+        assert_eq!(*seen.last().unwrap(), 1.0, "{format:?} did not finish at 100%");
+        assert_eq!(
+            image::open(scratch.path()).expect("decode").to_rgb8().into_raw(),
+            rgb8(w, h),
+            "{format:?} must stay lossless when written in pieces"
+        );
+    }
 }
 
 // ── Failure modes ─────────────────────────────────────────────────────────────
