@@ -32,7 +32,7 @@ ONLY use this skill when the user prompts you. Invoking it is explicit permissio
 
    MSI needs a plain `major.minor.patch` with numbers only, no `-beta` style suffix.
 
-4. **Write the changelog.** Add a section for the new version to the top of `CHANGELOG.md`, above the previous release, following the format of the sections already there:
+4. **Write the changelog.** The release workflow uses this section as the GitHub release notes. Add a section for the new version to the top of `CHANGELOG.md`, above the previous release, following the format of the sections already there:
    - A `## [X.Y.Z] - YYYY-MM-DD` heading with today's date, and a `[X.Y.Z]: https://github.com/alayshoo/Open-Darkroom/compare/vPREV...vX.Y.Z` link added to the top of the link list at the foot of the file.
    - Entries grouped under `### Added`, `### Changed`, `### Fixed` and `### Removed`, leaving out any group with nothing in it.
    - Work out what changed from `git log origin/release..origin/main`, reading the commit bodies and the merged pull requests, not just the subject lines.
