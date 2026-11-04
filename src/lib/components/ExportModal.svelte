@@ -28,7 +28,7 @@
 </script>
 
 {#if visible}
-    <div class="overlay fixed z-9999 flex items-center justify-center">
+    <div class="overlay fixed z-1000 flex items-center justify-center">
         <div class="modal flex flex-col gap-3.5 px-9 py-7 rounded-[10px]">
             <p class="label m-0">Exporting… {Math.round(progress * 100)}%</p>
             <div class="track w-full h-1 rounded-[2px]">

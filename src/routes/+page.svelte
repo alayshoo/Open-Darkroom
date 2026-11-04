@@ -954,6 +954,7 @@
     pasteAdjustments={handlePasteAdjustments}
     resetAdjustments={handleResetAdjustments}
     openSettings={(section) => settings.show(section)}
+    busy={showExportModal}
 ></TitleBar>
 <!-- Shared by both modes, so the two sets of controls stay one and the same. -->
 {#snippet unsharpMask()}
