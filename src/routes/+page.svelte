@@ -1127,26 +1127,30 @@
             class:dimmed={!imagePayload}
             inert={!imagePayload}
         >
-            <CropButton active={isCropping} ontoggle={toggleCrop} />
-            <CropTools
-                visible={isCropping}
-                bind:straightening={isStraightening}
-                bind:aspectMenuOpen
-                aspect={aspectLock}
-                aspectRatio={lockedAspect}
-                canReset={!isFullFrame(draftCrop)}
-                onturn={turnDraft}
-                onflip={flipDraft}
-                onaspect={setAspect}
-                oncustom={() => (customAspectOpen = true)}
-                onreset={resetDraft}
-            />
-            <RetouchTools disabled={!canRetouch} ontoggle={toggleRetouch} />
-            <PresetsButton
-                active={presets.open}
-                disabled={isCropping}
-                ontoggle={() => presets.toggle()}
-            />
+            <div class="crop-group relative">
+                <CropButton active={isCropping} ontoggle={toggleCrop} />
+                <CropTools
+                    visible={isCropping}
+                    bind:straightening={isStraightening}
+                    bind:aspectMenuOpen
+                    aspect={aspectLock}
+                    aspectRatio={lockedAspect}
+                    canReset={!isFullFrame(draftCrop)}
+                    onturn={turnDraft}
+                    onflip={flipDraft}
+                    onaspect={setAspect}
+                    oncustom={() => (customAspectOpen = true)}
+                    onreset={resetDraft}
+                />
+            </div>
+            <div class="toolbar-rest flex flex-col items-center gap-1" class:away={isCropping} inert={isCropping}>
+                <RetouchTools disabled={!canRetouch} ontoggle={toggleRetouch} />
+                <PresetsButton
+                    active={presets.open}
+                    disabled={isCropping}
+                    ontoggle={() => presets.toggle()}
+                />
+            </div>
         </div>
         <div
             data-tauri-drag-region
@@ -2101,6 +2105,16 @@
         padding-right: 6px;
         gap: 4px;
         z-index: 1;
+    }
+
+    /* Fades out of the crop tools' way, and back once they have folded up. */
+    .toolbar-rest {
+        transition: opacity 0.18s ease 0.18s;
+    }
+
+    .toolbar-rest.away {
+        opacity: 0;
+        transition-delay: 0s;
     }
 
     /* At the foot of the icon column. The button's chip, inset 3px inside its
