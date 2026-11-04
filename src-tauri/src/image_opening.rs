@@ -671,7 +671,7 @@ pub(crate) async fn crop_histograms(
     // One pass at a time: overlapping rayon jobs nest on the workers' stacks
     // while they wait on each other, and enough of them overflow it.
     static BINNING: Mutex<()> = Mutex::new(());
-    let histograms = tauri::async_runtime::spawn_blocking(move || {
+    let histograms = tauri::async_runtime::spawn_blocking(move || -> Result<Histograms, String> {
         let _binning = BINNING.lock().unwrap_or_else(|e| e.into_inner());
         let view = crop_view(&crop, width, height);
         let mut histograms = compute_histograms_in(&pixels_u16, width, height, channels, &view, &bins);
