@@ -651,7 +651,7 @@ pub(crate) async fn crop_histograms(
 
     let strokes = retouch.unwrap_or_default();
     // Strokes are laid over the image on the GPU, so they need a device first.
-    let gpu = if strokes.is_empty() { None } else { Some(request_device("histogram_device").await?) };
+    let gpu = if strokes.is_empty() { None } else { Some(histogram_device().await?) };
 
     // One pass at a time: overlapping rayon jobs nest on the workers' stacks
     // while they wait on each other, and enough of them overflow it.
@@ -667,6 +667,22 @@ pub(crate) async fn crop_histograms(
         }
     })
     .await
-    .map_err(|e| e.to_string())??;
-    Ok(Response::new(histogram_bytes(&histograms)))
+    .map_err(|e| e.to_string())?;
+    // A failed pass may mean the device was lost, so the next one starts afresh.
+    if histograms.is_err() {
+        *HISTOGRAM_DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    Ok(Response::new(histogram_bytes(&histograms?)))
+}
+
+/// The device the retouched histograms are binned on, made the first time one is needed.
+static HISTOGRAM_DEVICE: Mutex<Option<(wgpu::Device, wgpu::Queue)>> = Mutex::new(None);
+
+async fn histogram_device() -> Result<(wgpu::Device, wgpu::Queue), String> {
+    if let Some(gpu) = HISTOGRAM_DEVICE.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        return Ok(gpu);
+    }
+    let gpu = request_device("histogram_device").await?;
+    // Two first requests may race; the device stored first is the one kept.
+    Ok(HISTOGRAM_DEVICE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(gpu).clone())
 }
