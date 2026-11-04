@@ -16,6 +16,18 @@
 		onclear?: () => void;
 	} = $props();
 
+	const altKey = typeof navigator !== "undefined" && /Mac/.test(navigator.platform) ? "⌥" : "Alt";
+
+	// The narrowest each slider gets with the hint beside them; any less and
+	// the hint gives way. GAP is the spacing between the bar's controls.
+	const SLIDER_ROOM = 180;
+	const GAP = 28;
+	let fillWidth = $state(0);
+	let buttonsWidth = $state(0);
+	// Measured even while suppressed, so it is known when there is room again.
+	let hintWidth = $state(0);
+	let hintShown = $derived(fillWidth >= 3 * SLIDER_ROOM + 4 * GAP + buttonsWidth + hintWidth);
+
 	// Held while the bar slides shut, so its title does not blank mid-way.
 	let shown = $state<"heal" | "clone">("heal");
 	$effect(() => {
@@ -25,64 +37,73 @@
 
 <div class="retouch-bar" class:open inert={!open}>
 	<div class="band"></div>
-	<div class="row flex items-center" role="group" aria-label="{shown === 'heal' ? 'Heal' : 'Clone'} brush">
+	<div class="row flex items-center" style:--gap="{GAP}px" role="group" aria-label="{shown === 'heal' ? 'Heal' : 'Clone'} brush">
 		<span class="title shrink-0">{shown === "heal" ? "Heal" : "Clone"}</span>
-		<div class="slider">
-			<SingleValSliderGroup
-				bind:value={retouchTool.radius}
-				defaultValue={12}
-				name="Size"
-				unit="px"
-				min={MIN_BRUSH_RADIUS}
-				max={150}
-				allowOverflow
-				hardMin={MIN_BRUSH_RADIUS}
-				hardMax={MAX_BRUSH_RADIUS}
-				decimalPlaces={0}
-				dragStep={1}
-				sliderStep={1}
-				keyboardStep={1}
-			/>
-		</div>
-		<div class="slider">
-			<SingleValSliderGroup
-				bind:value={retouchTool.feather}
-				defaultValue={50}
-				name="Feather"
-				unit="%"
-				min={0}
-				max={100}
-				decimalPlaces={0}
-				dragStep={1}
-				sliderStep={1}
-				keyboardStep={1}
-			/>
-		</div>
-		<div class="slider">
-			<SingleValSliderGroup
-				bind:value={retouchTool.opacity}
-				defaultValue={100}
-				name="Opacity"
-				unit="%"
-				min={1}
-				max={100}
-				decimalPlaces={0}
-				dragStep={1}
-				sliderStep={1}
-				keyboardStep={1}
-			/>
-		</div>
-		<div class="buttons flex shrink-0 items-center gap-2">
-			<div class="well">
-				<GlassButton
-					label="Auto source"
-					disabled={!retouchTool.hasSource}
-					onclick={() => retouchTool.resetSource()}
-				>
-					<span class="glyph absolute">A</span>
-				</GlassButton>
+		<div class="fill relative flex flex-1 items-center" bind:clientWidth={fillWidth}>
+			<div class="sliders flex flex-1 items-center">
+				<div class="slider">
+					<SingleValSliderGroup
+						bind:value={retouchTool.radius}
+						defaultValue={12}
+						name="Size"
+						unit="px"
+						min={MIN_BRUSH_RADIUS}
+						max={150}
+						allowOverflow
+						hardMin={MIN_BRUSH_RADIUS}
+						hardMax={MAX_BRUSH_RADIUS}
+						decimalPlaces={0}
+						dragStep={1}
+						sliderStep={1}
+						keyboardStep={1}
+					/>
+				</div>
+				<div class="slider">
+					<SingleValSliderGroup
+						bind:value={retouchTool.feather}
+						defaultValue={50}
+						name="Feather"
+						unit="%"
+						min={0}
+						max={100}
+						decimalPlaces={0}
+						dragStep={1}
+						sliderStep={1}
+						keyboardStep={1}
+					/>
+				</div>
+				<div class="slider">
+					<SingleValSliderGroup
+						bind:value={retouchTool.opacity}
+						defaultValue={100}
+						name="Opacity"
+						unit="%"
+						min={1}
+						max={100}
+						decimalPlaces={0}
+						dragStep={1}
+						sliderStep={1}
+						keyboardStep={1}
+					/>
+				</div>
 			</div>
-			<RevertButton visible={strokes > 0} label="Clear all" onrevert={() => onclear?.()} />
+			<div class="buttons flex shrink-0 items-center gap-2" bind:clientWidth={buttonsWidth}>
+				<div class="well">
+					<GlassButton
+						label="Auto source"
+						disabled={!retouchTool.hasSource}
+						onclick={() => retouchTool.resetSource()}
+					>
+						<span class="glyph absolute">A</span>
+					</GlassButton>
+				</div>
+				<RevertButton visible={strokes > 0} label="Clear all" onrevert={() => onclear?.()} />
+			</div>
+			<p class="hint shrink-0" class:suppressed={!hintShown} aria-hidden={!hintShown} bind:clientWidth={hintWidth}>
+				{altKey}-click picks a source<br />
+				{altKey}-drag sizes, and softens upwards<br />
+				Space pans
+			</p>
 		</div>
 	</div>
 </div>
@@ -141,7 +162,7 @@
 
 	.row {
 		position: relative;
-		gap: 28px;
+		gap: var(--gap);
 		height: 52px;
 		padding: 0 28px 4px 76px;
 		pointer-events: auto;
@@ -155,10 +176,30 @@
 		color: var(--color1);
 	}
 
+	.fill,
+	.sliders {
+		gap: var(--gap);
+		min-width: 0;
+	}
+
 	.slider {
-		flex: 1;
+		flex: 1 1 0;
 		min-width: 120px;
-		max-width: 220px;
+	}
+
+	.hint {
+		margin: 0;
+		font: 11px var(--font-ui);
+		line-height: 1.4;
+		white-space: nowrap;
+		color: var(--color3);
+	}
+
+	/* Out of the row but still laid out, so its width stays measured. */
+	.hint.suppressed {
+		position: absolute;
+		right: 0;
+		visibility: hidden;
 	}
 
 	/* The same flat black well as the auto levels button. */
