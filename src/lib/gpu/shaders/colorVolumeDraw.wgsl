@@ -9,7 +9,7 @@
 //!include "chunks/gamutGrids.wgsl"
 
 @group(0) @binding(0) var<storage, read> volBins: array<u32, VOL_TOTAL>;
-@group(0) @binding(1) var<storage, read> scale:   array<u32, 2>;
+@group(0) @binding(1) var<storage, read> scale:   array<u32, 1>;
 
 // Where the box is being looked at from.
 struct Camera {
@@ -157,7 +157,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
       if (count == 0u) { continue; }
 
       // The first occupied cell is the surface; sparse cells are drawn fainter.
-      let density = log(1.0 + f32(count)) / log(1.0 + f32(scale[1]));
+      let density = log(1.0 + f32(count)) / log(1.0 + f32(scale[0]));
       colour = cell_colour(cell) * relief(t, span);
       alpha = clamp(0.35 + 2.2 * density, 0.0, 1.0);
       hit = t;

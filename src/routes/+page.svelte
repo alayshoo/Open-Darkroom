@@ -571,6 +571,8 @@
 
     async function handleExport() {
         isExportPending = true;
+        // A focused control would otherwise keep taking keys under the overlay.
+        (document.activeElement as HTMLElement)?.blur();
         const unlisten = await listen("export:started", () => {
             showExportModal = true;
         });
@@ -972,6 +974,11 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        // Nothing but the window itself answers while an export runs.
+        if (isExportPending) {
+            e.preventDefault();
+            return;
+        }
         // The preset dialog takes the keyboard while it is up.
         if (presetDialog) {
             if (e.key === "Escape") {
@@ -1020,6 +1027,7 @@
     pasteAdjustments={handlePasteAdjustments}
     resetAdjustments={handleResetAdjustments}
     openSettings={(section) => settings.show(section)}
+    busy={showExportModal}
 ></TitleBar>
 <!-- Shared by both modes, so the two sets of controls stay one and the same. -->
 {#snippet unsharpMask()}

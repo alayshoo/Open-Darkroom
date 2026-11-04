@@ -32,7 +32,7 @@ import { sharpnessIsVisible, sharpnessReach } from "./sharpnessVisibility";
 import { createFrameTimer } from "./pipelines/frameTimer";
 import { debugStats } from "./debugStats.svelte";
 import { previewDebug } from "./previewDebug.svelte";
-import { createOutputSpaceBuffer } from "./outputSpaceBuffer";
+import { createOutputSpaceBuffer, type GamutMask } from "./outputSpaceBuffer";
 import type { OutputSpaceId } from "./outputSpace";
 import { CROP_VIEW_BUFFER_SIZE, EVERYWHERE, cropViewToFloats } from "$lib/types/crop";
 import {
@@ -364,6 +364,13 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     // stage reads it, so what the chain holds stays good.
     function setOutputSpace(destination: OutputSpaceId, proof: OutputSpaceId | null) {
         outputSpace.set(destination, proof);
+        loupeStale = true;
+    }
+
+    // The pixels painted as outside a gamut. Read by the encode stage only, like
+    // the destination above.
+    function setGamutMask(mask: GamutMask | null) {
+        outputSpace.setMask(mask);
         loupeStale = true;
     }
 
@@ -748,7 +755,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     setOutputSpace(gpu.displaySpace, null);
 
     return {
-        loadImage, setSource, sourceChanged: markStale, setSliders, setOutputSpace, setToneMap, setCurves, setFrame, setLoupe,
+        loadImage, setSource, sourceChanged: markStale, setSliders, setOutputSpace, setGamutMask, setToneMap, setCurves,
+        setFrame, setLoupe,
         requestRender, destroy,
     };
 }

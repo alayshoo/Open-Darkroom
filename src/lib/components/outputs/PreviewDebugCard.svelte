@@ -148,9 +148,7 @@
         margin: 0 0 0.4rem;
         font-size: 10.5px;
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(255, 255, 255, 0.6);
     }
 
     .map {

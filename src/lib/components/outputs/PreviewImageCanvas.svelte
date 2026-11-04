@@ -281,6 +281,12 @@
 
     $effect(() => {
         if (!renderer) return;
+        renderer.setGamutMask(colorSpaceDebug.activeMask);
+        renderer.requestRender();
+    });
+
+    $effect(() => {
+        if (!renderer) return;
         renderer.setToneMap(colorSpaceDebug.toneMap);
         renderer.requestRender();
     });

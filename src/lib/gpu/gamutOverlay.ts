@@ -66,7 +66,8 @@ export interface GamutOverlayState {
     destination: OutputSpaceId;
 }
 
-function packTint(hex: string): number {
+/** A `#rrggbb` tint as the 0xRRGGBB word the shaders unpack. */
+export function packTint(hex: string): number {
     return parseInt(hex.slice(1), 16) & 0xffffff;
 }
 

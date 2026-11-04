@@ -88,3 +88,12 @@ fn inside_gamut(space: GamutSpace, xy: vec2f) -> bool {
   );
   return all(d >= vec3f(-GAMUT_TOLERANCE)) || all(d <= vec3f(GAMUT_TOLERANCE));
 }
+
+// A 0xRRGGBB tint as a colour.
+fn unpack_tint(packed: u32) -> vec3f {
+  return vec3f(
+    f32((packed >> 16u) & 255u),
+    f32((packed >> 8u) & 255u),
+    f32(packed & 255u),
+  ) / 255.0;
+}
