@@ -16,11 +16,9 @@
         settings.isBw = !isRgb;
     });
 
-    // What the format last defaulted from. A plain variable rather than state:
-    // it is bookkeeping for the effect below, and tracking it would make the
-    // effect retrigger on its own write.
-    // Keyed on whether the depth is past 8 bits, so dragging a depth slider
-    // does not keep overriding a space chosen by hand.
+    // What the format last defaulted from, keyed on depth past 8 bits so a depth
+    // slider does not override a hand-picked space. A plain variable: tracking
+    // it would make the effect below retrigger on its own write.
     const defaultingKey = () => `${settings.format}:${exportBitDepth(settings) > 8}`;
     let lastDefaultedFor = defaultingKey();
 

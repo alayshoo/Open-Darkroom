@@ -11,7 +11,7 @@
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use image::codecs::jpeg::JpegEncoder;
 use image::ImageEncoder;
@@ -135,6 +135,9 @@ pub fn encode_and_save(
 
 /// As [`encode_and_save`], calling `on_progress` with the fraction written so
 /// far for the formats where [`ExportSettings::reports_encode_progress`] holds.
+///
+/// The file is written next to `path` and moved over it only once complete, so
+/// a failed export never leaves a partial file or destroys the one it replaces.
 pub fn encode_and_save_with_progress(
     rgb_bytes: Vec<u8>,
     width: u32,
@@ -143,10 +146,32 @@ pub fn encode_and_save_with_progress(
     path: &Path,
     on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
+    let partial = partial_path(path);
+    let written = encode(rgb_bytes, width, height, settings, &partial, on_progress)
+        .and_then(|()| std::fs::rename(&partial, path).map_err(|e| e.to_string()));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
+}
+
+/// A hidden sibling of `path`, on the same volume so the final rename is atomic.
+fn partial_path(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    path.with_file_name(format!(".{name}.partial"))
+}
+
+fn encode(
+    rgb_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    settings: &ExportSettings,
+    path: &Path,
+    on_progress: &mut dyn FnMut(f32),
+) -> Result<(), String> {
     // Built once here rather than per encoder: the profile describes the render,
-    // which is the same whatever container it ends up in. The exception is a
-    // black-and-white TIFF, the one output written with a single sample per
-    // pixel, which needs a profile naming a single channel.
+    // whatever container it ends up in. Greyscale output, written with a single
+    // sample per pixel, needs a profile naming a single channel.
     let greyscale = settings.greyscale();
     let icc = settings.output_space.icc(greyscale)?;
 

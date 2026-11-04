@@ -520,6 +520,31 @@ fn jxl_lossless_at_twelve_bits_keeps_twelve_bits() {
     assert!(worst <= 1, "12-bit samples drifted by up to {worst} codes");
 }
 
+/// Past 2048 pixels libjxl pulls the input in rectangles and may encode it in
+/// independent groups; neither may change a lossless result.
+#[test]
+fn a_large_jxl_round_trips_exactly_when_read_in_pieces() {
+    let (w, h) = (2100u32, 1100);
+    let source = grainy16(w, h);
+
+    for is_bw in [false, true] {
+        let scratch = Scratch::new(&format!("jxl-large-{is_bw}"), "jxl");
+        let mut s = settings(ExportFormat::Jxl);
+        s.jxl_bit_depth = 16;
+        s.jxl_effort = 3;
+        s.is_bw = is_bw;
+        encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+
+        let expected: Vec<u16> = source
+            .chunks_exact(if is_bw { 6 } else { 2 })
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let (dw, dh, channels, decoded) = decode_jxl(scratch.path(), 65535.0);
+        assert_eq!((dw, dh, channels), (w, h, if is_bw { 1 } else { 3 }));
+        assert!(decoded == expected, "large lossless JPEG XL (BW: {is_bw}) is not exact");
+    }
+}
+
 #[test]
 fn an_unsupported_jxl_bit_depth_is_reported() {
     let scratch = Scratch::new("jxlbad", "jxl");
@@ -575,6 +600,40 @@ fn an_unsupported_tiff_bit_depth_is_reported() {
     let err = encode_and_save(rgb8(4, 4), 4, 4, &s, scratch.path())
         .expect_err("12-bit TIFF is not supported");
     assert!(err.contains("12"), "error should name the bit depth: {err}");
+}
+
+fn partial_file_of(path: &std::path::Path) -> PathBuf {
+    let name = path.file_name().unwrap().to_string_lossy();
+    path.with_file_name(format!(".{name}.partial"))
+}
+
+#[test]
+fn a_failed_export_leaves_the_file_it_would_replace_untouched() {
+    for (format, ext) in [(ExportFormat::Png, "png"), (ExportFormat::Jxl, "jxl")] {
+        let scratch = Scratch::new(&format!("keep-{ext}"), ext);
+        std::fs::write(scratch.path(), b"earlier export").unwrap();
+
+        // One byte short of a 4 × 4 image.
+        let mut short = rgb8(4, 4);
+        short.pop();
+        encode_and_save(short, 4, 4, &settings(format), scratch.path())
+            .expect_err("a short buffer must fail");
+
+        assert_eq!(std::fs::read(scratch.path()).unwrap(), b"earlier export", "{format:?}");
+        assert!(!partial_file_of(scratch.path()).exists(), "{format:?} left a partial file");
+    }
+}
+
+#[test]
+fn a_successful_export_replaces_the_file_and_cleans_up() {
+    let scratch = Scratch::new("replace", "png");
+    std::fs::write(scratch.path(), b"earlier export").unwrap();
+
+    encode_and_save(rgb8(4, 4), 4, 4, &settings(ExportFormat::Png), scratch.path())
+        .expect("encode");
+
+    assert_eq!(image::open(scratch.path()).expect("decode").to_rgb8().into_raw(), rgb8(4, 4));
+    assert!(!partial_file_of(scratch.path()).exists());
 }
 
 // ── The embedded profile ──────────────────────────────────────────────────────

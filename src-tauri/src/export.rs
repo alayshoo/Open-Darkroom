@@ -112,14 +112,21 @@ pub(crate) async fn export_image(
     );
 
     send(plan.encoding(settings.reports_encode_progress()));
-    encode_and_save_with_progress(
-        rendered.rgb,
-        rendered.width,
-        rendered.height,
-        &settings,
-        &path,
-        &mut |fraction| send(plan.encoded(fraction)),
-    )?;
+    // Encoding is CPU-bound and can run for minutes, so it stays off the async
+    // runtime's workers.
+    let encode_path = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        encode_and_save_with_progress(
+            rendered.rgb,
+            rendered.width,
+            rendered.height,
+            &settings,
+            &encode_path,
+            &mut |fraction| send(plan.encoded(fraction)),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     println!(
         "export: saved {} × {} → {} in {} ms total",
