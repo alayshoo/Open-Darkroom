@@ -189,9 +189,9 @@ describe("the retouch brushes", () => {
         paint([[0.2, 0.2]], { altKey: true });
         paint([[0.6, 0.6]]);
         await vi.waitFor(() => expect(history.stack).toHaveLength(1));
-        button("Automatic source (Alt-click picks one)").click();
+        button("Auto source").click();
         expect(retouchTool.hasSource).toBe(false);
-        button("Clear all strokes").click();
+        button("Clear all").click();
         expect(history.stack.map((a) => a.type)).toEqual(["retouchAdd", "retouchClear"]);
     });
 });

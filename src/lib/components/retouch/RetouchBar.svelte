@@ -75,14 +75,14 @@
 		<div class="buttons flex shrink-0 items-center gap-2">
 			<div class="well">
 				<GlassButton
-					label="Automatic source (Alt-click picks one)"
+					label="Auto source"
 					disabled={!retouchTool.hasSource}
 					onclick={() => retouchTool.resetSource()}
 				>
 					<span class="glyph absolute">A</span>
 				</GlassButton>
 			</div>
-			<RevertButton visible={strokes > 0} label="Clear all strokes" onrevert={() => onclear?.()} />
+			<RevertButton visible={strokes > 0} label="Clear all" onrevert={() => onclear?.()} />
 		</div>
 	</div>
 </div>
