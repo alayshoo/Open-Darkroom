@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { defaultOutputSpace, type ExportSettings } from "$lib/types/exportSettings";
+    import { defaultOutputSpace, exportBitDepth, type ExportSettings } from "$lib/types/exportSettings";
     import { OUTPUT_SPACE_IDS, OUTPUT_SPACE_LABELS } from "$lib/gpu/outputSpace";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import SingleValSliderInt from "./values/SingleValSliderInt.svelte";
@@ -19,16 +19,17 @@
     // What the format last defaulted from. A plain variable rather than state:
     // it is bookkeeping for the effect below, and tracking it would make the
     // effect retrigger on its own write.
-    let lastDefaultedFor = `${settings.format}:${settings.tiffBitDepth}`;
+    let lastDefaultedFor = `${settings.format}:${exportBitDepth(settings)}`;
 
     // Changing format or bit depth re-picks the space, so 8-bit lands on sRGB
-    // and a 16-bit TIFF on the working space without anyone having to think
-    // about it. An explicit choice then stands until the format moves again.
+    // and 16-bit on the working space without anyone having to think about
+    // it. An explicit choice then stands until the format moves again.
     $effect(() => {
-        const key = `${settings.format}:${settings.tiffBitDepth}`;
+        const bitDepth = exportBitDepth(settings);
+        const key = `${settings.format}:${bitDepth}`;
         if (key === lastDefaultedFor) return;
         lastDefaultedFor = key;
-        settings.outputSpace = defaultOutputSpace(settings.format, settings.tiffBitDepth);
+        settings.outputSpace = defaultOutputSpace(bitDepth);
     });
 </script>
 
@@ -156,6 +157,81 @@
         </div>
     {/if}
 
+    {#if settings.format === "jxl"}
+        <div class="setting flex flex-col gap-1.5">
+            <div class="format-row flex flex-row gap-2">
+                <button
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+                    class:active={settings.jxlLossless}
+                    onclick={() => (settings.jxlLossless = true)}
+                >
+                    Lossless
+                </button>
+                <button
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+                    class:active={!settings.jxlLossless}
+                    onclick={() => (settings.jxlLossless = false)}
+                >
+                    Lossy
+                </button>
+            </div>
+            <div class="format-row flex flex-row gap-2">
+                <button
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+                    class:active={settings.jxlBitDepth === 8}
+                    onclick={() => (settings.jxlBitDepth = 8)}
+                >
+                    {isRgb ? "RGB" : "Greyscale"} 8-bit
+                </button>
+                <button
+                    class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+                    class:active={settings.jxlBitDepth === 16}
+                    onclick={() => (settings.jxlBitDepth = 16)}
+                >
+                    {isRgb ? "RGB" : "Greyscale"} 16-bit
+                </button>
+            </div>
+        </div>
+        {#if !settings.jxlLossless}
+            <div class="setting flex flex-col gap-1.5">
+                <div class="setting-header flex justify-between items-baseline">
+                    <span class="setting-label">Quality</span>
+                    <span class="setting-value">{settings.jxlQuality}</span>
+                </div>
+                <SingleValSliderInt
+                    min={1}
+                    max={100}
+                    step={1}
+                    defaultValue={95}
+                    bind:value={settings.jxlQuality}
+                    stepAnimation={false}
+                    springy={false}
+                    ></SingleValSliderInt>
+                <div class="setting-hints flex justify-between -mt-2">
+                    <span>Low</span>
+                    <span>Keeps grain</span>
+                </div>
+            </div>
+        {/if}
+        <div class="setting flex flex-col gap-1.5">
+            <div class="setting-header flex justify-between items-baseline">
+                <span class="setting-label">Effort</span>
+                <span class="setting-value">{settings.jxlEffort}</span>
+            </div>
+            <SingleValSliderInt
+                min={1}
+                max={9}
+                step={1}
+                defaultValue={7}
+                bind:value={settings.jxlEffort}
+                ></SingleValSliderInt>
+            <div class="setting-hints flex justify-between -mt-2">
+                <span>Fast</span>
+                <span>Small</span>
+            </div>
+        </div>
+    {/if}
+
     <div class="rule h-0.25 shrink-0"></div>
 
     <div class="setting flex flex-col gap-1.5">
@@ -217,6 +293,14 @@
             onclick={() => (settings.format = "tiff")}
         >
             TIFF
+        </button>
+        <button
+            class="pill flex-1 px-0 py-1.25 border-0 rounded-[6px]"
+            class:active={settings.format === "jxl"}
+            title="JPEG XL"
+            onclick={() => (settings.format = "jxl")}
+        >
+            JXL
         </button>
     </div>
 </div>

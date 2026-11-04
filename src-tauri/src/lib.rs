@@ -12,6 +12,7 @@ pub mod full_resolution;
 pub mod export_rendering;
 pub mod shaders;
 pub mod export_encoding;
+pub mod jxl_encoding;
 mod export;
 mod presets;
 

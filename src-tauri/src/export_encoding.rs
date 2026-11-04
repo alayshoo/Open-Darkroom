@@ -1,7 +1,7 @@
 // src-tauri/src/export_encoding.rs
 //
 // File-format-specific encoding: takes raw RGB bytes from the GPU pipeline
-// and writes them to disk as PNG, JPEG, WebP, or TIFF with user-controlled
+// and writes them to disk as PNG, JPEG, WebP, TIFF or JPEG XL with user-controlled
 // quality settings.
 //
 // Every file is tagged with the profile of the space it was rendered into.
@@ -20,6 +20,7 @@ use tiff::encoder::colortype::{self, ColorType};
 use tiff::encoder::{TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
+use crate::jxl_encoding::{encode_jxl, JxlOptions};
 use crate::output_space::OutputSpace;
 
 // ── Export settings ───────────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ pub enum ExportFormat {
     Jpeg,
     Webp,
     Tiff,
+    Jxl,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -51,8 +53,33 @@ pub struct ExportSettings {
     pub webp_compression: u8,
     /// TIFF bit depth per channel: 8 or 16.
     pub tiff_bit_depth: u8,
-    /// Whether the image is in black-and-white mode (greyscale output for TIFF).
+    /// JPEG XL: encode losslessly when true.
+    pub jxl_lossless: bool,
+    /// JPEG XL lossy quality, 1 (lowest) – 100 (highest); 90 is visually lossless.
+    pub jxl_quality: u8,
+    /// JPEG XL encoder effort, 1 (fastest) – 9 (smallest).
+    pub jxl_effort: u8,
+    /// JPEG XL bit depth per channel: 8 or 16.
+    pub jxl_bit_depth: u8,
+    /// Whether the image is in black-and-white mode (greyscale output for TIFF
+    /// and JPEG XL).
     pub is_bw: bool,
+}
+
+impl ExportSettings {
+    /// Bits per channel the render has to produce for this format.
+    pub fn bit_depth(&self) -> u8 {
+        match self.format {
+            ExportFormat::Tiff => self.tiff_bit_depth,
+            ExportFormat::Jxl => self.jxl_bit_depth,
+            _ => 8,
+        }
+    }
+
+    /// Whether the file is written with a single channel.
+    fn greyscale(&self) -> bool {
+        self.is_bw && matches!(self.format, ExportFormat::Tiff | ExportFormat::Jxl)
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -69,7 +96,7 @@ pub fn encode_and_save(
     // which is the same whatever container it ends up in. The exception is a
     // black-and-white TIFF, the one output written with a single sample per
     // pixel, which needs a profile naming a single channel.
-    let greyscale = matches!(settings.format, ExportFormat::Tiff) && settings.is_bw;
+    let greyscale = settings.greyscale();
     let icc = settings.output_space.icc(greyscale)?;
 
     match settings.format {
@@ -77,6 +104,13 @@ pub fn encode_and_save(
         ExportFormat::Jpeg => encode_jpeg(rgb_bytes, width, height, settings.jpeg_quality, icc, path),
         ExportFormat::Webp => encode_webp(rgb_bytes, width, height, settings.webp_lossless, settings.webp_quality, settings.webp_compression, &icc, path),
         ExportFormat::Tiff => encode_tiff(rgb_bytes, width, height, settings.tiff_bit_depth, settings.is_bw, &icc, path),
+        ExportFormat::Jxl  => encode_jxl(rgb_bytes, width, height, &JxlOptions {
+            lossless: settings.jxl_lossless,
+            quality: settings.jxl_quality,
+            effort: settings.jxl_effort,
+            bit_depth: settings.jxl_bit_depth,
+            greyscale,
+        }, &icc, path),
     }
 }
 

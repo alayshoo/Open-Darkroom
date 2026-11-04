@@ -34,6 +34,7 @@ pub(crate) async fn export_image(
         ExportFormat::Jpeg => ("JPEG Image", &["jpg", "jpeg"]),
         ExportFormat::Webp => ("WebP Image", &["webp"]),
         ExportFormat::Tiff => ("TIFF Image", &["tiff", "tif"]),
+        ExportFormat::Jxl => ("JPEG XL Image", &["jxl"]),
     };
 
     let path = app
@@ -50,6 +51,7 @@ pub(crate) async fn export_image(
         ExportFormat::Jpeg => ensure_extension(path, "jpg"),
         ExportFormat::Webp => ensure_extension(path, "webp"),
         ExportFormat::Tiff => ensure_extension(path, "tiff"),
+        ExportFormat::Jxl => ensure_extension(path, "jxl"),
     };
 
     let (pixels_u16, width, height, channels, space) = {
@@ -66,10 +68,7 @@ pub(crate) async fn export_image(
 
     let t = Instant::now();
 
-    let bit_depth = match settings.format {
-        ExportFormat::Tiff => settings.tiff_bit_depth,
-        _ => 8,
-    };
+    let bit_depth = settings.bit_depth();
 
     let _ = app.emit("export:started", ());
 
