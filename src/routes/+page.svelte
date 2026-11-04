@@ -1202,8 +1202,10 @@
             <DebugStatsOverlay />
         {/if}
     </div>
+    <!-- Holds the side bar's room in the row; the bar itself only slides. -->
+    <div class="side-bar-space shrink-0" class:away={isRetouching}></div>
     <div
-        class="side-bar flex w-[23%] flex-col gap-3"
+        class="side-bar flex flex-col gap-3"
         class:away={isRetouching}
         inert={isRetouching}
         onpointerdowncapture={endLoupeOnPress}
@@ -2143,25 +2145,39 @@
         display: none;
     }
 
-    .side-bar {
-        min-width: 300px;
-        /* A faint lift so labels and values hold up over a bright image. */
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-        position: relative;
-        z-index: 10;
-        pointer-events: auto;
-        /* Back only once the brush bar has dropped away. */
+    /* While a brush is in hand it gives its room and its gap to the image.
+       Back only once the brush bar has dropped away. */
+    .side-bar-space {
+        width: max(23%, 300px);
         transition:
-            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s,
-            transform 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
+            width 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s,
+            margin-left 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
     }
 
-    /* Out past the window's right edge while a brush is in hand, giving its
-       room and its gap to the image. Pushed a little further so the panels'
-       shadows go with it. */
+    .side-bar-space.away {
+        width: 0;
+        margin-left: -12px;
+        transition-delay: 0s;
+    }
+
+    /* Over its space rather than in the row, so leaving moves it by transform
+       alone and never lays it out or repaints it. */
+    .side-bar {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: max(23%, 300px);
+        /* A faint lift so labels and values hold up over a bright image. */
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+        z-index: 10;
+        pointer-events: auto;
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
+    }
+
+    /* Past the window's right edge, far enough that the panels' shadows go too. */
     .side-bar.away {
-        margin-right: calc(-1 * max(23%, 300px) - 12px);
-        transform: translateX(40px);
+        transform: translateX(calc(100% + 52px));
         transition-delay: 0s;
     }
 
