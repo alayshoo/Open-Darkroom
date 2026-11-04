@@ -1,6 +1,6 @@
 <!-- src/lib/components/outputs/ColorSpacePanel.svelte -->
 <script lang="ts">
-    import { untrack } from "svelte";
+    import { onDestroy, untrack } from "svelte";
     import { type Sliders } from "$lib/types/imgParameters";
     import type { GPUCanvasLink, GPUImage } from "$lib/types/gpuTypes";
     import { getGPU } from "$lib/gpu/gpuInit";
@@ -168,6 +168,9 @@
         const observers = [observe(chromaticityCanvas), observe(volumeCanvas)];
         return () => observers.forEach((ro) => ro.disconnect());
     });
+
+    // A mask only lasts as long as the panel that set it.
+    onDestroy(() => (colorSpaceDebug.mask = null));
 
     // Link the canvases and create the pipeline once on mount. sRGB on both:
     // the plots are interface, drawn to sit beside the CSS around them.
@@ -590,8 +593,8 @@
         border-radius: 3px;
         background: linear-gradient(
             to right,
-            rgb(41, 10, 87),
-            rgb(168, 46, 115),
+            rgb(92, 56, 217),
+            rgb(217, 56, 140),
             rgb(250, 128, 38),
             rgb(255, 250, 209)
         );

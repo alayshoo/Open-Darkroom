@@ -111,9 +111,7 @@ function rgbToXyz(primaries: [number, number][], white: [number, number]): Matri
  * working space's applied, with no chromatic adaptation in between.
  */
 export function workingToDestination(id: OutputSpaceId): Float32Array {
-    const working = rgbToXyz(PRIMARIES[WORKING_SPACE], D65);
-    const destination = rgbToXyz(PRIMARIES[id], D65);
-    return new Float32Array(multiplyMat3(invertMat3(destination), working));
+    return spaceToSpace(WORKING_SPACE, id);
 }
 
 /**
@@ -121,9 +119,7 @@ export function workingToDestination(id: OutputSpaceId): Float32Array {
  * trip: into the space being proofed, and back out to carry on to the display.
  */
 export function destinationToWorking(id: OutputSpaceId): Float32Array {
-    const working = rgbToXyz(PRIMARIES[WORKING_SPACE], D65);
-    const destination = rgbToXyz(PRIMARIES[id], D65);
-    return new Float32Array(multiplyMat3(invertMat3(working), destination));
+    return spaceToSpace(id, WORKING_SPACE);
 }
 
 /** Linear RGB of one space → linear RGB of another, column-major. */

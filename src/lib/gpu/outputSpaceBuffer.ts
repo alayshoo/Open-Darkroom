@@ -9,7 +9,9 @@
 import type { GPUSession } from "$lib/types/gpuTypes";
 import {
     destinationToWorking,
+    PRIMARIES,
     spaceToSpace,
+    spaceToXyz,
     transferFor,
     workingToDestination,
     type OutputSpaceId,
@@ -17,10 +19,10 @@ import {
 
 /**
  * Three `mat3x3<f32>` of three 16-byte columns each, four u32, then the mask's
- * `mat3x3<f32>`. Must match `OUTPUT_SPACE_BYTES` in
+ * `mat3x3<f32>` and `vec3f`, padded to 16. Must match `OUTPUT_SPACE_BYTES` in
  * src-tauri/src/export_rendering.rs.
  */
-export const OUTPUT_SPACE_BUFFER_SIZE = 208;
+export const OUTPUT_SPACE_BUFFER_SIZE = 224;
 
 /** Where each field starts, in units of the view that writes it. */
 const TO_DESTINATION = 0;
@@ -31,6 +33,7 @@ const PROOF_WORD = 37;
 const MASK_WORD = 38;
 const MASK_TINT_WORD = 39;
 const TO_MASK = 40;
+const MASK_HEIGHTS = 52;
 
 /** MASK_ ids in chunks/outputTransform.wgsl. */
 const MASK_BEFORE = 1;
@@ -43,6 +46,20 @@ export interface GamutMask {
     tint: number;
     /** Test what the output transform produces rather than what it was given. */
     afterTransform: boolean;
+}
+
+/** Each primary's X+Y+Z, and the triangle's height in xy above the edge opposite it. */
+function triangleTerms(space: OutputSpaceId) {
+    const xyz = spaceToXyz(space);
+    const sums = [0, 1, 2].map((i) => xyz[i * 3] + xyz[i * 3 + 1] + xyz[i * 3 + 2]);
+    const p = PRIMARIES[space];
+    const heights = p.map(([x, y], i) => {
+        const [ax, ay] = p[(i + 1) % 3];
+        const [bx, by] = p[(i + 2) % 3];
+        const cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+        return Math.abs(cross) / Math.hypot(bx - ax, by - ay);
+    });
+    return { sums, heights };
 }
 
 export interface OutputSpaceBuffer {
@@ -100,12 +117,18 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
         if (mask) {
             words[MASK_WORD] = mask.afterTransform ? MASK_AFTER : MASK_BEFORE;
             words[MASK_TINT_WORD] = mask.tint & 0xffffff;
-            writeMatrix(
-                TO_MASK,
-                mask.afterTransform
-                    ? spaceToSpace(destination, mask.space)
-                    : workingToDestination(mask.space),
-            );
+
+            // Rows weighted by each primary's X+Y+Z, so the shader can find the
+            // chromaticity's distance from each edge as inside_gamut() does.
+            const toMask = mask.afterTransform
+                ? spaceToSpace(destination, mask.space)
+                : workingToDestination(mask.space);
+            const { sums, heights } = triangleTerms(mask.space);
+            for (let col = 0; col < 3; col++) {
+                for (let row = 0; row < 3; row++) toMask[col * 3 + row] *= sums[row];
+            }
+            writeMatrix(TO_MASK, toMask);
+            floats.set(heights, MASK_HEIGHTS);
         }
 
         gpu.device.queue.writeBuffer(buffer, 0, staging);

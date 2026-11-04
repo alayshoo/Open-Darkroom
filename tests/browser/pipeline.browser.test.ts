@@ -1078,10 +1078,11 @@ describe("the output space", () => {
   }
 
   it("declares a buffer matching the WGSL struct", () => {
-    // Three mat3x3 of three 16-byte columns, four u32, then the mask's mat3x3.
-    expect(OUTPUT_SPACE_BUFFER_SIZE).toBe(208);
+    // Three mat3x3 of three 16-byte columns, four u32, then the mask's mat3x3
+    // and vec3f.
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBe(224);
     expect(OUTPUT_SPACE_BUFFER_SIZE % 16).toBe(0);
-    expect(OUTPUT_SPACE_BUFFER_SIZE).toBeGreaterThanOrEqual(4 * 48 + 16);
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBeGreaterThanOrEqual(4 * 48 + 16 + 12);
 
     const buffer = createOutputSpaceBuffer(gpu);
     expect(buffer.buffer.size).toBe(OUTPUT_SPACE_BUFFER_SIZE);
@@ -1126,18 +1127,20 @@ describe("the output space", () => {
   it("paints only the pixels outside the masked gamut", async () => {
     const TINT = 0x6fd3ff;
     const painted = [0x6f, 0xd3, 0xff];
-    const masked = (space: OutputSpaceId, afterTransform: boolean) =>
+    const masked = (space: OutputSpaceId, afterTransform: boolean, output: OutputSpaceId = "srgb") =>
       develop(WORKING_RED, defaultSlidersRGB, undefined, {
-        output: "srgb",
+        output,
         alreadyWorking: true,
         mask: { space, tint: TINT, afterTransform },
       }).then(firstPixel);
-    const plain = firstPixel(
-      await develop(WORKING_RED, defaultSlidersRGB, undefined, {
-        output: "srgb",
-        alreadyWorking: true,
-      }),
-    );
+    const plainIn = async (output: OutputSpaceId) =>
+      firstPixel(
+        await develop(WORKING_RED, defaultSlidersRGB, undefined, {
+          output,
+          alreadyWorking: true,
+        }),
+      );
+    const plain = await plainIn("srgb");
 
     expect(await masked("srgb", false)).toEqual(painted);
     expect(await masked("display-p3", false)).toEqual(painted);
@@ -1146,6 +1149,9 @@ describe("the output space", () => {
     // After the transform the red has been fitted into sRGB, so nothing is left
     // outside it.
     expect(await masked("srgb", true)).toEqual(plain);
+    // Fitted into Display P3 instead, the red is still wider than sRGB.
+    expect(await masked("srgb", true, "display-p3")).toEqual(painted);
+    expect(await masked("display-p3", true, "display-p3")).toEqual(await plainIn("display-p3"));
   });
 
   // What soft-proofing is for: on a display wider than the export, the preview

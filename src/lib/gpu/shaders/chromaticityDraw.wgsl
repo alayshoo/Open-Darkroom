@@ -108,14 +108,6 @@ fn triangle_edge(space: GamutSpace, xy: vec2f) -> f32 {
   );
 }
 
-fn unpack_tint(packed: u32) -> vec3f {
-  return vec3f(
-    f32((packed >> 16u) & 255u),
-    f32((packed >> 8u) & 255u),
-    f32(packed & 255u),
-  ) / 255.0;
-}
-
 // Violet for the rarest cells through to near white for the most common.
 fn heat(t: f32) -> vec3f {
   let c0 = vec3f(0.36, 0.22, 0.85);

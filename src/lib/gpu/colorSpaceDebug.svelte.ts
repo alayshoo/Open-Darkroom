@@ -4,7 +4,7 @@
 
 import { OUTPUT_SPACE_IDS, WORKING_SPACE, type OutputSpaceId } from "./outputSpace";
 import { detectDisplaySpace } from "./gpuInit";
-import { GAMUT_TINTS } from "./gamutOverlay";
+import { GAMUT_TINTS, packTint } from "./gamutOverlay";
 import type { GamutMask } from "./outputSpaceBuffer";
 import { settings } from "$lib/settings/settings.svelte";
 import { defaultToneMap, type RolloffMode, type ToneMap } from "$lib/types/toneMap";
@@ -55,7 +55,7 @@ class ColorSpaceDebug {
         if (!settings.debugTools || !this.enabled || !this.mask) return null;
         return {
             space: this.mask,
-            tint: parseInt(GAMUT_TINTS[this.mask].slice(1), 16),
+            tint: packTint(GAMUT_TINTS[this.mask]),
             afterTransform: this.transformed,
         };
     }

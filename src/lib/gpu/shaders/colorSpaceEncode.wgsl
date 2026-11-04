@@ -25,6 +25,8 @@
 //!include "chunks/luma.wgsl"
 //!include "chunks/outputTransform.wgsl"
 //!include "chunks/cropView.wgsl"
+//!include "chunks/colorimetry.wgsl"
+//!include "chunks/gamutGrids.wgsl"
 
 @group(0) @binding(0) var compositeTexture: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> outputSpace: OutputSpace;
@@ -74,25 +76,20 @@ const OFF_IMAGE = vec4f(0.0);
 // What is left of the image outside the crop tool's box: black at 55% over it.
 const OUTSIDE_KEEP: f32 = 0.45;
 
-// A channel this far below zero, relative to the brightest, is outside the
-// masked gamut rather than sitting on its boundary.
-const MASK_TOLERANCE: f32 = 1e-3;
 const MASK_STRIPE_PX: f32 = 6.0;
 
+// Whether the chromaticity falls outside the masked triangle, by the same edge
+// distances and tolerance the panel's inside_gamut() counts with.
 fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> bool {
-  let rgb = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
-  let peak = max(rgb.r, max(rgb.g, rgb.b));
-  if (peak <= GAMUT_EPSILON) { return false; }
-  return min(rgb.r, min(rgb.g, rgb.b)) < -MASK_TOLERANCE * peak;
+  let weighted = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
+  let sum = weighted.r + weighted.g + weighted.b;
+  if (sum < COLORIMETRY_EPSILON) { return false; }
+  return any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE));
 }
 
 // Diagonal stripes of the mask's tint, so it never reads as part of the image.
 fn mask_paint(position: vec2f, packed: u32) -> vec3f {
-  let tint = vec3f(
-    f32((packed >> 16u) & 255u),
-    f32((packed >> 8u) & 255u),
-    f32(packed & 255u),
-  ) / 255.0;
+  let tint = unpack_tint(packed);
   let stripe = u32(floor((position.x + position.y) / MASK_STRIPE_PX)) % 2u;
   return select(tint, tint * 0.35, stripe == 1u);
 }

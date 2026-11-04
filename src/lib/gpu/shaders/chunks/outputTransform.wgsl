@@ -44,8 +44,11 @@ struct OutputSpace {
   mask: u32,
   // The mask's colour, 0xRRGGBB.
   mask_tint: u32,
-  // Linear working space, or linear destination for MASK_AFTER → the masked space.
+  // Linear working space, or linear destination for MASK_AFTER → the masked
+  // space, each row scaled by its primary's X+Y+Z.
   to_mask: mat3x3<f32>,
+  // The masked triangle's height in xy above the edge opposite each primary.
+  mask_heights: vec3f,
 }
 
 const MASK_OFF: u32 = 0u;
