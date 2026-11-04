@@ -20,7 +20,7 @@ use crate::crop::{crop_view, CropPayload, CropView};
 use crate::export_rendering::request_device;
 use crate::retouch::{
     apply_retouch, block_box, follow_strokes, Followed, LinearSource, RetouchPasses, RetouchPayload, RetouchedBlocks,
-    StrokeJournal,
+    StrokeJournal, MAX_JOURNAL_BYTES,
 };
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
@@ -391,6 +391,10 @@ pub fn compute_retouched_histograms_in(
     Ok(histograms)
 }
 
+/// Bytes of retouched blocks and journal kept between histogram requests;
+/// past it nothing is kept, and the next request lays the strokes afresh.
+pub const MAX_RETOUCHED_BYTES: usize = 512 << 20;
+
 /// The retouched histograms of one image, kept between requests: the strokes
 /// laid over it with what each wrote over, and the counts for the last crop.
 pub struct RetouchedHistograms {
@@ -398,15 +402,27 @@ pub struct RetouchedHistograms {
     blocks: RetouchedBlocks,
     crop: Option<CropPayload>,
     histograms: Option<Histograms>,
+    budget: usize,
 }
 
 impl RetouchedHistograms {
     pub fn new() -> Self {
-        Self::with_journal(StrokeJournal::new())
+        Self::with_budget(MAX_RETOUCHED_BYTES)
     }
 
-    pub fn with_journal(journal: StrokeJournal) -> Self {
-        Self { journal, blocks: RetouchedBlocks::new(), crop: None, histograms: None }
+    pub fn with_budget(budget: usize) -> Self {
+        Self {
+            journal: StrokeJournal::with_cap(MAX_JOURNAL_BYTES.min(budget)),
+            blocks: RetouchedBlocks::new(),
+            crop: None,
+            histograms: None,
+            budget,
+        }
+    }
+
+    /// Bytes of retouched blocks and journal held for the next request.
+    pub fn held_bytes(&self) -> usize {
+        self.journal.bytes() + self.blocks.values().map(Vec::len).sum::<usize>()
     }
 
     /// The histograms of `src` within `crop` with `strokes` laid over it. Only
@@ -456,11 +472,15 @@ impl RetouchedHistograms {
                 counts
             }
             (Err(e), _) => {
-                *self = Self::with_journal(StrokeJournal::with_cap(self.journal.cap()));
+                *self = Self::with_budget(self.budget);
                 return Err(e);
             }
         };
         self.blocks = source.into_blocks();
+        if self.held_bytes() > self.budget {
+            *self = Self::with_budget(self.budget);
+            return Ok(histograms);
+        }
         self.crop = Some(*crop);
         self.histograms = Some(histograms.clone());
         Ok(histograms)

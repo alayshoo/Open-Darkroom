@@ -13,7 +13,7 @@ use open_darkroom_lib::export_rendering::{render_cropped_with_chunk_rows, Slider
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::crop::crop_view;
 use open_darkroom_lib::image_opening::{
-    compute_histograms_in, compute_retouched_histograms_in, Histograms, Rgba16Image, RetouchedHistograms,
+    compute_histograms_in, compute_retouched_histograms_in, Histograms, Rgba16Image, RetouchedHistograms, MAX_RETOUCHED_BYTES,
 };
 use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::retouch::{
@@ -295,8 +295,9 @@ fn same_counts(a: &Histograms, b: &Histograms) -> bool {
     a.r == b.r && a.g == b.g && a.b == b.b
 }
 
-#[test]
-fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
+/// Follows strokes and crops with one [`RetouchedHistograms`], checking each
+/// step against binning afresh, and returns the bytes held after each.
+fn follow_histograms(budget: usize) -> Vec<usize> {
     let (w, h) = (160, 120);
     let img = noise(w, h, 9);
     let bins: Vec<u8> = (0..=u16::MAX as u32).map(|i| (i >> 8) as u8).collect();
@@ -313,7 +314,8 @@ fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
         (tight, vec![all[0].clone(), all[4].clone()]),
         (tight, all[..4].to_vec()),
     ];
-    let mut kept = RetouchedHistograms::new();
+    let mut kept = RetouchedHistograms::with_budget(budget);
+    let mut held = Vec::new();
     for (crop, strokes) in &steps {
         let got = kept
             .update(device, queue, &passes, img.as_raw(), w, h, 4, crop, &bins, &luts, strokes)
@@ -322,7 +324,19 @@ fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
         let fresh =
             compute_retouched_histograms_in(device, queue, img.as_raw(), w, h, 4, &view, &bins, &luts, strokes).unwrap();
         assert!(same_counts(&got, &fresh), "{} strokes in {crop:?}", strokes.len());
+        held.push(kept.held_bytes());
     }
+    held
+}
+
+#[test]
+fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
+    assert!(follow_histograms(MAX_RETOUCHED_BYTES).iter().all(|&bytes| bytes > 0));
+}
+
+#[test]
+fn past_the_budget_nothing_is_kept_and_the_histograms_still_match() {
+    assert!(follow_histograms(1).iter().all(|&bytes| bytes == 0));
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────

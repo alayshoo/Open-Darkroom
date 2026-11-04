@@ -841,6 +841,11 @@ impl StrokeJournal {
         self.cap
     }
 
+    /// Bytes of overwritten blocks held.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
     fn push(&mut self, stroke: RetouchPayload, journal: BlockJournal) {
         self.strokes.push(stroke);
         self.bytes += journal_bytes(&journal);
