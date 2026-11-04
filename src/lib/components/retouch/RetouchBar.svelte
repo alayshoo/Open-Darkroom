@@ -97,7 +97,7 @@
 						<span class="glyph absolute">A</span>
 					</GlassButton>
 				</div>
-				<RevertButton visible={strokes > 0} label="Clear all" onrevert={() => onclear?.()} />
+				<RevertButton disabled={strokes === 0} label="Clear all" onrevert={() => onclear?.()} />
 			</div>
 			<p class="hint shrink-0" class:suppressed={!hintShown} aria-hidden={!hintShown} bind:clientWidth={hintWidth}>
 				{altKey}-click picks a source<br />
