@@ -525,6 +525,8 @@
     function onPointerUp() {
         dragFrom = null;
         loupeGrab = null;
+        // An Alt press that never moved far enough to size the brush picks a source.
+        if (resizing && !resizing.moved) retouchTool.pickSource(resizing.point);
         resizing = null;
         if (stroke) finishStroke();
     }
@@ -533,6 +535,8 @@
 
     // CSS pixels of Alt + drag per percent of feather.
     const RESIZE_PX_PER_FEATHER = 2;
+    // CSS pixels an Alt press may wander and still count as a click.
+    const CLICK_SLOP_PX = 3;
 
     let brushing = $derived(retouchTool.mode !== null && retouchReady && !showWhole && !loupe.picking);
     let spaceHeld = $state(false);
@@ -551,8 +555,8 @@
     let pendingId = 0;
     let queue: Promise<void> = Promise.resolve();
 
-    // Alt + drag: across sizes the brush, up softens it.
-    let resizing = $state<{ at: Point; radius: number; feather: number } | null>(null);
+    // Alt + drag: across sizes the brush, up softens it. Alt + click picks a source.
+    let resizing = $state<{ at: Point; point: Point; radius: number; feather: number; moved: boolean } | null>(null);
 
     let toImage = $derived(layout ? canvasToImage(layout.placement) : null);
     let fromImage = $derived(toImage ? invert(toImage) : null);
@@ -561,13 +565,9 @@
         if (!toImage || !imagePayload) return;
         const cursor = cursorOf(e);
         const point = apply(toImage, cursor);
-        if (e.ctrlKey || e.metaKey) {
-            retouchTool.pickSource(point);
-            return;
-        }
         canvas.setPointerCapture(e.pointerId);
         if (e.altKey) {
-            resizing = { at: cursor, radius: retouchTool.radius, feather: retouchTool.feather };
+            resizing = { at: cursor, point, radius: retouchTool.radius, feather: retouchTool.feather, moved: false };
             return;
         }
         const { fullWidth, fullHeight } = imagePayload;
@@ -582,6 +582,8 @@
         if (resizing) {
             const dx = (e.clientX * dpr - resizing.at[0]) / dpr;
             const dy = (e.clientY * dpr - resizing.at[1]) / dpr;
+            if (!resizing.moved && Math.hypot(dx, dy) < CLICK_SLOP_PX) return;
+            resizing.moved = true;
             retouchTool.setRadius(resizing.radius + (dx * dpr) / (layout?.placement.scale ?? 1));
             retouchTool.setFeather(resizing.feather - dy / RESIZE_PX_PER_FEATHER);
             return;

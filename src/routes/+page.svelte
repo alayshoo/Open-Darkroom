@@ -26,7 +26,7 @@
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
     import CropTools from "$lib/components/inputs/cropTools.svelte";
     import RetouchTools from "$lib/components/inputs/retouchTools.svelte";
-    import RetouchPanel from "$lib/components/retouch/RetouchPanel.svelte";
+    import RetouchBar from "$lib/components/retouch/RetouchBar.svelte";
     import { retouchTool } from "$lib/retouch/retouchTool.svelte";
     import type { Retouch, RetouchMode } from "$lib/types/retouch";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
@@ -581,21 +581,12 @@
         if (!canRetouch) retouchTool.mode = null;
     });
 
-    // The brushes and the presets share the column beside the toolbar.
+    // The presets need the side bar the brushes send away.
     $effect(() => {
         if (presets.open) untrack(() => (retouchTool.mode = null));
     });
 
     let isRetouching = $derived(retouchTool.mode !== null);
-
-    let leftPanel = $derived<"presets" | "retouch" | null>(
-        isRetouching ? "retouch" : presets.open ? "presets" : null,
-    );
-    // Held while the column slides shut, so its panel leaves with it.
-    let shownLeftPanel = $state<"presets" | "retouch">("presets");
-    $effect(() => {
-        if (leftPanel) shownLeftPanel = leftPanel;
-    });
 
     function toggleRetouch(mode: RetouchMode) {
         if (!canRetouch) return;
@@ -1108,35 +1099,23 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="chrome-scrim" class:shifted={leftPanel !== null}>
+    <div class="chrome-scrim" class:shifted={presets.open}>
         <div class="scrim-fill"></div>
     </div>
-    <div class="left-column shrink-0" class:open={leftPanel !== null} inert={leftPanel === null}>
-        <div class="left-column-slide h-full">
-            <div
-                class="left-panel"
-                class:shown={shownLeftPanel === "presets"}
-                inert={shownLeftPanel !== "presets"}
-            >
-                <PresetsPanel
-                    list={presets.list}
-                    canApply={!sidebarInactive}
-                    onapply={applyPreset}
-                    onhover={(preset) => (hoveredPresetId = preset?.id ?? null)}
-                    onadd={openNewPreset}
-                    onimport={importPresets}
-                    onedit={openEditPreset}
-                    onexport={exportPreset}
-                    ondelete={deletePreset}
-                />
-            </div>
-            <div
-                class="left-panel"
-                class:shown={shownLeftPanel === "retouch"}
-                inert={shownLeftPanel !== "retouch"}
-            >
-                <RetouchPanel strokes={edit.retouch.length} onclear={clearRetouch} />
-            </div>
+    <RetouchBar open={isRetouching} strokes={edit.retouch.length} onclear={clearRetouch} />
+    <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
+        <div class="presets-slide h-full">
+            <PresetsPanel
+                list={presets.list}
+                canApply={!sidebarInactive}
+                onapply={applyPreset}
+                onhover={(preset) => (hoveredPresetId = preset?.id ?? null)}
+                onadd={openNewPreset}
+                onimport={importPresets}
+                onedit={openEditPreset}
+                onexport={exportPreset}
+                ondelete={deletePreset}
+            />
         </div>
     </div>
     <!-- The empty parts of the icon column drag the window; Tauri matches the
@@ -1189,7 +1168,7 @@
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
-        <div class="canvas-center absolute flex items-center justify-center">
+        <div class="canvas-center absolute flex items-center justify-center" class:raised={isRetouching}>
             <PreviewImageCanvas
                 sliders={shownSliders}
                 curveLut={shownCurveLut}
@@ -1925,6 +1904,10 @@
 
     .app-shell {
         --presets-width: 260px;
+        /* Smoothstep, from a scrim band's inner edge out to the window edge. */
+        --scrim-ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
+            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
+            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
         /* 32px title bar + the same 12px inset used on the other three sides */
         top: 44px;
         bottom: 12px;
@@ -1952,6 +1935,13 @@
         inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
+        transition: bottom 0.25s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    /* Clear of the brush bar, rising with it once the side bar has gone. */
+    .canvas-center.raised {
+        bottom: 76px;
+        transition: bottom 0.3s cubic-bezier(0.2, 0, 0, 1) 0.35s;
     }
 
     /* ===== Glass panels =====
@@ -2025,10 +2015,6 @@
         content: "";
         position: absolute;
         inset: 0;
-        /* Smoothstep, from each band's inner edge out to the window edge. */
-        --ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
-            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
-            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
         /* The corner tile runs the same ramp, pushed out past the inner radius
            (the first 31.25% of the tile), so it meets both bands exactly. */
         background:
@@ -2045,9 +2031,9 @@
                     black
                 )
                 0 0 / var(--reach-x) var(--reach-y) no-repeat,
-            linear-gradient(to top, var(--ramp)) var(--reach-x) 0 /
+            linear-gradient(to top, var(--scrim-ramp)) var(--reach-x) 0 /
                 calc(100% - var(--reach-x)) var(--top) no-repeat,
-            linear-gradient(to left, var(--ramp)) 0 var(--reach-y) /
+            linear-gradient(to left, var(--scrim-ramp)) 0 var(--reach-y) /
                 var(--left) calc(100% - var(--reach-y)) no-repeat;
         transition: opacity 0.5s ease;
     }
@@ -2086,10 +2072,7 @@
         transition: opacity 0.2s ease;
     }
 
-    /* The column that holds the presets or the brush in hand, pushing the
-       toolbar right. Closed, its negative margin cancels the shell's gap; open,
-       it also covers the toolbar's bleed to the edge. */
-    .left-column {
+    .presets-column {
         width: 0;
         margin-right: -12px;
         position: relative;
@@ -2100,14 +2083,14 @@
             margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .left-column.open {
+    .presets-column.open {
         width: var(--presets-width);
         margin-right: 12px;
     }
 
     /* The panel keeps its width and slides in with the toolbar rather than
        being squeezed, so its list never reflows mid-animation. */
-    .left-column-slide {
+    .presets-slide {
         /* Laps 4px into the shell's edge inset, so the names sit 18px in. */
         width: calc(var(--presets-width) + 4px);
         margin-left: -4px;
@@ -2115,30 +2098,8 @@
         transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .left-column.open .left-column-slide {
+    .presets-column.open .presets-slide {
         transform: translateX(0);
-    }
-
-    /* Both panels share the column's one cell, and swap in place. */
-    .left-column-slide {
-        display: grid;
-        grid-template: 100% / 100%;
-    }
-
-    .left-panel {
-        grid-area: 1 / 1;
-        min-height: 0;
-        opacity: 0;
-        visibility: hidden;
-        transition:
-            opacity 0.15s ease,
-            visibility 0s linear 0.15s;
-    }
-
-    .left-panel.shown {
-        opacity: 1;
-        visibility: visible;
-        transition: opacity 0.15s ease 0.1s;
     }
 
     .toolbar-tools {
@@ -2182,9 +2143,10 @@
         position: relative;
         z-index: 10;
         pointer-events: auto;
+        /* Back only once the brush bar has dropped away. */
         transition:
-            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1),
-            transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s,
+            transform 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
     }
 
     /* Out past the window's right edge while a brush is in hand, giving its
@@ -2193,6 +2155,7 @@
     .side-bar.away {
         margin-right: calc(-1 * max(23%, 300px) - 12px);
         transform: translateX(40px);
+        transition-delay: 0s;
     }
 
     .quick-actions {
