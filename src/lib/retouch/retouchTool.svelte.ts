@@ -29,11 +29,8 @@ class RetouchTool {
     /** An image point picked as the source, waiting for the stroke it is measured from. */
     pickedSource = $state.raw<Point | null>(null);
 
-    /**
-     * Image pixels from a stroke to where it takes its pixels from, once a
-     * picked source has been used. Every stroke after keeps it. Null lets each
-     * stroke find its own.
-     */
+    // Image pixels from a stroke to its source, kept for every stroke after a
+    // picked source is used. Null lets each stroke find its own.
     offset = $state.raw<Point | null>(null);
 
     toggle(mode: RetouchMode) {

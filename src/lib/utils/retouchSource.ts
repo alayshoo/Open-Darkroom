@@ -75,11 +75,8 @@ function clearance(points: Point[], [dx, dy]: Point): number {
     return d;
 }
 
-/**
- * Whole-texel offsets that move the stroke clear of itself and keep it on the
- * image, nearest rings first. Wider rings are tried only when the nearer ones
- * leave nothing.
- */
+// Whole-texel offsets that move the stroke clear of itself and keep it on the
+// image, nearest rings first; wider rings only when the nearer leave nothing.
 export function sourceCandidates(r: PlacedRetouch, width: number, height: number): Point[] {
     const coarse = thin(resampleStroke(r.points, Math.max(1, r.radius * 0.5)), 96);
     const xs = r.points.map((p) => p[0]);

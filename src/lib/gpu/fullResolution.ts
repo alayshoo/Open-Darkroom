@@ -133,10 +133,7 @@ export function generateMipmaps(device: GPUDevice, texture: GPUTexture) {
     device.queue.submit([encoder.finish()]);
 }
 
-/**
- * Records the mip levels below the first, or, given `region` in texels of the
- * first level, only the part of each that region reaches.
- */
+/** Records the mip levels below the first, or only the part of each that `region`, in level 0 texels, reaches. */
 export function recordMipmaps(
     device: GPUDevice,
     encoder: GPUCommandEncoder,

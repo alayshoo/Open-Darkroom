@@ -658,13 +658,17 @@
         pending = [...pending, { id, points: done.points, radius }];
         const image = source;
         const emit = onretouch;
+        // A stroke belongs to the image it was painted on, so one opened since drops it.
+        const opened = imagePayload;
+        const stillOpen = () => imagePayload === opened && source === image;
 
         queue = queue.then(async () => {
             try {
+                if (!stillOpen()) return;
                 let finished = base;
                 if (!done.offset && image) {
                     const found = await findSource(gpu.device, image, placeRetouch(base, image.width, image.height));
-                    if (!found) return;
+                    if (!found || !stillOpen()) return;
                     finished = { ...base, offset: [found[0] / image.width, found[1] / image.height] };
                 }
                 emit(finished);
@@ -676,9 +680,16 @@
         });
     }
 
+    const SPACE_CONTROLS = "button, a[href], select, summary, [role='button'], [role='checkbox'], [role='switch'], [role='menuitem'], [role='tab']";
+
     function onBrushKey(e: KeyboardEvent) {
         if (!brushing || isTextField(e.target)) return;
         if (e.code === "Space") {
+            // A focused control keeps Space for itself.
+            if (e.target instanceof Element && e.target.closest(SPACE_CONTROLS)) {
+                spaceHeld = false;
+                return;
+            }
             spaceHeld = e.type === "keydown";
             e.preventDefault();
         } else if (e.key === "Alt" && e.type === "keydown") {

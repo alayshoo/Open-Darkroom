@@ -59,21 +59,28 @@ export function cloneRetouch(r: Retouch): Retouch {
     };
 }
 
-export function retouchEqual(a: Retouch, b: Retouch): boolean {
+/** Whether two strokes are painted with the same brush from the same source. */
+export function sameBrush(a: Retouch, b: Retouch): boolean {
     return (
         a.mode === b.mode &&
         a.radius === b.radius &&
         a.feather === b.feather &&
         a.opacity === b.opacity &&
         a.offset[0] === b.offset[0] &&
-        a.offset[1] === b.offset[1] &&
-        a.points.length === b.points.length &&
-        a.points.every((p, i) => p[0] === b.points[i][0] && p[1] === b.points[i][1])
+        a.offset[1] === b.offset[1]
     );
 }
 
+/** Whether `b`'s points begin with all of `a`'s. */
+export function pointsStartWith(b: Retouch, a: Retouch): boolean {
+    return a.points.length <= b.points.length && a.points.every((p, i) => p[0] === b.points[i][0] && p[1] === b.points[i][1]);
+}
+
+export function retouchEqual(a: Retouch, b: Retouch): boolean {
+    return sameBrush(a, b) && a.points.length === b.points.length && pointsStartWith(b, a);
+}
+
 // ── Geometry in texels ────────────────────────────────────────────────────────
-//
 // Everything below must match retouch.rs, so the preview and the export cut a
 // stroke into the same passes.
 
@@ -235,28 +242,27 @@ export function retouchTiles(r: PlacedRetouch, width: number, height: number): R
     return tiles;
 }
 
-/**
- * The texels a tile reads from the image: its work box where the tone match is
- * taken, and the same box moved by the offset where the pixels come from.
- */
-export function tileReads(tile: RetouchTile, offset: [number, number], width: number, height: number): TexelBox | null {
+/** What a tile reads from the image: its work box, and that box moved by the offset when it is on the image. */
+export function tileReads(
+    tile: RetouchTile,
+    offset: [number, number],
+    width: number,
+    height: number,
+): { work: TexelBox; source: TexelBox | null } {
     const [x0, y0, x1, y1] = tile.work;
     const [dx, dy] = offset;
-    return clampBox(
-        [Math.min(x0, x0 + dx), Math.min(y0, y0 + dy), Math.max(x1, x1 + dx), Math.max(y1, y1 + dy)],
-        width,
-        height,
-    );
+    return { work: tile.work, source: clampBox([x0 + dx, y0 + dy, x1 + dx, y1 + dy], width, height) };
 }
 
 /** Size of the `RetouchPass` uniform in retouch.wgsl. */
-export const RETOUCH_UNIFORM_SIZE = 80;
+export const RETOUCH_UNIFORM_SIZE = 96;
 
-/** The `RetouchPass` uniform for one tile. */
+/** The `RetouchPass` uniform for one tile, with where the bound image holds the tile's own texels and its source's. */
 export function retouchUniform(
     r: PlacedRetouch,
     tile: RetouchTile,
     imageOrigin: [number, number],
+    sourceOrigin: [number, number],
     width: number,
     height: number,
 ): ArrayBuffer {
@@ -272,6 +278,7 @@ export function retouchUniform(
     f.set(r.offset, 10);
     f.set([r.radius, r.feather, r.opacity, span.sigma, span.step], 12);
     u.set([span.taps, tile.segments.length, r.mode === "heal" ? 1 : 0], 17);
+    f.set(sourceOrigin, 20);
     return buffer;
 }
 

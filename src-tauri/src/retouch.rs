@@ -20,7 +20,7 @@ pub const RETOUCH_TILE: i64 = 512;
 pub const MAX_BLUR_TAPS: i64 = 64;
 
 /// Size of the `RetouchPass` uniform in retouch.wgsl.
-pub const RETOUCH_UNIFORM_BYTES: usize = 80;
+pub const RETOUCH_UNIFORM_BYTES: usize = 96;
 
 /// Side of the blocks the retouched pixels are kept in.
 const CACHE_TILE: u32 = 128;
@@ -36,7 +36,7 @@ pub enum RetouchMode {
 
 /// One stroke as the frontend stores it: fractions of the source's width and
 /// height, and a radius as a fraction of its long edge.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RetouchPayload {
     pub mode: RetouchMode,
     pub points: Vec<[f64; 2]>,
@@ -207,17 +207,19 @@ pub fn retouch_tiles(r: &PlacedRetouch, width: u32, height: u32) -> Vec<RetouchT
     tiles
 }
 
-/// What a tile reads from the image: its work box, and that box moved by the offset.
-pub fn tile_reads(tile: &RetouchTile, offset: [i64; 2], width: u32, height: u32) -> Option<TexelBox> {
+/// What a tile reads from the image: its work box, and that box moved by the
+/// offset when it is on the image.
+pub fn tile_reads(tile: &RetouchTile, offset: [i64; 2], width: u32, height: u32) -> (TexelBox, Option<TexelBox>) {
     let [x0, y0, x1, y1] = tile.work;
     let [dx, dy] = offset;
-    clamp_box([x0.min(x0 + dx), y0.min(y0 + dy), x1.max(x1 + dx), y1.max(y1 + dy)], width, height)
+    (tile.work, clamp_box([x0 + dx, y0 + dy, x1 + dx, y1 + dy], width, height))
 }
 
 pub fn retouch_uniform(
     r: &PlacedRetouch,
     tile: &RetouchTile,
     image_origin: [i64; 2],
+    source_origin: [i64; 2],
     width: u32,
     height: u32,
 ) -> [u8; RETOUCH_UNIFORM_BYTES] {
@@ -250,6 +252,10 @@ pub fn retouch_uniform(
         let at = (floats.len() + i) * 4;
         bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
+    for (i, v) in source_origin.iter().enumerate() {
+        let at = (floats.len() + uints.len() + i) * 4;
+        bytes[at..at + 4].copy_from_slice(&(*v as f32).to_le_bytes());
+    }
     bytes
 }
 
@@ -263,12 +269,31 @@ pub struct LinearSource<'a> {
     height: u32,
     channels: usize,
     luts: &'a [Vec<f32>; 3],
-    blocks: HashMap<(u32, u32), Vec<u8>>,
+    blocks: RetouchedBlocks,
 }
+
+/// The blocks strokes have written, as LE f32 RGBA, by block.
+pub type RetouchedBlocks = HashMap<(u32, u32), Vec<u8>>;
 
 impl<'a> LinearSource<'a> {
     pub fn new(pixels: &'a [u16], width: u32, height: u32, channels: usize, luts: &'a [Vec<f32>; 3]) -> Self {
-        Self { pixels, width, height, channels, luts, blocks: HashMap::new() }
+        Self::with_blocks(pixels, width, height, channels, luts, HashMap::new())
+    }
+
+    /// The image with `blocks`, which earlier strokes wrote over the same pixels, laid over it.
+    pub fn with_blocks(
+        pixels: &'a [u16],
+        width: u32,
+        height: u32,
+        channels: usize,
+        luts: &'a [Vec<f32>; 3],
+        blocks: RetouchedBlocks,
+    ) -> Self {
+        Self { pixels, width, height, channels, luts, blocks }
+    }
+
+    pub fn into_blocks(self) -> RetouchedBlocks {
+        self.blocks
     }
 
     fn untouched(&self, x0: u32, y0: u32, w: u32, h: u32) -> Vec<u8> {
@@ -349,7 +374,8 @@ impl<'a> LinearSource<'a> {
 
 // ── Applying the strokes ──────────────────────────────────────────────────────
 
-struct Passes {
+/// The retouch pipelines, built once per device.
+pub struct RetouchPasses {
     layout: wgpu::BindGroupLayout,
     prep: wgpu::RenderPipeline,
     blur_h: wgpu::RenderPipeline,
@@ -357,7 +383,13 @@ struct Passes {
     apply: wgpu::RenderPipeline,
 }
 
-fn create_passes(device: &wgpu::Device) -> Passes {
+impl RetouchPasses {
+    pub fn new(device: &wgpu::Device) -> Self {
+        create_passes(device)
+    }
+}
+
+fn create_passes(device: &wgpu::Device) -> RetouchPasses {
     let texture = |binding| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -419,7 +451,7 @@ fn create_passes(device: &wgpu::Device) -> Passes {
             cache: None,
         })
     };
-    Passes {
+    RetouchPasses {
         prep: pipeline("fs_prep"),
         blur_h: pipeline("fs_blur_h"),
         blur_v: pipeline("fs_blur_v"),
@@ -469,34 +501,45 @@ fn run_pass(
 fn render_tile(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    passes: &Passes,
+    passes: &RetouchPasses,
     source: &LinearSource,
     stroke: &PlacedRetouch,
     tile: &RetouchTile,
 ) -> Result<Vec<u8>, String> {
     let (width, height) = (source.width, source.height);
-    let reads = tile_reads(tile, stroke.offset, width, height).expect("a tile's reads include its own box");
-    let (rw, rh) = ((reads[2] - reads[0]) as u32, (reads[3] - reads[1]) as u32);
-    let image = texture(device, "retouch_image", rw, rh, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &image,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &source.read(reads[0] as u32, reads[1] as u32, rw, rh),
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(rw * LINEAR_F32_BYTES_PER_PIXEL as u32),
-            rows_per_image: None,
-        },
-        wgpu::Extent3d { width: rw, height: rh, depth_or_array_layers: 1 },
-    );
+    // The work box on top, and the source box under it, so the image holds only what the tile reads.
+    let (work, source_box) = tile_reads(tile, stroke.offset, width, height);
+    let size = |b: &TexelBox| ((b[2] - b[0]) as u32, (b[3] - b[1]) as u32);
+    let (ww, wh) = size(&work);
+    let (sw, sh) = source_box.as_ref().map_or((0, 0), size);
+    let image = texture(device, "retouch_image", ww.max(sw), wh + sh, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+    let upload = |b: &TexelBox, y: u32| {
+        let (bw, bh) = size(b);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &image,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &source.read(b[0] as u32, b[1] as u32, bw, bh),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bw * LINEAR_F32_BYTES_PER_PIXEL as u32),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d { width: bw, height: bh, depth_or_array_layers: 1 },
+        );
+    };
+    upload(&work, 0);
+    if let Some(b) = &source_box {
+        upload(b, wh);
+    }
+    let source_origin = source_box.map_or([0, 0], |b| [b[0], b[1] - wh as i64]);
 
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("retouch_uniform"),
-        contents: &retouch_uniform(stroke, tile, [reads[0], reads[1]], width, height),
+        contents: &retouch_uniform(stroke, tile, [work[0], work[1]], source_origin, width, height),
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let segment_bytes: Vec<u8> = tile.segments.iter().flatten().flat_map(|v| (*v as f32).to_le_bytes()).collect();
@@ -526,12 +569,11 @@ fn render_tile(
     let mut encoder = device.create_command_encoder(&Default::default());
     let target_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
     let matched = if stroke.mode == RetouchMode::Heal {
-        let (ww, wh) = ((tile.work[2] - tile.work[0]) as u32, (tile.work[3] - tile.work[1]) as u32);
-        let work: Vec<_> = (0..3).map(|_| texture(device, "retouch_work", ww, wh, target_usage)).collect();
-        run_pass(&mut encoder, &passes.prep, &work[0], &bind(&image));
-        run_pass(&mut encoder, &passes.blur_h, &work[1], &bind(&work[0]));
-        run_pass(&mut encoder, &passes.blur_v, &work[2], &bind(&work[1]));
-        work.into_iter().nth(2).unwrap()
+        let blur: Vec<_> = (0..3).map(|_| texture(device, "retouch_work", ww, wh, target_usage)).collect();
+        run_pass(&mut encoder, &passes.prep, &blur[0], &bind(&image));
+        run_pass(&mut encoder, &passes.blur_h, &blur[1], &bind(&blur[0]));
+        run_pass(&mut encoder, &passes.blur_v, &blur[2], &bind(&blur[1]));
+        blur.into_iter().nth(2).unwrap()
     } else {
         texture(device, "retouch_blank", 1, 1, wgpu::TextureUsages::TEXTURE_BINDING)
     };
@@ -592,13 +634,23 @@ pub fn apply_retouch(
     if strokes.is_empty() {
         return Ok(());
     }
-    let passes = create_passes(device);
+    apply_retouch_with(device, queue, &create_passes(device), source, strokes)
+}
+
+/// [`apply_retouch`] with pipelines already built for `device`.
+pub fn apply_retouch_with(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    passes: &RetouchPasses,
+    source: &mut LinearSource,
+    strokes: &[RetouchPayload],
+) -> Result<(), String> {
     for stroke in strokes.iter().filter(|s| s.is_valid()) {
         let placed = place_retouch(stroke, source.width, source.height);
         let tiles = retouch_tiles(&placed, source.width, source.height);
         let mut rendered = Vec::with_capacity(tiles.len());
         for tile in &tiles {
-            rendered.push(render_tile(device, queue, &passes, source, &placed, tile)?);
+            rendered.push(render_tile(device, queue, passes, source, &placed, tile)?);
         }
         for (tile, data) in tiles.iter().zip(rendered) {
             let [x0, y0, x1, y1] = tile.target;

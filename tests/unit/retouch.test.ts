@@ -64,9 +64,18 @@ describe("retouchTiles", () => {
         const placed = placeRetouch(spot({ points: [[0, 0]], offset: [-0.5, -0.5] }), 200, 100);
         for (const tile of retouchTiles(placed, 200, 100)) {
             expect(Math.min(...tile.target, ...tile.work)).toBeGreaterThanOrEqual(0);
-            const reads = tileReads(tile, placed.offset, 200, 100);
-            expect(reads === null || (reads[2] <= 200 && reads[3] <= 100)).toBe(true);
+            const { work, source } = tileReads(tile, placed.offset, 200, 100);
+            expect(work).toEqual(tile.work);
+            expect(source === null || (Math.min(...source) >= 0 && source[2] <= 200 && source[3] <= 100)).toBe(true);
         }
+    });
+
+    it("reads the source apart from the stroke, however far away it is", () => {
+        const placed = placeRetouch(spot({ points: [[0.01, 0.01]], offset: [0.9, 0.9] }), 10000, 10000);
+        const [tile] = retouchTiles(placed, 10000, 10000);
+        const { work, source } = tileReads(tile, placed.offset, 10000, 10000);
+        expect(work).toEqual(tile.work);
+        expect(source).toEqual([work[0] + 9000, work[1] + 9000, work[2] + 9000, work[3] + 9000]);
     });
 });
 
@@ -83,12 +92,13 @@ describe("retouchUniform", () => {
     it("is laid out as retouch.wgsl declares it", () => {
         const placed = placeRetouch(spot({ offset: [0.1, -0.1] }), 1000, 500);
         const [tile] = retouchTiles(placed, 1000, 500);
-        const buffer = retouchUniform(placed, tile, [7, 9], 1000, 500);
+        const buffer = retouchUniform(placed, tile, [7, 9], [-3, 4], 1000, 500);
         const f = new Float32Array(buffer);
         const u = new Uint32Array(buffer);
         expect(buffer.byteLength).toBe(RETOUCH_UNIFORM_SIZE);
         expect([f[6], f[7], f[8], f[9], f[10], f[11], f[12]]).toEqual([7, 9, 1000, 500, 100, -50, 10]);
         expect([u[18], u[19]]).toEqual([1, 1]);
+        expect([f[20], f[21]]).toEqual([-3, 4]);
     });
 });
 

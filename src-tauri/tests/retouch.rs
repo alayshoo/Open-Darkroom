@@ -87,7 +87,7 @@ fn the_uniform_is_laid_out_as_retouch_wgsl_declares_it() {
     let r = stroke(RetouchMode::Heal, &[[0.5, 0.5]], 0.01, [0.1, -0.1]);
     let placed = place_retouch(&r, 1000, 500);
     let tile = &retouch_tiles(&placed, 1000, 500)[0];
-    let bytes = retouch_uniform(&placed, tile, [7, 9], 1000, 500);
+    let bytes = retouch_uniform(&placed, tile, [7, 9], [-3, 4], 1000, 500);
     let f = |i: usize| f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
     let u = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
     assert_eq!(bytes.len(), RETOUCH_UNIFORM_BYTES);
@@ -97,6 +97,7 @@ fn the_uniform_is_laid_out_as_retouch_wgsl_declares_it() {
     assert_eq!(f(12), 10.0);
     assert_eq!(u(18), 1);
     assert_eq!(u(19), 1);
+    assert_eq!([f(20), f(21)], [-3.0, 4.0]);
 }
 
 // ── retouch.wgsl ──────────────────────────────────────────────────────────────
@@ -112,6 +113,16 @@ fn a_clone_copies_its_source_exactly_and_leaves_the_rest_alone() {
     // Well clear of the stroke nothing moves.
     assert_eq!(texel(&after, 96, 72, 50), texel(&before, 96, 72, 50));
     assert_eq!(texel(&after, 96, 10, 10), texel(&before, 96, 10, 10));
+}
+
+#[test]
+fn a_source_further_away_than_a_texture_reaches_is_still_copied() {
+    // Wider than wgpu's default 8192 texel limit between the stroke and its source.
+    let img = noise(9000, 16, 3);
+    let r = stroke(RetouchMode::Clone, &[[8950.0 / 9000.0, 0.5]], 4.0 / 9000.0, [-8900.0 / 9000.0, 0.0]);
+    let before = retouched(&img, &[]);
+    let after = retouched(&img, &[r]);
+    assert_eq!(texel(&after, 9000, 8950, 8), texel(&before, 9000, 50, 8));
 }
 
 #[test]

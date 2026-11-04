@@ -34,6 +34,8 @@ struct RetouchPass {
   taps:          u32,
   segments:      u32,
   heal:          u32,
+  // Where in `image` the texels a stroke takes its pixels from are held.
+  source_origin: vec2f,
 }
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -84,6 +86,10 @@ fn load_image(t: vec2f) -> vec4f {
   return textureLoad(image, vec2i(t - pass_.image_origin), 0);
 }
 
+fn load_source(s: vec2f) -> vec4f {
+  return textureLoad(image, vec2i(s - pass_.source_origin), 0);
+}
+
 fn log_rgb(c: vec3f) -> vec3f {
   return log(max(c, vec3f(EPS)));
 }
@@ -96,7 +102,7 @@ fn fs_prep(@builtin(position) position: vec4f) -> @location(0) vec4f {
   if (!inside_image(s) || stroke_distance(t + 0.5) < pass_.radius + 1.0) {
     return vec4f(0.0);
   }
-  return vec4f(log_rgb(load_image(t).rgb) - log_rgb(load_image(s).rgb), 1.0);
+  return vec4f(log_rgb(load_image(t).rgb) - log_rgb(load_source(s).rgb), 1.0);
 }
 
 fn blur(position: vec4f, axis: vec2i) -> vec4f {
@@ -135,7 +141,7 @@ fn fs_apply(@builtin(position) position: vec4f) -> @location(0) vec4f {
     return destination;
   }
 
-  var taken = load_image(s).rgb;
+  var taken = load_source(s).rgb;
   if (pass_.heal == 1u) {
     let matched = textureLoad(work, vec2i(t - pass_.work_origin), 0);
     let shift = select(vec3f(0.0), matched.rgb / matched.a, matched.a > EPS);

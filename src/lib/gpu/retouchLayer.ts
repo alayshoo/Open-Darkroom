@@ -19,7 +19,9 @@ import {
     retouchUniform,
     segmentsBuffer,
     cloneRetouch,
+    pointsStartWith,
     retouchEqual,
+    sameBrush,
     type PlacedRetouch,
     type Retouch,
     type RetouchTile,
@@ -37,18 +39,13 @@ const BACKUP_TILE = 256;
 /** Past this many separate regions the mip levels are rebuilt over their union. */
 const MAX_MIP_REGIONS = 16;
 
+/** Texels of blur textures kept between updates; larger ones are freed once used. */
+const KEEP_WORK_TEXELS = 768 * 768;
+
 export interface RetouchLayer {
-    /**
-     * Brings `image` in line with `strokes`, applying only those added since
-     * the last call when the rest are unchanged. Returns whether it changed.
-     */
+    /** Brings `image` in line with `strokes`, applying only those newly added. Returns whether it changed. */
     sync(image: GPUImage, strokes: readonly Retouch[]): boolean;
-    /**
-     * Paints `stroke` over the strokes synced, while it is still being drawn,
-     * re-rendering only the tiles its new points reach. Null takes it away.
-     * Syncing the strokes with it added keeps what it painted. Returns whether
-     * the image changed.
-     */
+    /** Paints `stroke` while it is drawn, kept once synced; null takes it away. Returns whether it changed. */
     paint(image: GPUImage, stroke: Retouch | null): boolean;
     destroy(): void;
 }
@@ -119,6 +116,13 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
                 usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
             }),
         );
+    }
+
+    function releaseLargeWork() {
+        if (workSize.width * workSize.height <= KEEP_WORK_TEXELS) return;
+        for (const t of work) t.destroy();
+        work = [];
+        workSize = { width: 0, height: 0 };
     }
 
     function clearBackups() {
@@ -218,7 +222,7 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
             size: RETOUCH_UNIFORM_SIZE,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
-        device.queue.writeBuffer(uniform, 0, retouchUniform(placed, tile, [0, 0], width, height));
+        device.queue.writeBuffer(uniform, 0, retouchUniform(placed, tile, [0, 0], [0, 0], width, height));
         const segmentData = segmentsBuffer(tile);
         const segments = device.createBuffer({
             size: segmentData.byteLength,
@@ -288,28 +292,12 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
     }
 
     // ── The stroke being drawn ────────────────────────────────────────────────
-    //
     // Laid on a fixed grid of tiles, so a tile it has already rendered stays
     // as it is until a new segment of the stroke reaches it.
 
-    function sameBrush(a: Retouch, b: Retouch): boolean {
-        return (
-            a.mode === b.mode &&
-            a.radius === b.radius &&
-            a.feather === b.feather &&
-            a.opacity === b.opacity &&
-            a.offset[0] === b.offset[0] &&
-            a.offset[1] === b.offset[1]
-        );
-    }
-
     /** Whether `next` is `stroke` with points added, or the same. */
     function continues(stroke: Retouch, next: Retouch): boolean {
-        return (
-            sameBrush(stroke, next) &&
-            stroke.points.length <= next.points.length &&
-            stroke.points.every((p, i) => p[0] === next.points[i][0] && p[1] === next.points[i][1])
-        );
+        return sameBrush(stroke, next) && pointsStartWith(next, stroke);
     }
 
     function dropLive(encoder: GPUCommandEncoder, transient: { destroy(): void }[]): TexelBox[] {
@@ -371,8 +359,10 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
         // The dirty tiles read the image from before the stroke.
         const reads = new Set<number>();
         for (const { tile } of dirty) {
-            const box = tileReads(tile, placed.offset, width, height);
-            if (box) backupTiles(box, (key) => live!.before.has(key) && reads.add(key));
+            const { work, source } = tileReads(tile, placed.offset, width, height);
+            for (const box of source ? [work, source] : [work]) {
+                backupTiles(box, (key) => live!.before.has(key) && reads.add(key));
+            }
         }
         const restored = restore(encoder, live.before, reads);
 
@@ -416,6 +406,7 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
         finishMips(encoder, dirty);
         device.queue.submit([encoder.finish()]);
         for (const t of transient) t.destroy();
+        if (!live) releaseLargeWork();
         return true;
     }
 
@@ -458,6 +449,7 @@ export function createRetouchLayer(device: GPUDevice): RetouchLayer {
         finishMips(encoder, dirty);
         device.queue.submit([encoder.finish()]);
         for (const t of transient) t.destroy();
+        if (!live) releaseLargeWork();
 
         applied = strokes.map(cloneRetouch);
         return true;
