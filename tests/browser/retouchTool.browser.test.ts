@@ -36,12 +36,18 @@ function openPayload(): ArrayBuffer {
     return buffer;
 }
 
+/** How many strokes each request for the input histograms carried. */
+const binned: number[] = [];
+
 function stubTauri() {
     let callback = 0;
     (window as any).__TAURI_INTERNALS__ = {
-        invoke: async (cmd: string) => {
+        invoke: async (cmd: string, args?: { retouch?: unknown[] }) => {
             if (cmd === "open_image_file") return openPayload();
-            if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
+            if (cmd === "crop_histograms") {
+                binned.push(args?.retouch?.length ?? 0);
+                return new ArrayBuffer(HIST_BYTES);
+            }
             if (/^plugin:store\|(entries|keys|values)$/.test(cmd)) return [];
             if (cmd === "plugin:event|listen") return ++callback;
             return null;
@@ -181,6 +187,23 @@ describe("the retouch brushes", () => {
         // A drag sizes the brush rather than picking a source.
         expect(retouchTool.pickedSource).toBeNull();
         expect(history.stack.filter((a) => a.type === "retouchAdd")).toHaveLength(history.stack.length);
+    });
+
+    it("keeps the keyboard to the brushes and undo, and bins the histograms once put down", async () => {
+        history.clear();
+        await userEvent.keyboard("c");
+        paint([[0.2, 0.2]], { altKey: true });
+        const asked = binned.length;
+        paint([[0.6, 0.6]]);
+        await vi.waitFor(() => expect(history.stack).toHaveLength(1));
+        await userEvent.keyboard("r");
+        expect(button("Apply crop")).toBeNull();
+        expect(retouchTool.mode).toBe("clone");
+        expect(binned.length).toBe(asked);
+
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(binned.length).toBe(asked + 1));
+        expect(binned.at(-1)).toBeGreaterThan(0);
     });
 
     it("clears every stroke as one step", async () => {

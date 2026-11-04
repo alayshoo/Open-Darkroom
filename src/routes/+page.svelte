@@ -28,7 +28,7 @@
     import RetouchTools from "$lib/components/inputs/retouchTools.svelte";
     import RetouchBar from "$lib/components/retouch/RetouchBar.svelte";
     import { retouchTool } from "$lib/retouch/retouchTool.svelte";
-    import type { Retouch, RetouchMode } from "$lib/types/retouch";
+    import { type Retouch, type RetouchMode, retouchEqual } from "$lib/types/retouch";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -106,6 +106,7 @@
     import { actionMode, actionPage } from "$lib/history/actionControls";
 
     import { createKeydownHandler, isTextField } from "$lib/config/keyboardShortcuts";
+    import type { ShortcutId } from "$lib/config/shortcutRegistry";
 
     // ===== Control Modes =====
 
@@ -355,6 +356,7 @@
     // An edit belongs to one image, so a newly opened one starts from defaults
     // with an empty history.
     function resetEdit(width: number, height: number) {
+        retouchTool.mode = null;
         edit = newImageEdit(width, height);
         retouchTool.resetSource();
         cancelCrop();
@@ -517,10 +519,21 @@
             });
     }
 
+    // The strokes both histograms bin. They are out of sight while a brush is
+    // in hand, so they catch up once it is put down.
+    let histogramStrokes = $state.raw<Retouch[]>([]);
+    $effect(() => {
+        if (isRetouching) return;
+        const strokes = $state.snapshot(edit.retouch) as Retouch[];
+        const held = untrack(() => histogramStrokes);
+        if (strokes.length === held.length && strokes.every((s, i) => retouchEqual(s, held[i]))) return;
+        histogramStrokes = strokes;
+    });
+
     $effect(() => {
         const payload = imagePayload;
         const kept = { ...edit.crop };
-        const strokes = $state.snapshot(edit.retouch) as Retouch[];
+        const strokes = histogramStrokes;
         ++histogramRequest;
         histogramPending = null;
 
@@ -909,6 +922,9 @@
     // settings brings F1/F2 back.
     debugStats.enabled = import.meta.env.DEV;
 
+    // A brush in hand keeps the keyboard to itself, bar undo and redo.
+    const RETOUCH_SHORTCUTS: ReadonlySet<ShortcutId> = new Set(["healTool", "cloneTool", "undo", "redo"]);
+
     const handleKeydown = createKeydownHandler({
         handlers: {
             pagePrev: () => movePage(false),
@@ -950,6 +966,7 @@
         },
         closeSettings: () => settings.close(),
         isSettingsOpen: () => settings.open,
+        allows: (id) => !isRetouching || RETOUCH_SHORTCUTS.has(id),
     });
 
     // Enter and Escape belong to the crop tool while it is open, unless a field
@@ -1224,7 +1241,7 @@
                     curveLut={shownCurveLut}
                     {imagePayload}
                     crop={edit.crop}
-                    retouch={edit.retouch}
+                    retouch={histogramStrokes}
                     curveCanvas={curveHistogramCanvas}
                     masterCanvas={masterHistogramCanvas}
                     curveChannel={edit.isRgb ? curveChannel : "master"}

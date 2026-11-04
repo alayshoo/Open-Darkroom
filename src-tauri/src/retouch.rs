@@ -5,7 +5,7 @@
 // stroke into the same tiles; the strokes land in a sparse cache of linear
 // tiles that every region the export renders is read through.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde::Deserialize;
 use wgpu::util::DeviceExt;
@@ -270,10 +270,21 @@ pub struct LinearSource<'a> {
     channels: usize,
     luts: &'a [Vec<f32>; 3],
     blocks: RetouchedBlocks,
+    journal: Option<BlockJournal>,
 }
 
 /// The blocks strokes have written, as LE f32 RGBA, by block.
 pub type RetouchedBlocks = HashMap<(u32, u32), Vec<u8>>;
+
+/// What writes overwrote: each block they changed and what it held before,
+/// or None where it was untouched.
+pub type BlockJournal = HashMap<(u32, u32), Option<Vec<u8>>>;
+
+/// The box `[x0, y0, w, h]` of block `key` on an image `width` × `height`.
+pub fn block_box((bx, by): (u32, u32), width: u32, height: u32) -> [u32; 4] {
+    let (x, y) = (bx * CACHE_TILE, by * CACHE_TILE);
+    [x, y, CACHE_TILE.min(width - x), CACHE_TILE.min(height - y)]
+}
 
 impl<'a> LinearSource<'a> {
     pub fn new(pixels: &'a [u16], width: u32, height: u32, channels: usize, luts: &'a [Vec<f32>; 3]) -> Self {
@@ -289,11 +300,40 @@ impl<'a> LinearSource<'a> {
         luts: &'a [Vec<f32>; 3],
         blocks: RetouchedBlocks,
     ) -> Self {
-        Self { pixels, width, height, channels, luts, blocks }
+        Self { pixels, width, height, channels, luts, blocks, journal: None }
     }
 
     pub fn into_blocks(self) -> RetouchedBlocks {
         self.blocks
+    }
+
+    /// What block `key` holds, or None while no stroke has written it.
+    pub fn block(&self, key: (u32, u32)) -> Option<&[u8]> {
+        self.blocks.get(&key).map(Vec::as_slice)
+    }
+
+    /// Starts recording what later writes overwrite.
+    fn start_journal(&mut self) {
+        self.journal = Some(BlockJournal::new());
+    }
+
+    /// What was overwritten since [`Self::start_journal`].
+    fn take_journal(&mut self) -> BlockJournal {
+        self.journal.take().unwrap_or_default()
+    }
+
+    /// Puts back what `journal` recorded.
+    fn roll_back(&mut self, journal: BlockJournal) {
+        for (key, held) in journal {
+            match held {
+                Some(data) => self.blocks.insert(key, data),
+                None => self.blocks.remove(&key),
+            };
+        }
+    }
+
+    fn clear_blocks(&mut self) {
+        self.blocks.clear();
     }
 
     fn untouched(&self, x0: u32, y0: u32, w: u32, h: u32) -> Vec<u8> {
@@ -312,8 +352,8 @@ impl<'a> LinearSource<'a> {
     }
 
     fn block_box(&self, bx: u32, by: u32) -> (u32, u32, u32, u32) {
-        let (x, y) = (bx * CACHE_TILE, by * CACHE_TILE);
-        (x, y, CACHE_TILE.min(self.width - x), CACHE_TILE.min(self.height - y))
+        let [x, y, w, h] = block_box((bx, by), self.width, self.height);
+        (x, y, w, h)
     }
 
     /// `w` × `h` texels from (`x0`, `y0`), as LE f32 RGBA.
@@ -340,13 +380,9 @@ impl<'a> LinearSource<'a> {
         out
     }
 
-    /// Every block a stroke has written, as its box `[x0, y0, w, h]` and its
-    /// pixels in LE f32 RGBA.
-    pub fn blocks(&self) -> impl Iterator<Item = ([u32; 4], &[u8])> + '_ {
-        self.blocks.iter().map(|(&(bx, by), data)| {
-            let (x, y, w, h) = self.block_box(bx, by);
-            ([x, y, w, h], data.as_slice())
-        })
+    /// Every block a stroke has written, by key, with its pixels in LE f32 RGBA.
+    pub fn blocks(&self) -> impl Iterator<Item = ((u32, u32), &[u8])> + '_ {
+        self.blocks.iter().map(|(&key, data)| (key, data.as_slice()))
     }
 
     fn write(&mut self, x0: u32, y0: u32, w: u32, h: u32, data: &[u8]) {
@@ -354,6 +390,9 @@ impl<'a> LinearSource<'a> {
         for by in y0 / CACHE_TILE..=(y0 + h - 1) / CACHE_TILE {
             for bx in x0 / CACHE_TILE..=(x0 + w - 1) / CACHE_TILE {
                 let (bx0, by0, bw, bh) = self.block_box(bx, by);
+                if let Some(journal) = &mut self.journal {
+                    journal.entry((bx, by)).or_insert_with(|| self.blocks.get(&(bx, by)).cloned());
+                }
                 if !self.blocks.contains_key(&(bx, by)) {
                     let fresh = self.untouched(bx0, by0, bw, bh);
                     self.blocks.insert((bx, by), fresh);
@@ -496,25 +535,54 @@ fn run_pass(
     pass.draw(0..6, 0..1);
 }
 
-/// One tile of a stroke, rendered against `source` as it stands, read back as
-/// LE f32 RGBA over the tile's target box.
-fn render_tile(
+/// GPU memory the tiles of one submission may hold between them.
+const BATCH_BYTES: u64 = 256 << 20;
+
+fn box_size(b: &TexelBox) -> (u32, u32) {
+    ((b[2] - b[0]) as u32, (b[3] - b[1]) as u32)
+}
+
+fn padded_row(width: u32) -> u32 {
+    let row = width * LINEAR_F32_BYTES_PER_PIXEL as u32;
+    row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+/// Bytes of GPU memory one tile takes while it renders.
+fn tile_bytes(stroke: &PlacedRetouch, tile: &RetouchTile, width: u32, height: u32) -> u64 {
+    let (work, source_box) = tile_reads(tile, stroke.offset, width, height);
+    let (ww, wh) = box_size(&work);
+    let (sw, sh) = source_box.as_ref().map_or((0, 0), box_size);
+    let (tw, th) = box_size(&tile.target);
+    let px = LINEAR_F32_BYTES_PER_PIXEL as u64;
+    let image = ww.max(sw) as u64 * (wh + sh) as u64 * px;
+    let blur = if stroke.mode == RetouchMode::Heal { 3 * ww as u64 * wh as u64 * px } else { 0 };
+    image + blur + 2 * tw as u64 * th as u64 * px + padded_row(tw) as u64 * th as u64
+}
+
+/// Records one tile of a stroke into `encoder`, rendered against `source` as
+/// it stands and copied into `staging` from `at`. Returns the textures the
+/// commands read, which must outlive the submission.
+#[allow(clippy::too_many_arguments)]
+fn encode_tile(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     passes: &RetouchPasses,
     source: &LinearSource,
     stroke: &PlacedRetouch,
     tile: &RetouchTile,
-) -> Result<Vec<u8>, String> {
+    encoder: &mut wgpu::CommandEncoder,
+    blank: &wgpu::Texture,
+    staging: &wgpu::Buffer,
+    at: u64,
+) -> Vec<wgpu::Texture> {
     let (width, height) = (source.width, source.height);
     // The work box on top, and the source box under it, so the image holds only what the tile reads.
     let (work, source_box) = tile_reads(tile, stroke.offset, width, height);
-    let size = |b: &TexelBox| ((b[2] - b[0]) as u32, (b[3] - b[1]) as u32);
-    let (ww, wh) = size(&work);
-    let (sw, sh) = source_box.as_ref().map_or((0, 0), size);
+    let (ww, wh) = box_size(&work);
+    let (sw, sh) = source_box.as_ref().map_or((0, 0), box_size);
     let image = texture(device, "retouch_image", ww.max(sw), wh + sh, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
     let upload = |b: &TexelBox, y: u32| {
-        let (bw, bh) = size(b);
+        let (bw, bh) = box_size(b);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &image,
@@ -566,30 +634,23 @@ fn render_tile(
         })
     };
 
-    let mut encoder = device.create_command_encoder(&Default::default());
+    let mut kept = Vec::new();
     let target_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
     let matched = if stroke.mode == RetouchMode::Heal {
         let blur: Vec<_> = (0..3).map(|_| texture(device, "retouch_work", ww, wh, target_usage)).collect();
-        run_pass(&mut encoder, &passes.prep, &blur[0], &bind(&image));
-        run_pass(&mut encoder, &passes.blur_h, &blur[1], &bind(&blur[0]));
-        run_pass(&mut encoder, &passes.blur_v, &blur[2], &bind(&blur[1]));
-        blur.into_iter().nth(2).unwrap()
+        run_pass(encoder, &passes.prep, &blur[0], &bind(blank));
+        run_pass(encoder, &passes.blur_h, &blur[1], &bind(&blur[0]));
+        run_pass(encoder, &passes.blur_v, &blur[2], &bind(&blur[1]));
+        let matched = blur[2].clone();
+        kept.extend(blur);
+        matched
     } else {
-        texture(device, "retouch_blank", 1, 1, wgpu::TextureUsages::TEXTURE_BINDING)
+        blank.clone()
     };
 
-    let (tw, th) = ((tile.target[2] - tile.target[0]) as u32, (tile.target[3] - tile.target[1]) as u32);
+    let (tw, th) = box_size(&tile.target);
     let output = texture(device, "retouch_output", tw, th, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
-    run_pass(&mut encoder, &passes.apply, &output, &bind(&matched));
-
-    let row = tw * LINEAR_F32_BYTES_PER_PIXEL as u32;
-    let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("retouch_staging"),
-        size: (padded * th) as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    run_pass(encoder, &passes.apply, &output, &bind(&matched));
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: &output,
@@ -598,11 +659,52 @@ fn render_tile(
             aspect: wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
-            buffer: &staging,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None },
+            buffer: staging,
+            layout: wgpu::TexelCopyBufferLayout { offset: at, bytes_per_row: Some(padded_row(tw)), rows_per_image: None },
         },
         wgpu::Extent3d { width: tw, height: th, depth_or_array_layers: 1 },
     );
+    kept.extend([image, output]);
+    kept
+}
+
+/// `tiles`, rendered in one submission and read back as LE f32 RGBA over
+/// each tile's target box.
+fn render_batch(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    passes: &RetouchPasses,
+    source: &LinearSource,
+    stroke: &PlacedRetouch,
+    tiles: &[RetouchTile],
+) -> Result<Vec<Vec<u8>>, String> {
+    let offsets: Vec<u64> = tiles
+        .iter()
+        .scan(0u64, |at, tile| {
+            let (tw, th) = box_size(&tile.target);
+            let here = *at;
+            *at += padded_row(tw) as u64 * th as u64;
+            Some(here)
+        })
+        .collect();
+    let total = tiles.last().map_or(0, |t| {
+        let (tw, th) = box_size(&t.target);
+        offsets[offsets.len() - 1] + padded_row(tw) as u64 * th as u64
+    });
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("retouch_staging"),
+        size: total,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    // Stands in for the blurred match in a clone, which never reads it.
+    let blank = texture(device, "retouch_blank", 1, 1, wgpu::TextureUsages::TEXTURE_BINDING);
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+    let mut kept = Vec::new();
+    for (tile, &at) in tiles.iter().zip(&offsets) {
+        kept.extend(encode_tile(device, queue, passes, source, stroke, tile, &mut encoder, &blank, &staging, at));
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -611,16 +713,60 @@ fn render_tile(
     });
     let _ = device.poll(wgpu::MaintainBase::Wait);
     rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("GPU buffer map failed: {e}"))?;
+    drop(kept);
 
     let mapped = staging.slice(..).get_mapped_range();
-    let mut out = Vec::with_capacity((row * th) as usize);
-    for y in 0..th as usize {
-        let at = y * padded as usize;
-        out.extend_from_slice(&mapped[at..at + row as usize]);
-    }
+    let out = tiles
+        .iter()
+        .zip(&offsets)
+        .map(|(tile, &at)| {
+            let (tw, th) = box_size(&tile.target);
+            let (row, padded) = (tw as usize * LINEAR_F32_BYTES_PER_PIXEL, padded_row(tw) as usize);
+            let mut data = Vec::with_capacity(row * th as usize);
+            for y in 0..th as usize {
+                let from = at as usize + y * padded;
+                data.extend_from_slice(&mapped[from..from + row]);
+            }
+            data
+        })
+        .collect();
     drop(mapped);
     staging.unmap();
     Ok(out)
+}
+
+/// One stroke laid over `source`, every tile rendered against the image as it
+/// was before the stroke.
+fn apply_stroke(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    passes: &RetouchPasses,
+    source: &mut LinearSource,
+    stroke: &RetouchPayload,
+) -> Result<(), String> {
+    let (width, height) = (source.width, source.height);
+    let placed = place_retouch(stroke, width, height);
+    let tiles = retouch_tiles(&placed, width, height);
+    let mut rendered = Vec::with_capacity(tiles.len());
+    let mut start = 0;
+    while start < tiles.len() {
+        let mut end = start + 1;
+        let mut bytes = tile_bytes(&placed, &tiles[start], width, height);
+        while end < tiles.len() {
+            bytes += tile_bytes(&placed, &tiles[end], width, height);
+            if bytes > BATCH_BYTES {
+                break;
+            }
+            end += 1;
+        }
+        rendered.extend(render_batch(device, queue, passes, source, &placed, &tiles[start..end])?);
+        start = end;
+    }
+    for (tile, data) in tiles.iter().zip(rendered) {
+        let [x0, y0, x1, y1] = tile.target;
+        source.write(x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32, &data);
+    }
+    Ok(())
 }
 
 /// Lays `strokes` over `source` in order, each against the image as the
@@ -646,16 +792,124 @@ pub fn apply_retouch_with(
     strokes: &[RetouchPayload],
 ) -> Result<(), String> {
     for stroke in strokes.iter().filter(|s| s.is_valid()) {
-        let placed = place_retouch(stroke, source.width, source.height);
-        let tiles = retouch_tiles(&placed, source.width, source.height);
-        let mut rendered = Vec::with_capacity(tiles.len());
-        for tile in &tiles {
-            rendered.push(render_tile(device, queue, passes, source, &placed, tile)?);
-        }
-        for (tile, data) in tiles.iter().zip(rendered) {
-            let [x0, y0, x1, y1] = tile.target;
-            source.write(x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32, &data);
-        }
+        apply_stroke(device, queue, passes, source, stroke)?;
     }
     Ok(())
+}
+
+// ── Following the strokes as they change ──────────────────────────────────────
+
+/// Bytes of overwritten blocks a [`StrokeJournal`] keeps; past it the oldest
+/// strokes can no longer be rolled back.
+pub const MAX_JOURNAL_BYTES: usize = 256 << 20;
+
+/// The strokes a [`LinearSource`]'s blocks hold, with what each one wrote
+/// over, so a list sharing only their start is reached by rolling back.
+pub struct StrokeJournal {
+    strokes: Vec<RetouchPayload>,
+    // What each stroke from `floor` on overwrote; earlier ones were let go to stay under the cap.
+    entries: VecDeque<BlockJournal>,
+    floor: usize,
+    bytes: usize,
+    cap: usize,
+}
+
+fn journal_bytes(journal: &BlockJournal) -> usize {
+    journal.values().map(|held| held.as_ref().map_or(0, Vec::len)).sum()
+}
+
+impl Default for StrokeJournal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StrokeJournal {
+    pub fn new() -> Self {
+        Self::with_cap(MAX_JOURNAL_BYTES)
+    }
+
+    pub fn with_cap(cap: usize) -> Self {
+        Self { strokes: Vec::new(), entries: VecDeque::new(), floor: 0, bytes: 0, cap }
+    }
+
+    pub fn strokes(&self) -> &[RetouchPayload] {
+        &self.strokes
+    }
+
+    pub fn cap(&self) -> usize {
+        self.cap
+    }
+
+    fn push(&mut self, stroke: RetouchPayload, journal: BlockJournal) {
+        self.strokes.push(stroke);
+        self.bytes += journal_bytes(&journal);
+        self.entries.push_back(journal);
+        while self.bytes > self.cap {
+            let Some(oldest) = self.entries.pop_front() else { break };
+            self.bytes -= journal_bytes(&oldest);
+            self.floor += 1;
+        }
+    }
+
+    fn pop(&mut self) -> BlockJournal {
+        self.strokes.pop();
+        let journal = self.entries.pop_back().unwrap_or_default();
+        self.bytes -= journal_bytes(&journal);
+        journal
+    }
+}
+
+/// How [`follow_strokes`] reached the strokes asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Followed {
+    /// By rolling back and applying only what differed; `touched` saw every block that changed.
+    Stepped,
+    /// From the untouched image, since what differed had been rolled past the cap.
+    Restarted,
+}
+
+/// Brings `source`, whose blocks hold `journal`'s strokes, in line with
+/// `strokes`: the strokes after the start the two share are rolled back, then
+/// the rest are applied. `touched` is given each block that changes, with what
+/// it held just before, at least once and first with what it held on entry.
+pub fn follow_strokes(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    passes: &RetouchPasses,
+    source: &mut LinearSource,
+    journal: &mut StrokeJournal,
+    strokes: &[RetouchPayload],
+    mut touched: impl FnMut((u32, u32), Option<&[u8]>),
+) -> Result<Followed, String> {
+    let shared = journal.strokes.iter().zip(strokes).take_while(|(a, b)| a == b).count();
+    let followed = if shared < journal.floor {
+        source.clear_blocks();
+        *journal = StrokeJournal::with_cap(journal.cap);
+        Followed::Restarted
+    } else {
+        while journal.strokes.len() > shared {
+            let undo = journal.pop();
+            for key in undo.keys() {
+                touched(*key, source.block(*key));
+            }
+            source.roll_back(undo);
+        }
+        Followed::Stepped
+    };
+
+    for stroke in &strokes[journal.strokes.len()..] {
+        source.start_journal();
+        let applied = if stroke.is_valid() { apply_stroke(device, queue, passes, source, stroke) } else { Ok(()) };
+        let undo = source.take_journal();
+        if let Err(e) = applied {
+            source.roll_back(undo);
+            return Err(e);
+        }
+        for (key, held) in &undo {
+            touched(*key, held.as_deref());
+        }
+        journal.push(stroke.clone(), undo);
+    }
+    Ok(followed)
 }

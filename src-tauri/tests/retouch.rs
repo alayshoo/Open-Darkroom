@@ -12,11 +12,13 @@ use open_darkroom_lib::crop::CropPayload;
 use open_darkroom_lib::export_rendering::{render_cropped_with_chunk_rows, SlidersPayload};
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::crop::crop_view;
-use open_darkroom_lib::image_opening::{compute_histograms_in, compute_retouched_histograms_in, Rgba16Image};
+use open_darkroom_lib::image_opening::{
+    compute_histograms_in, compute_retouched_histograms_in, Histograms, Rgba16Image, RetouchedHistograms,
+};
 use open_darkroom_lib::output_space::OutputSpace;
 use open_darkroom_lib::retouch::{
-    apply_retouch, blur_span, place_retouch, retouch_tiles, retouch_uniform, LinearSource, RetouchMode,
-    RetouchPayload, RETOUCH_TILE, RETOUCH_UNIFORM_BYTES,
+    apply_retouch, blur_span, follow_strokes, place_retouch, retouch_tiles, retouch_uniform, Followed, LinearSource,
+    RetouchMode, RetouchPasses, RetouchPayload, StrokeJournal, RETOUCH_TILE, RETOUCH_UNIFORM_BYTES,
 };
 
 fn identity_luts() -> [Vec<f32>; 3] {
@@ -232,6 +234,95 @@ fn the_input_histograms_count_a_healed_speck_as_what_replaced_it() {
     assert_eq!(after.r[0xF0], 0);
     assert_eq!(after.r.iter().sum::<u32>(), 128 * 64);
     assert_eq!(after.r[0x60] - before.r[0x60], 16);
+}
+
+/// Strokes spread over a noisy image, each on its own spot.
+fn spots(width: u32, height: u32) -> Vec<RetouchPayload> {
+    let r = 5.0 / width.max(height) as f64;
+    [(0.2, 0.3), (0.5, 0.5), (0.8, 0.7), (0.5, 0.52), (0.3, 0.8)]
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y))| {
+            let mode = if i % 2 == 0 { RetouchMode::Heal } else { RetouchMode::Clone };
+            stroke(mode, &[[x, y], [x + 0.05, y + 0.02]], r, [-0.15, -0.1])
+        })
+        .collect()
+}
+
+/// Follows `steps` in turn with one journal, checking each against the same strokes applied afresh.
+fn follow_through(img: &Rgba16Image, cap: usize, steps: &[Vec<RetouchPayload>]) -> Vec<Followed> {
+    let (w, h) = img.dimensions();
+    let luts = identity_luts();
+    let (device, queue) = device();
+    let passes = RetouchPasses::new(device);
+    let mut journal = StrokeJournal::with_cap(cap);
+    let mut blocks = Default::default();
+    let mut outcomes = Vec::new();
+    for strokes in steps {
+        let mut source = LinearSource::with_blocks(img.as_raw(), w, h, 4, &luts, blocks);
+        outcomes.push(follow_strokes(device, queue, &passes, &mut source, &mut journal, strokes, |_, _| {}).unwrap());
+        assert_eq!(source.read(0, 0, w, h), retouched(img, strokes), "after following {} strokes", strokes.len());
+        assert_eq!(journal.strokes(), strokes.as_slice());
+        blocks = source.into_blocks();
+    }
+    outcomes
+}
+
+#[test]
+fn strokes_rolled_back_leave_the_image_as_if_never_applied() {
+    let img = noise(160, 120, 5);
+    let all = spots(160, 120);
+    let steps = vec![
+        all.clone(),
+        all[..2].to_vec(),
+        vec![all[0].clone(), all[3].clone()],
+        vec![],
+        all[..4].to_vec(),
+    ];
+    assert!(follow_through(&img, usize::MAX, &steps).iter().all(|f| *f == Followed::Stepped));
+}
+
+#[test]
+fn past_the_cap_the_oldest_strokes_are_reapplied_from_the_untouched_image() {
+    let img = noise(160, 120, 6);
+    let all = spots(160, 120);
+    // Room for about one stroke's blocks, so only the newest can be rolled back.
+    let outcomes = follow_through(&img, 300_000, &[all.clone(), all[..4].to_vec(), all[..1].to_vec()]);
+    assert_eq!(outcomes, [Followed::Stepped, Followed::Stepped, Followed::Restarted]);
+}
+
+fn same_counts(a: &Histograms, b: &Histograms) -> bool {
+    a.r == b.r && a.g == b.g && a.b == b.b
+}
+
+#[test]
+fn the_kept_histograms_match_binning_afresh_as_strokes_and_crops_change() {
+    let (w, h) = (160, 120);
+    let img = noise(w, h, 9);
+    let bins: Vec<u8> = (0..=u16::MAX as u32).map(|i| (i >> 8) as u8).collect();
+    let luts = identity_luts();
+    let (device, queue) = device();
+    let passes = RetouchPasses::new(device);
+    let tight = CropPayload { cx: 0.45, cy: 0.55, w: 0.6, h: 0.5, angle: 0.2, ..CropPayload::FULL_FRAME };
+    let all = spots(w, h);
+    let steps = [
+        (CropPayload::FULL_FRAME, all[..3].to_vec()),
+        (CropPayload::FULL_FRAME, all.clone()),
+        (CropPayload::FULL_FRAME, all[..1].to_vec()),
+        (tight, all[..1].to_vec()),
+        (tight, vec![all[0].clone(), all[4].clone()]),
+        (tight, all[..4].to_vec()),
+    ];
+    let mut kept = RetouchedHistograms::new();
+    for (crop, strokes) in &steps {
+        let got = kept
+            .update(device, queue, &passes, img.as_raw(), w, h, 4, crop, &bins, &luts, strokes)
+            .unwrap();
+        let view = crop_view(crop, w, h);
+        let fresh =
+            compute_retouched_histograms_in(device, queue, img.as_raw(), w, h, 4, &view, &bins, &luts, strokes).unwrap();
+        assert!(same_counts(&got, &fresh), "{} strokes in {crop:?}", strokes.len());
+    }
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
