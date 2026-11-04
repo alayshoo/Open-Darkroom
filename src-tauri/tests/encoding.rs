@@ -332,24 +332,63 @@ fn decode_jxl(path: &std::path::Path, max: f32) -> (u32, u32, usize, Vec<u16>) {
     (image.width(), image.height(), frame.channels(), samples)
 }
 
-/// Film grain stand-in: a smooth ramp with per-sample noise on top, which is
-/// what defeats lossless prediction and what lossy coding is tempted to smooth.
+/// Film grain stand-in: a smooth ramp under luminance noise that clumps over a
+/// few pixels and is shared by all three channels, as dye clouds mostly are.
 fn grainy16(width: u32, height: u32) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
     let mut state = 0x2545_f491_u32;
-    let mut out = Vec::with_capacity((width * height * 6) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            for c in 0..3u32 {
-                state ^= state << 13;
-                state ^= state >> 17;
-                state ^= state << 5;
-                let base = 12_000 + x * 30_000 / width + y * 10_000 / height + c * 3_000;
-                let v = base + state % 4_000;
-                out.extend_from_slice(&(v as u16).to_le_bytes());
+    let white: Vec<f64> = (0..w * h)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            f64::from(state % 10_000) / 10_000.0 - 0.5
+        })
+        .collect();
+
+    let grain = |x: usize, y: usize| {
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for (dx, dy) in (-1i64..=1).flat_map(|dy| (-1i64..=1).map(move |dx| (dx, dy))) {
+            let (xx, yy) = (x as i64 + dx, y as i64 + dy);
+            if xx >= 0 && yy >= 0 && (xx as usize) < w && (yy as usize) < h {
+                let k = if dx == 0 && dy == 0 { 2.0 } else { 1.0 };
+                sum += k * white[yy as usize * w + xx as usize];
+                weight += k;
+            }
+        }
+        sum / weight
+    };
+
+    let mut out = Vec::with_capacity(w * h * 6);
+    for y in 0..h {
+        for x in 0..w {
+            let g = grain(x, y);
+            for c in 0..3 {
+                let base = 15_000.0 + (x * 30_000 / w + y * 10_000 / h + c * 3_000) as f64;
+                let v = base + 6_000.0 * g * (1.0 + 0.05 * c as f64);
+                out.extend_from_slice(&(v.clamp(0.0, 65535.0) as u16).to_le_bytes());
             }
         }
     }
     out
+}
+
+/// Each sample minus the mean of its horizontal neighbours on the same channel:
+/// what is left is the grain, with the image underneath removed.
+fn high_pass(samples: &[f64], width: usize) -> Vec<f64> {
+    (0..samples.len())
+        .map(|i| {
+            let x = (i / 3) % width;
+            if x < 3 || x + 3 >= width {
+                return 0.0;
+            }
+            let mean = (-3i64..=3)
+                .map(|d| samples[(i as i64 + d * 3) as usize])
+                .sum::<f64>()
+                / 7.0;
+            samples[i] - mean
+        })
+        .collect()
 }
 
 #[test]
@@ -408,9 +447,12 @@ fn bw_jxl_writes_a_single_channel_tagged_grey() {
     assert_eq!(profile.color_space(), lcms2::ColorSpaceSignature::GrayData);
 }
 
+/// Lossy coding is free to swap the grain for something statistically similar
+/// and still score well on error. What matters here is that the grain coming
+/// back is the same grain, so it is compared pattern against pattern.
 #[test]
-fn jxl_lossy_stays_close_and_is_smaller_than_lossless() {
-    let (w, h) = (128u32, 96);
+fn jxl_lossy_keeps_the_grain_and_is_smaller_than_lossless() {
+    let (w, h) = (256u32, 192);
     let source = grainy16(w, h);
 
     let encode = |lossless: bool, quality: u8| {
@@ -421,7 +463,12 @@ fn jxl_lossy_stays_close_and_is_smaller_than_lossless() {
         s.jxl_quality = quality;
         encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
         let size = std::fs::metadata(scratch.path()).expect("stat").len();
-        (size, decode_jxl(scratch.path(), 65535.0).3)
+        let samples: Vec<f64> = decode_jxl(scratch.path(), 65535.0)
+            .3
+            .iter()
+            .map(|&v| f64::from(v))
+            .collect();
+        (size, samples)
     };
 
     let (lossless_size, _) = encode(true, 90);
@@ -431,19 +478,16 @@ fn jxl_lossy_stays_close_and_is_smaller_than_lossless() {
     assert!(high_size < lossless_size, "lossy {high_size} B is not smaller than lossless {lossless_size} B");
     assert!(low_size < high_size, "quality 60 ({low_size} B) is not smaller than 95 ({high_size} B)");
 
-    let source: Vec<u16> = source
+    let source: Vec<f64> = source
         .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .map(|c| f64::from(u16::from_le_bytes([c[0], c[1]])))
         .collect();
-    let mean_error = source
-        .iter()
-        .zip(&high)
-        .map(|(&a, &b)| (f64::from(a) - f64::from(b)).abs())
-        .sum::<f64>()
-        / source.len() as f64;
+    let (a, b) = (high_pass(&source, w as usize), high_pass(&high, w as usize));
+    let dot = |p: &[f64], q: &[f64]| p.iter().zip(q).map(|(x, y)| x * y).sum::<f64>();
+    let correlation = dot(&a, &b) / (dot(&a, &a) * dot(&b, &b)).sqrt();
     assert!(
-        mean_error < 1500.0,
-        "quality 95 drifted by {mean_error:.0} levels on average"
+        correlation > 0.85,
+        "quality 95 kept only {correlation:.2} of the grain pattern"
     );
 }
 
