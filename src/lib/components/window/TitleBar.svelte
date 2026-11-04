@@ -20,6 +20,7 @@
         pasteAdjustments = () => {},
         resetAdjustments = () => {},
         openSettings = (_section?: string) => {},
+        busy = false,
     }: {
         title?: string;
         editable?: boolean;
@@ -30,7 +31,10 @@
         pasteAdjustments?: () => void;
         resetAdjustments?: () => void;
         openSettings?: (section?: string) => void;
+        busy?: boolean;
     } = $props();
+
+    const modalOpen = $derived(settings.open || busy);
 
     let isMaximized = $state(false);
     let unlisten: (() => void) | undefined;
@@ -64,7 +68,7 @@
      the page's .chrome-scrim, which runs on down the left edge. -->
 <div
     class="titlebar flex items-center justify-center"
-    class:modal-open={settings.open}
+    class:modal-open={modalOpen}
 >
     <div data-tauri-drag-region class="drag absolute inset-0"></div>
 
@@ -152,7 +156,7 @@
         bind:value={title}
         readonly={!editable}
         class="window-title h-6.5 rounded-[6px] px-2.5 py-1 border-2 border-transparent"
-        style="pointer-events: {editable && !settings.open ? 'auto' : 'none'}"
+        style="pointer-events: {editable && !modalOpen ? 'auto' : 'none'}"
     />
 
     <!-- Trailing group. The buttons sit 5px in from the window's right edge,
