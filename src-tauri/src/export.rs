@@ -9,8 +9,9 @@ use std::time::Instant;
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::export_encoding::{encode_and_save, ExportFormat, ExportSettings};
-use crate::crop::CropPayload;
+use crate::export_encoding::{encode_and_save_with_progress, ExportFormat, ExportSettings};
+use crate::export_progress::{ProgressEvent, ProgressPlan};
+use crate::crop::{crop_view, CropPayload};
 use crate::export_rendering::{render_cropped_image, SlidersPayload};
 use crate::image_opening::ImageState;
 use crate::retouch::RetouchPayload;
@@ -36,6 +37,7 @@ pub(crate) async fn export_image(
         ExportFormat::Jpeg => ("JPEG Image", &["jpg", "jpeg"]),
         ExportFormat::Webp => ("WebP Image", &["webp"]),
         ExportFormat::Tiff => ("TIFF Image", &["tiff", "tif"]),
+        ExportFormat::Jxl => ("JPEG XL Image", &["jxl"]),
     };
 
     let path = app
@@ -52,6 +54,7 @@ pub(crate) async fn export_image(
         ExportFormat::Jpeg => ensure_extension(path, "jpg"),
         ExportFormat::Webp => ensure_extension(path, "webp"),
         ExportFormat::Tiff => ensure_extension(path, "tiff"),
+        ExportFormat::Jxl => ensure_extension(path, "jxl"),
     };
 
     let (pixels_u16, width, height, channels, space) = {
@@ -68,16 +71,29 @@ pub(crate) async fn export_image(
 
     let t = Instant::now();
 
-    let bit_depth = match settings.format {
-        ExportFormat::Tiff => settings.tiff_bit_depth,
-        _ => 8,
-    };
+    let bit_depth = settings.bit_depth();
 
     let _ = app.emit("export:started", ());
 
+    let view = crop_view(&crop, width, height);
+    let megapixels = view.width as f32 * view.height as f32 / 1e6;
+    let plan = Arc::new(ProgressPlan::new(
+        settings.encode_seconds_per_megapixel() * megapixels,
+    ));
+    let send = {
+        let app = app.clone();
+        move |event: Option<ProgressEvent>| {
+            if let Some(event) = event {
+                let _ = app.emit("export:progress", event);
+            }
+        }
+    };
+    send(plan.preparing());
+
     // The renderer is Tauri-agnostic; bridging its progress to the frontend is
     // this command's job.
-    let progress_handle = app.clone();
+    let render_plan = Arc::clone(&plan);
+    let render_send = send.clone();
     let rendered = render_cropped_image(
         &pixels_u16,
         width,
@@ -89,9 +105,7 @@ pub(crate) async fn export_image(
         &space,
         settings.output_space,
         bit_depth,
-        move |progress| {
-            let _ = progress_handle.emit("export:progress", progress);
-        },
+        move |fraction| render_send(render_plan.rendered(fraction)),
     )
     .await?;
 
@@ -100,9 +114,22 @@ pub(crate) async fn export_image(
         t.elapsed().as_millis()
     );
 
-    encode_and_save(rendered.rgb, rendered.width, rendered.height, &settings, &path)?;
-
-    let _ = app.emit("export:progress", 1.0f32);
+    send(plan.encoding(settings.reports_encode_progress()));
+    // Encoding is CPU-bound and can run for minutes, so it stays off the async
+    // runtime's workers.
+    let encode_path = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        encode_and_save_with_progress(
+            rendered.rgb,
+            rendered.width,
+            rendered.height,
+            &settings,
+            &encode_path,
+            &mut |fraction| send(plan.encoded(fraction)),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     println!(
         "export: saved {} × {} → {} in {} ms total",

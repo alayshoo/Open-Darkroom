@@ -1,7 +1,7 @@
 // src-tauri/src/export_encoding.rs
 //
 // File-format-specific encoding: takes raw RGB bytes from the GPU pipeline
-// and writes them to disk as PNG, JPEG, WebP, or TIFF with user-controlled
+// and writes them to disk as PNG, JPEG, WebP, TIFF or JPEG XL with user-controlled
 // quality settings.
 //
 // Every file is tagged with the profile of the space it was rendered into.
@@ -11,15 +11,15 @@
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use image::codecs::jpeg::JpegEncoder;
-use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::ImageEncoder;
 use tiff::encoder::colortype::{self, ColorType};
 use tiff::encoder::{TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
+use crate::jxl_encoding::{encode_jxl, JxlOptions};
 use crate::output_space::OutputSpace;
 
 // ── Export settings ───────────────────────────────────────────────────────────
@@ -31,9 +31,10 @@ pub enum ExportFormat {
     Jpeg,
     Webp,
     Tiff,
+    Jxl,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSettings {
     pub format: ExportFormat,
@@ -51,8 +52,72 @@ pub struct ExportSettings {
     pub webp_compression: u8,
     /// TIFF bit depth per channel: 8 or 16.
     pub tiff_bit_depth: u8,
-    /// Whether the image is in black-and-white mode (greyscale output for TIFF).
+    /// JPEG XL: encode losslessly when true.
+    pub jxl_lossless: bool,
+    /// JPEG XL lossy quality, 1 (lowest) – 100 (highest); 90 is visually lossless.
+    pub jxl_quality: u8,
+    /// JPEG XL encoder effort, 1 (fastest) – 9 (smallest).
+    pub jxl_effort: u8,
+    /// JPEG XL bits per channel, 8 – 16.
+    pub jxl_bit_depth: u8,
+    /// Whether the image is in black-and-white mode (greyscale output for TIFF
+    /// and JPEG XL).
     pub is_bw: bool,
+}
+
+impl ExportSettings {
+    /// Bits per channel the render has to produce for this format.
+    pub fn bit_depth(&self) -> u8 {
+        match self.format {
+            ExportFormat::Tiff => self.tiff_bit_depth,
+            // Anything past 8 bits is rendered at 16 and requantised by libjxl.
+            ExportFormat::Jxl if self.jxl_bit_depth > 8 => 16,
+            _ => 8,
+        }
+    }
+
+    /// Whether the encoder reports how much of the file it has written.
+    pub fn reports_encode_progress(&self) -> bool {
+        matches!(self.format, ExportFormat::Png | ExportFormat::Tiff)
+    }
+
+    /// Rough encode time in seconds per megapixel, measured on four cores with
+    /// grainy content. It only decides how much of the progress bar encoding
+    /// gets, so it needs to be the right order of magnitude, not exact.
+    pub fn encode_seconds_per_megapixel(&self) -> f32 {
+        let quality = |q: u8| f32::from(q.clamp(1, 100)) / 100.0;
+        match self.format {
+            ExportFormat::Tiff => 0.005,
+            ExportFormat::Jpeg => 0.02 + 0.03 * quality(self.jpeg_quality),
+            ExportFormat::Png if self.png_compression <= 2 => 0.015,
+            ExportFormat::Png => 0.14,
+            ExportFormat::Webp if self.webp_lossless && self.webp_compression == 0 => 0.17,
+            ExportFormat::Webp if self.webp_lossless => 0.5,
+            ExportFormat::Webp => 0.08 + 0.05 * quality(self.webp_quality),
+            ExportFormat::Jxl => {
+                // Indexed by effort; the even efforts sit between measured odd ones.
+                const LOSSY: [f32; 9] = [0.04, 0.04, 0.04, 0.07, 0.10, 0.14, 0.17, 0.22, 0.27];
+                const LOSSLESS_8: [f32; 9] = [0.008, 0.03, 0.048, 0.09, 0.134, 0.25, 0.376, 0.8, 1.39];
+                const LOSSLESS_16: [f32; 9] = [0.023, 0.04, 0.056, 0.11, 0.164, 0.3, 0.48, 1.5, 2.9];
+
+                let e = usize::from(self.jxl_effort.clamp(1, 9) - 1);
+                let seconds = if self.jxl_lossless {
+                    let t = f32::from(self.jxl_bit_depth.clamp(8, 16) - 8) / 8.0;
+                    LOSSLESS_8[e] + (LOSSLESS_16[e] - LOSSLESS_8[e]) * t
+                } else {
+                    LOSSY[e]
+                };
+                // libjxl is the one encoder here that uses every core.
+                let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+                seconds * 4.0 / cores as f32
+            }
+        }
+    }
+
+    /// Whether the file is written with a single channel.
+    fn greyscale(&self) -> bool {
+        self.is_bw && matches!(self.format, ExportFormat::Tiff | ExportFormat::Jxl)
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -65,47 +130,118 @@ pub fn encode_and_save(
     settings: &ExportSettings,
     path: &Path,
 ) -> Result<(), String> {
+    encode_and_save_with_progress(rgb_bytes, width, height, settings, path, &mut |_| {})
+}
+
+/// As [`encode_and_save`], calling `on_progress` with the fraction written so
+/// far for the formats where [`ExportSettings::reports_encode_progress`] holds.
+///
+/// The file is written next to `path` and moved over it only once complete, so
+/// a failed export never leaves a partial file or destroys the one it replaces.
+pub fn encode_and_save_with_progress(
+    rgb_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    settings: &ExportSettings,
+    path: &Path,
+    on_progress: &mut dyn FnMut(f32),
+) -> Result<(), String> {
+    let partial = partial_path(path);
+    let written = encode(rgb_bytes, width, height, settings, &partial, on_progress)
+        .and_then(|()| std::fs::rename(&partial, path).map_err(|e| e.to_string()));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
+}
+
+/// A hidden sibling of `path`, on the same volume so the final rename is atomic.
+fn partial_path(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    path.with_file_name(format!(".{name}.partial"))
+}
+
+fn encode(
+    rgb_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    settings: &ExportSettings,
+    path: &Path,
+    on_progress: &mut dyn FnMut(f32),
+) -> Result<(), String> {
     // Built once here rather than per encoder: the profile describes the render,
-    // which is the same whatever container it ends up in. The exception is a
-    // black-and-white TIFF, the one output written with a single sample per
-    // pixel, which needs a profile naming a single channel.
-    let greyscale = matches!(settings.format, ExportFormat::Tiff) && settings.is_bw;
+    // whatever container it ends up in. Greyscale output, written with a single
+    // sample per pixel, needs a profile naming a single channel.
+    let greyscale = settings.greyscale();
     let icc = settings.output_space.icc(greyscale)?;
 
     match settings.format {
-        ExportFormat::Png  => encode_png(rgb_bytes, width, height, settings.png_compression, icc, path),
+        ExportFormat::Png  => encode_png(&rgb_bytes, width, height, settings.png_compression, icc, path, on_progress),
         ExportFormat::Jpeg => encode_jpeg(rgb_bytes, width, height, settings.jpeg_quality, icc, path),
         ExportFormat::Webp => encode_webp(rgb_bytes, width, height, settings.webp_lossless, settings.webp_quality, settings.webp_compression, &icc, path),
-        ExportFormat::Tiff => encode_tiff(rgb_bytes, width, height, settings.tiff_bit_depth, settings.is_bw, &icc, path),
+        ExportFormat::Tiff => encode_tiff(rgb_bytes, width, height, settings.tiff_bit_depth, settings.is_bw, &icc, path, on_progress),
+        ExportFormat::Jxl  => encode_jxl(rgb_bytes, width, height, &JxlOptions {
+            lossless: settings.jxl_lossless,
+            quality: settings.jxl_quality,
+            effort: settings.jxl_effort,
+            bit_depth: settings.jxl_bit_depth,
+            greyscale,
+        }, &icc, path),
     }
 }
 
 // ── PNG ───────────────────────────────────────────────────────────────────────
 
+/// Rows handed to the PNG stream between progress reports.
+const PNG_ROWS_PER_REPORT: usize = 64;
+
+/// Written through a stream rather than in one call, so that progress can be
+/// reported as the rows go out.
 fn encode_png(
-    rgb_bytes: Vec<u8>,
+    rgb_bytes: &[u8],
     width: u32,
     height: u32,
     compression: u8,
     icc: Vec<u8>,
     path: &Path,
+    on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
-    let compression_type = match compression {
-        0..=2 => CompressionType::Fast,
-        3..=6 => CompressionType::Default,
-        _     => CompressionType::Best,
-    };
+    let row_bytes = width as usize * 3;
+    if rgb_bytes.len() != row_bytes * height as usize {
+        return Err(format!(
+            "PNG input is {} bytes, expected {}",
+            rgb_bytes.len(),
+            row_bytes * height as usize
+        ));
+    }
+
+    let mut info = png::Info::with_size(width, height);
+    info.icc_profile = Some(Cow::Owned(icc));
+    info.color_type = png::ColorType::Rgb;
+    info.bit_depth = png::BitDepth::Eight;
 
     let file = File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = PngEncoder::new_with_quality(
-        BufWriter::new(file),
-        compression_type,
-        FilterType::Adaptive,
-    );
-    encoder.set_icc_profile(icc).map_err(|e| e.to_string())?;
-    encoder
-        .write_image(&rgb_bytes, width, height, image::ExtendedColorType::Rgb8)
-        .map_err(|e| e.to_string())
+    let mut encoder =
+        png::Encoder::with_info(BufWriter::new(file), info).map_err(|e| e.to_string())?;
+    encoder.set_compression(match compression {
+        0..=2 => png::Compression::Fast,
+        3..=6 => png::Compression::Balanced,
+        _ => png::Compression::High,
+    });
+    encoder.set_filter(png::Filter::Adaptive);
+
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    let mut stream = writer.stream_writer().map_err(|e| e.to_string())?;
+
+    let mut written = 0usize;
+    for rows in rgb_bytes.chunks(row_bytes * PNG_ROWS_PER_REPORT) {
+        stream.write_all(rows).map_err(|e| e.to_string())?;
+        written += rows.len();
+        on_progress(written as f32 / rgb_bytes.len() as f32);
+    }
+
+    stream.finish().map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())
 }
 
 // ── JPEG ──────────────────────────────────────────────────────────────────────
@@ -239,6 +375,7 @@ fn encode_tiff(
     is_bw: bool,
     icc: &[u8],
     path: &Path,
+    on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
     let file = File::create(path).map_err(|e| e.to_string())?;
     let mut encoder =
@@ -250,16 +387,16 @@ fn encode_tiff(
 
     match (bit_depth, is_bw) {
         (8, false) => write_tiff::<_, colortype::RGB8, _>(
-            &mut encoder, width, height, icc, |i| rgb_bytes[i],
+            &mut encoder, width, height, icc, on_progress, |i| rgb_bytes[i],
         ),
         (8, true) => write_tiff::<_, colortype::Gray8, _>(
-            &mut encoder, width, height, icc, |i| rgb_bytes[i * 3],
+            &mut encoder, width, height, icc, on_progress, |i| rgb_bytes[i * 3],
         ),
         (16, false) => write_tiff::<_, colortype::RGB16, _>(
-            &mut encoder, width, height, icc, |i| u16_at(i * 2),
+            &mut encoder, width, height, icc, on_progress, |i| u16_at(i * 2),
         ),
         (16, true) => write_tiff::<_, colortype::Gray16, _>(
-            &mut encoder, width, height, icc, |i| u16_at(i * 6),
+            &mut encoder, width, height, icc, on_progress, |i| u16_at(i * 6),
         ),
         _ => Err(format!("Unsupported TIFF bit depth: {}", bit_depth)),
     }
@@ -275,6 +412,7 @@ fn write_tiff<W, C, F>(
     width: u32,
     height: u32,
     icc: &[u8],
+    on_progress: &mut dyn FnMut(f32),
     sample: F,
 ) -> Result<(), String>
 where
@@ -293,6 +431,7 @@ where
         .write_tag(Tag::IccProfile, IccProfile(icc))
         .map_err(|e| e.to_string())?;
 
+    let total = width as usize * height as usize * C::SAMPLE_FORMAT.len();
     let mut at = 0usize;
     let mut strip: Vec<C::Inner> = Vec::new();
     loop {
@@ -306,6 +445,7 @@ where
         strip.extend((at..at + count).map(&sample));
         image.write_strip(&strip).map_err(|e| e.to_string())?;
         at += count;
+        on_progress(at as f32 / total as f32);
     }
 
     image.finish().map_err(|e| e.to_string())

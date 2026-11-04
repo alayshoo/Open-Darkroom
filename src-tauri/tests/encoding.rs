@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use image::GenericImageView;
 
-use open_darkroom_lib::export_encoding::{encode_and_save, ExportFormat, ExportSettings};
+use open_darkroom_lib::export_encoding::{
+    encode_and_save, encode_and_save_with_progress, ExportFormat, ExportSettings,
+};
 use open_darkroom_lib::icc::SourceSpace;
 use open_darkroom_lib::output_space::OutputSpace;
 
@@ -27,6 +29,10 @@ fn settings(format: ExportFormat) -> ExportSettings {
         webp_quality: 90,
         webp_compression: 6,
         tiff_bit_depth: 8,
+        jxl_lossless: true,
+        jxl_quality: 90,
+        jxl_effort: 7,
+        jxl_bit_depth: 8,
         is_bw: false,
     }
 }
@@ -312,6 +318,277 @@ fn the_webp_lossless_flag_reaches_the_encoder() {
     );
 }
 
+// ── JPEG XL ───────────────────────────────────────────────────────────────────
+
+/// Decode a JPEG XL file to its samples, rescaled to the integer range it was
+/// written at, along with the number of colour channels.
+fn decode_jxl(path: &std::path::Path, max: f32) -> (u32, u32, usize, Vec<u16>) {
+    let image = jxl_oxide::JxlImage::builder().open(path).expect("decode JPEG XL");
+    let render = image.render_frame(0).expect("render JPEG XL");
+    let frame = render.image_all_channels();
+    let samples = frame
+        .buf()
+        .iter()
+        .map(|v| (v.clamp(0.0, 1.0) * max).round() as u16)
+        .collect();
+    (image.width(), image.height(), frame.channels(), samples)
+}
+
+/// Film grain stand-in: a smooth ramp under luminance noise that clumps over a
+/// few pixels and is shared by all three channels, as dye clouds mostly are.
+fn grainy16(width: u32, height: u32) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let mut state = 0x2545_f491_u32;
+    let white: Vec<f64> = (0..w * h)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            f64::from(state % 10_000) / 10_000.0 - 0.5
+        })
+        .collect();
+
+    let grain = |x: usize, y: usize| {
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for (dx, dy) in (-1i64..=1).flat_map(|dy| (-1i64..=1).map(move |dx| (dx, dy))) {
+            let (xx, yy) = (x as i64 + dx, y as i64 + dy);
+            if xx >= 0 && yy >= 0 && (xx as usize) < w && (yy as usize) < h {
+                let k = if dx == 0 && dy == 0 { 2.0 } else { 1.0 };
+                sum += k * white[yy as usize * w + xx as usize];
+                weight += k;
+            }
+        }
+        sum / weight
+    };
+
+    let mut out = Vec::with_capacity(w * h * 6);
+    for y in 0..h {
+        for x in 0..w {
+            let g = grain(x, y);
+            for c in 0..3 {
+                let base = 15_000.0 + (x * 30_000 / w + y * 10_000 / h + c * 3_000) as f64;
+                let v = base + 6_000.0 * g * (1.0 + 0.05 * c as f64);
+                out.extend_from_slice(&(v.clamp(0.0, 65535.0) as u16).to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+/// Each sample minus the mean of its horizontal neighbours on the same channel:
+/// what is left is the grain, with the image underneath removed.
+fn high_pass(samples: &[f64], width: usize) -> Vec<f64> {
+    (0..samples.len())
+        .map(|i| {
+            let x = (i / 3) % width;
+            if x < 3 || x + 3 >= width {
+                return 0.0;
+            }
+            let mean = (-3i64..=3)
+                .map(|d| samples[(i as i64 + d * 3) as usize])
+                .sum::<f64>()
+                / 7.0;
+            samples[i] - mean
+        })
+        .collect()
+}
+
+#[test]
+fn jxl_lossless_round_trips_exactly_at_eight_bits() {
+    let (w, h) = (37u32, 11);
+    let source = rgb8(w, h);
+    let scratch = Scratch::new("jxl8", "jxl");
+
+    encode_and_save(source.clone(), w, h, &settings(ExportFormat::Jxl), scratch.path())
+        .expect("encode");
+
+    let (dw, dh, channels, decoded) = decode_jxl(scratch.path(), 255.0);
+    assert_eq!((dw, dh, channels), (w, h, 3));
+    let decoded: Vec<u8> = decoded.iter().map(|&v| v as u8).collect();
+    assert_eq!(decoded, source, "lossless JPEG XL must be exact");
+}
+
+#[test]
+fn jxl_lossless_round_trips_exactly_at_sixteen_bits() {
+    let (w, h) = (23u32, 9);
+    let source = grainy16(w, h);
+    let scratch = Scratch::new("jxl16", "jxl");
+
+    let mut s = settings(ExportFormat::Jxl);
+    s.jxl_bit_depth = 16;
+    s.output_space = OutputSpace::Rec2020;
+    encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+
+    let (_, _, _, decoded) = decode_jxl(scratch.path(), 65535.0);
+    let decoded: Vec<u8> = decoded.iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert_eq!(decoded, source, "16-bit lossless JPEG XL must preserve every level");
+}
+
+#[test]
+fn bw_jxl_writes_a_single_channel_tagged_grey() {
+    let (w, h) = (8u32, 4);
+    let values: Vec<u16> = (0..(w * h)).map(|i| (i as u16 + 1) * 2000).collect();
+    let source: Vec<u8> = values
+        .iter()
+        .flat_map(|&v| [v, v, v])
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    let scratch = Scratch::new("jxlbw", "jxl");
+
+    let mut s = settings(ExportFormat::Jxl);
+    s.is_bw = true;
+    s.jxl_bit_depth = 16;
+    encode_and_save(source, w, h, &s, scratch.path()).expect("encode");
+
+    let (_, _, channels, decoded) = decode_jxl(scratch.path(), 65535.0);
+    assert_eq!(channels, 1, "BW mode should write a greyscale JPEG XL");
+    assert_eq!(decoded, values);
+
+    let icc = embedded_profile(scratch.path()).expect("a greyscale JPEG XL carries no profile");
+    let profile = lcms2::Profile::new_icc(&icc).expect("parse the embedded profile");
+    assert_eq!(profile.color_space(), lcms2::ColorSpaceSignature::GrayData);
+}
+
+/// Lossy coding is free to swap the grain for something statistically similar
+/// and still score well on error. What matters here is that the grain coming
+/// back is the same grain, so it is compared pattern against pattern.
+#[test]
+fn jxl_lossy_keeps_the_grain_and_is_smaller_than_lossless() {
+    let (w, h) = (256u32, 192);
+    let source = grainy16(w, h);
+
+    let encode = |lossless: bool, quality: u8| {
+        let scratch = Scratch::new(&format!("jxl-{lossless}-{quality}"), "jxl");
+        let mut s = settings(ExportFormat::Jxl);
+        s.jxl_bit_depth = 16;
+        s.jxl_lossless = lossless;
+        s.jxl_quality = quality;
+        encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+        let size = std::fs::metadata(scratch.path()).expect("stat").len();
+        let samples: Vec<f64> = decode_jxl(scratch.path(), 65535.0)
+            .3
+            .iter()
+            .map(|&v| f64::from(v))
+            .collect();
+        (size, samples)
+    };
+
+    let (lossless_size, _) = encode(true, 90);
+    let (high_size, high) = encode(false, 95);
+    let (low_size, _) = encode(false, 60);
+
+    assert!(high_size < lossless_size, "lossy {high_size} B is not smaller than lossless {lossless_size} B");
+    assert!(low_size < high_size, "quality 60 ({low_size} B) is not smaller than 95 ({high_size} B)");
+
+    let source: Vec<f64> = source
+        .chunks_exact(2)
+        .map(|c| f64::from(u16::from_le_bytes([c[0], c[1]])))
+        .collect();
+    let (a, b) = (high_pass(&source, w as usize), high_pass(&high, w as usize));
+    let dot = |p: &[f64], q: &[f64]| p.iter().zip(q).map(|(x, y)| x * y).sum::<f64>();
+    let correlation = dot(&a, &b) / (dot(&a, &a) * dot(&b, &b)).sqrt();
+    assert!(
+        correlation > 0.85,
+        "quality 95 kept only {correlation:.2} of the grain pattern"
+    );
+}
+
+/// Depths between 8 and 16 take 16-bit input and store it requantised, so the
+/// file must hold exactly the input rounded to that many bits.
+#[test]
+fn jxl_lossless_at_twelve_bits_keeps_twelve_bits() {
+    let (w, h) = (23u32, 9);
+    let source = grainy16(w, h);
+    let scratch = Scratch::new("jxl12", "jxl");
+
+    let mut s = settings(ExportFormat::Jxl);
+    s.jxl_bit_depth = 12;
+    assert_eq!(s.bit_depth(), 16, "a 12-bit JPEG XL is rendered at 16");
+    encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+
+    let image = jxl_oxide::JxlImage::builder().open(scratch.path()).expect("decode");
+    assert_eq!(image.image_header().metadata.bit_depth.bits_per_sample(), 12);
+
+    let (_, _, _, decoded) = decode_jxl(scratch.path(), 4095.0);
+    let worst = source
+        .chunks_exact(2)
+        .map(|c| (f64::from(u16::from_le_bytes([c[0], c[1]])) * 4095.0 / 65535.0).round() as i32)
+        .zip(&decoded)
+        .map(|(expected, &got)| (expected - i32::from(got)).abs())
+        .max()
+        .unwrap();
+    assert!(worst <= 1, "12-bit samples drifted by up to {worst} codes");
+}
+
+/// Past 2048 pixels libjxl pulls the input in rectangles and may encode it in
+/// independent groups; neither may change a lossless result.
+#[test]
+fn a_large_jxl_round_trips_exactly_when_read_in_pieces() {
+    let (w, h) = (2100u32, 1100);
+    let source = grainy16(w, h);
+
+    for is_bw in [false, true] {
+        let scratch = Scratch::new(&format!("jxl-large-{is_bw}"), "jxl");
+        let mut s = settings(ExportFormat::Jxl);
+        s.jxl_bit_depth = 16;
+        s.jxl_effort = 3;
+        s.is_bw = is_bw;
+        encode_and_save(source.clone(), w, h, &s, scratch.path()).expect("encode");
+
+        let expected: Vec<u16> = source
+            .chunks_exact(if is_bw { 6 } else { 2 })
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let (dw, dh, channels, decoded) = decode_jxl(scratch.path(), 65535.0);
+        assert_eq!((dw, dh, channels), (w, h, if is_bw { 1 } else { 3 }));
+        assert!(decoded == expected, "large lossless JPEG XL (BW: {is_bw}) is not exact");
+    }
+}
+
+#[test]
+fn an_unsupported_jxl_bit_depth_is_reported() {
+    let scratch = Scratch::new("jxlbad", "jxl");
+    let mut s = settings(ExportFormat::Jxl);
+    s.jxl_bit_depth = 17;
+
+    let err = encode_and_save(rgb8(4, 4), 4, 4, &s, scratch.path())
+        .expect_err("17-bit JPEG XL is not supported");
+    assert!(err.contains("17"), "error should name the bit depth: {err}");
+}
+
+// ── Encode progress ───────────────────────────────────────────────────────────
+
+/// The formats that report progress must climb to completion, so the bar's
+/// encoding phase ends where the file does.
+#[test]
+fn png_and_tiff_report_progress_up_to_completion() {
+    // Large enough for TIFF to need several strips.
+    let (w, h) = (600u32, 1000);
+
+    for (format, ext) in [(ExportFormat::Png, "png"), (ExportFormat::Tiff, "tiff")] {
+        let scratch = Scratch::new(&format!("progress-{ext}"), ext);
+        let mut seen = Vec::new();
+        encode_and_save_with_progress(
+            rgb8(w, h),
+            w,
+            h,
+            &settings(format),
+            scratch.path(),
+            &mut |p| seen.push(p),
+        )
+        .expect("encode");
+
+        assert!(seen.len() > 1, "{format:?} reported {seen:?}");
+        assert!(seen.windows(2).all(|p| p[1] >= p[0]), "{format:?} went backwards: {seen:?}");
+        assert_eq!(*seen.last().unwrap(), 1.0, "{format:?} did not finish at 100%");
+        assert_eq!(
+            image::open(scratch.path()).expect("decode").to_rgb8().into_raw(),
+            rgb8(w, h),
+            "{format:?} must stay lossless when written in pieces"
+        );
+    }
+}
+
 // ── Failure modes ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -323,6 +600,40 @@ fn an_unsupported_tiff_bit_depth_is_reported() {
     let err = encode_and_save(rgb8(4, 4), 4, 4, &s, scratch.path())
         .expect_err("12-bit TIFF is not supported");
     assert!(err.contains("12"), "error should name the bit depth: {err}");
+}
+
+fn partial_file_of(path: &std::path::Path) -> PathBuf {
+    let name = path.file_name().unwrap().to_string_lossy();
+    path.with_file_name(format!(".{name}.partial"))
+}
+
+#[test]
+fn a_failed_export_leaves_the_file_it_would_replace_untouched() {
+    for (format, ext) in [(ExportFormat::Png, "png"), (ExportFormat::Jxl, "jxl")] {
+        let scratch = Scratch::new(&format!("keep-{ext}"), ext);
+        std::fs::write(scratch.path(), b"earlier export").unwrap();
+
+        // One byte short of a 4 × 4 image.
+        let mut short = rgb8(4, 4);
+        short.pop();
+        encode_and_save(short, 4, 4, &settings(format), scratch.path())
+            .expect_err("a short buffer must fail");
+
+        assert_eq!(std::fs::read(scratch.path()).unwrap(), b"earlier export", "{format:?}");
+        assert!(!partial_file_of(scratch.path()).exists(), "{format:?} left a partial file");
+    }
+}
+
+#[test]
+fn a_successful_export_replaces_the_file_and_cleans_up() {
+    let scratch = Scratch::new("replace", "png");
+    std::fs::write(scratch.path(), b"earlier export").unwrap();
+
+    encode_and_save(rgb8(4, 4), 4, 4, &settings(ExportFormat::Png), scratch.path())
+        .expect("encode");
+
+    assert_eq!(image::open(scratch.path()).expect("decode").to_rgb8().into_raw(), rgb8(4, 4));
+    assert!(!partial_file_of(scratch.path()).exists());
 }
 
 // ── The embedded profile ──────────────────────────────────────────────────────
@@ -379,6 +690,11 @@ fn tiff_entry(bytes: &[u8], tag: u16) -> Option<(u16, Vec<u8>)> {
 fn embedded_profile(path: &std::path::Path) -> Option<Vec<u8>> {
     use image::ImageDecoder;
 
+    if path.extension().is_some_and(|e| e == "jxl") {
+        let image = jxl_oxide::JxlImage::builder().open(path).expect("decode JPEG XL");
+        return image.original_icc().map(<[u8]>::to_vec);
+    }
+
     if path.extension().is_some_and(|e| e == "tiff" || e == "tif") {
         let bytes = std::fs::read(path).expect("read");
         let (field_type, profile) = tiff_entry(&bytes, TIFF_ICC_TAG)?;
@@ -415,6 +731,7 @@ fn every_format_carries_the_profile_of_its_space() {
         ExportFormat::Jpeg,
         ExportFormat::Webp,
         ExportFormat::Tiff,
+        ExportFormat::Jxl,
     ] {
         for space in OutputSpace::ALL {
             let label = format!("{format:?}/{space:?}");
@@ -423,6 +740,7 @@ fn every_format_carries_the_profile_of_its_space() {
                 ExportFormat::Jpeg => "jpg",
                 ExportFormat::Webp => "webp",
                 ExportFormat::Tiff => "tiff",
+                ExportFormat::Jxl => "jxl",
             };
             let scratch = Scratch::new(&label.replace('/', "-").to_lowercase(), ext);
 

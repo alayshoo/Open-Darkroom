@@ -617,8 +617,8 @@ pub async fn render_cropped_image(
 ///
 /// `pixels_u16` is interleaved at `width` × `height`, `channels` samples per
 /// pixel — 3 for a source with no alpha, 4 for one with. The image is rendered
-/// `chunk_rows` rows at a time; `on_progress` is called after each chunk with
-/// the fraction completed, in (0, 1].
+/// `chunk_rows` rows at a time; `on_progress` is called with 0 once set-up is
+/// done, then after each chunk with the fraction completed, in (0, 1].
 ///
 /// `chunk_rows` is exposed so tests can vary the chunking — rendering an image
 /// in one pass and in several must produce identical output.
@@ -1162,6 +1162,9 @@ pub async fn render_cropped_with_chunk_rows(
         wgpu::TextureView,
         wgpu::TextureView,
     )> = None;
+
+    // Everything before this point is set-up; zero marks where the rows begin.
+    on_progress(0.0);
 
     while row_start < out_height {
         let row_end = (row_start + chunk_rows).min(out_height);
