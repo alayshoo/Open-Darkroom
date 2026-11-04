@@ -36,7 +36,7 @@ import {
 } from "$lib/gpu/pipelines/calcParamsPipeline";
 import { sharpnessIsVisible } from "$lib/gpu/sharpnessVisibility";
 import { createHistogramPipeline } from "$lib/gpu/pipelines/histogramPipeline";
-import { createOutputSpaceBuffer } from "$lib/gpu/outputSpaceBuffer";
+import { createOutputSpaceBuffer, type GamutMask } from "$lib/gpu/outputSpaceBuffer";
 import { IDENTITY, SRGB_TO_WORKING } from "$lib/gpu/workingSpace";
 import {
   OUTPUT_SPACE_IDS,
@@ -157,6 +157,8 @@ interface DevelopOptions {
   crop?: Crop;
   /** The box, in output pixels, outside which the encode stage shades. */
   keep?: [number, number, number, number];
+  /** The gamut whose outside the encode stage paints. */
+  mask?: GamutMask;
 }
 
 /**
@@ -181,6 +183,7 @@ async function develop(
   const colorSpaceEncode = createEncodeStage(gpu);
   const outputSpace = createOutputSpaceBuffer(gpu);
   outputSpace.set(options.output ?? "srgb", options.proof ?? null);
+  if (options.mask) outputSpace.setMask(options.mask);
   const sampler = createDevelopSampler(gpu);
 
   const image = uploadRawPixelsToGPU(
@@ -1075,10 +1078,10 @@ describe("the output space", () => {
   }
 
   it("declares a buffer matching the WGSL struct", () => {
-    // Three mat3x3 of three 16-byte columns, then two u32, bound 16-aligned.
-    expect(OUTPUT_SPACE_BUFFER_SIZE).toBe(160);
+    // Three mat3x3 of three 16-byte columns, four u32, then the mask's mat3x3.
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBe(208);
     expect(OUTPUT_SPACE_BUFFER_SIZE % 16).toBe(0);
-    expect(OUTPUT_SPACE_BUFFER_SIZE).toBeGreaterThanOrEqual(3 * 48 + 8);
+    expect(OUTPUT_SPACE_BUFFER_SIZE).toBeGreaterThanOrEqual(4 * 48 + 16);
 
     const buffer = createOutputSpaceBuffer(gpu);
     expect(buffer.buffer.size).toBe(OUTPUT_SPACE_BUFFER_SIZE);
@@ -1116,6 +1119,33 @@ describe("the output space", () => {
     // matrix. The exact values are the Rust suite's business; this is wiring.
     const distinct = new Set([...results.values()].map((p) => p.join(",")));
     expect(distinct.size).toBe(OUTPUT_SPACE_IDS.length);
+  });
+
+  // The F3 panel's mask: pixels outside the chosen gamut are painted in its
+  // tint, and the first pixel sits on a solid stripe.
+  it("paints only the pixels outside the masked gamut", async () => {
+    const TINT = 0x6fd3ff;
+    const painted = [0x6f, 0xd3, 0xff];
+    const masked = (space: OutputSpaceId, afterTransform: boolean) =>
+      develop(WORKING_RED, defaultSlidersRGB, undefined, {
+        output: "srgb",
+        alreadyWorking: true,
+        mask: { space, tint: TINT, afterTransform },
+      }).then(firstPixel);
+    const plain = firstPixel(
+      await develop(WORKING_RED, defaultSlidersRGB, undefined, {
+        output: "srgb",
+        alreadyWorking: true,
+      }),
+    );
+
+    expect(await masked("srgb", false)).toEqual(painted);
+    expect(await masked("display-p3", false)).toEqual(painted);
+    // The working red is the working space's own primary.
+    expect(await masked("rec2020", false)).toEqual(plain);
+    // After the transform the red has been fitted into sRGB, so nothing is left
+    // outside it.
+    expect(await masked("srgb", true)).toEqual(plain);
   });
 
   // What soft-proofing is for: on a display wider than the export, the preview

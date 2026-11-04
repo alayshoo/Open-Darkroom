@@ -126,9 +126,9 @@ pub const CURVES_OFFSET: u64 = 384;
 pub const CURVE_LUT_ENTRIES: usize = 256;
 
 /// Size of the `OutputSpace` uniform read by colorSpaceEncode.wgsl and
-/// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, then two
-/// u32, padded to the 16 bytes a uniform struct binds at.
-pub const OUTPUT_SPACE_BYTES: u64 = 160;
+/// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, four u32,
+/// then the preview mask's `mat3x3<f32>`. An export leaves the mask at zero.
+pub const OUTPUT_SPACE_BYTES: u64 = 208;
 
 /// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 57
 /// f32 fields occupy 228 bytes; a uniform struct is bound 16-aligned, so the

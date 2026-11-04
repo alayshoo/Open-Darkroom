@@ -287,6 +287,14 @@
         { id: "perChannel", label: "Per channel" },
     ];
 
+    // Mirrors SHARE_DECADE_MIN and SHARE_DECADES in chromaticityDraw.wgsl: the
+    // ramp runs from 10^-6 to 10^-1 of the measured pixels.
+    const SHARE_TICKS = [
+        { at: 0.2, label: "0.001%" },
+        { at: 0.6, label: "0.1%" },
+        { at: 1, label: "10%" },
+    ];
+
     function formatPercentage(value: number) {
         if (value === 0) return "0%";
         if (value < 0.1) return "<0.1%";
@@ -367,9 +375,20 @@
         <canvas class="chromaticity" bind:this={chromaticityCanvas}></canvas>
         <p class="axes"><span>x</span><span>y</span></p>
 
+        <div class="share">
+            <div class="ramp"></div>
+            <div class="ticks">
+                {#each SHARE_TICKS as tick (tick.label)}
+                    <span style="left: {tick.at * 100}%">{tick.label}</span>
+                {/each}
+            </div>
+            <p class="caption">Share of the pixels in each cell</p>
+        </div>
+
         <ul class="spaces">
             {#each GAMUT_ORDER as id (id)}
                 {@const outside = percentage(id)}
+                {@const masked = colorSpaceDebug.mask === id}
                 <li>
                     <label>
                         <input
@@ -389,6 +408,16 @@
                             {/if}
                         </span>
                     </label>
+                    <button
+                        class="mask"
+                        class:on={masked}
+                        style="--tint: {GAMUT_TINTS[id]}"
+                        aria-pressed={masked}
+                        title="Paint the pixels outside {OUTPUT_SPACE_LABELS[id]} on the preview"
+                        onclick={() => colorSpaceDebug.toggleMask(id)}
+                    >
+                        mask
+                    </button>
                 </li>
             {/each}
         </ul>
@@ -412,6 +441,10 @@
             {:else}
                 The colour the adjustments are asking for, measured in the
                 working space before the output transform.
+            {/if}
+            {#if colorSpaceDebug.mask}
+                Striped on the preview: what falls outside
+                {OUTPUT_SPACE_LABELS[colorSpaceDebug.mask]}.
             {/if}
         </p>
     </div>
@@ -471,9 +504,7 @@
         margin: 0 0 0.4rem;
         font-size: 10.5px;
         font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(255, 255, 255, 0.6);
     }
 
     canvas {
@@ -547,6 +578,79 @@
         justify-content: space-between;
         margin: 0.3rem 0 0;
         color: rgba(255, 255, 255, 0.4);
+    }
+
+    .share {
+        margin-top: 0.45rem;
+    }
+
+    /* The stops of heat() in chromaticityDraw.wgsl. */
+    .ramp {
+        height: 6px;
+        border-radius: 3px;
+        background: linear-gradient(
+            to right,
+            rgb(41, 10, 87),
+            rgb(168, 46, 115),
+            rgb(250, 128, 38),
+            rgb(255, 250, 209)
+        );
+    }
+
+    .ticks {
+        position: relative;
+        height: 1.45em;
+        color: rgba(255, 255, 255, 0.45);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .ticks span {
+        position: absolute;
+        top: 0.15em;
+        transform: translateX(-50%);
+        white-space: nowrap;
+    }
+
+    .ticks span:last-child {
+        transform: translateX(-100%);
+    }
+
+    .caption {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.38);
+    }
+
+    .spaces li {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+
+    .spaces label {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mask {
+        padding: 0 0.35rem;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 4px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.5);
+        font: inherit;
+        line-height: 1.35;
+        cursor: pointer;
+    }
+
+    .mask:hover {
+        color: rgba(255, 255, 255, 0.8);
+        border-color: rgba(255, 255, 255, 0.35);
+    }
+
+    .mask.on {
+        border-color: var(--tint);
+        background: color-mix(in srgb, var(--tint) 22%, transparent);
+        color: var(--tint);
     }
 
     .spaces {

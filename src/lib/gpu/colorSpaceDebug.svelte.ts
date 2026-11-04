@@ -2,12 +2,15 @@
 //
 // Session-only state of the F3 colour-space panel.
 
-import { OUTPUT_SPACE_IDS, type OutputSpaceId } from "./outputSpace";
+import { OUTPUT_SPACE_IDS, WORKING_SPACE, type OutputSpaceId } from "./outputSpace";
+import { detectDisplaySpace } from "./gpuInit";
+import { GAMUT_TINTS } from "./gamutOverlay";
+import type { GamutMask } from "./outputSpaceBuffer";
 import { settings } from "$lib/settings/settings.svelte";
 import { defaultToneMap, type RolloffMode, type ToneMap } from "$lib/types/toneMap";
 
-/** Triangles shown by default: sRGB and the working space. */
-const INITIAL: readonly OutputSpaceId[] = ["srgb", "rec2020"];
+/** Triangles shown by default: the display's space and the working space. */
+const INITIAL: readonly OutputSpaceId[] = [detectDisplaySpace(), WORKING_SPACE];
 
 function initialOverlays(): Record<OutputSpaceId, boolean> {
     return Object.fromEntries(
@@ -23,6 +26,9 @@ class ColorSpaceDebug {
 
     /** Measure after the output transform instead of before it. */
     transformed = $state(false);
+
+    /** The space whose outside is painted over the preview, if any. */
+    mask = $state<OutputSpaceId | null>(null);
 
     /** Whether the colour volume is binned and drawn. */
     volume = $state(true);
@@ -42,6 +48,20 @@ class ColorSpaceDebug {
     get toneMap(): ToneMap {
         if (!settings.debugTools) return defaultToneMap;
         return { rolloff: this.rolloff, rolloffMode: this.rolloffMode };
+    }
+
+    /** The mask the preview should paint, which is none while the panel is closed. */
+    get activeMask(): GamutMask | null {
+        if (!settings.debugTools || !this.enabled || !this.mask) return null;
+        return {
+            space: this.mask,
+            tint: parseInt(GAMUT_TINTS[this.mask].slice(1), 16),
+            afterTransform: this.transformed,
+        };
+    }
+
+    toggleMask(id: OutputSpaceId) {
+        this.mask = this.mask === id ? null : id;
     }
 
     toggle() {

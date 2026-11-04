@@ -9,17 +9,18 @@
 import type { GPUSession } from "$lib/types/gpuTypes";
 import {
     destinationToWorking,
+    spaceToSpace,
     transferFor,
     workingToDestination,
     type OutputSpaceId,
 } from "./outputSpace";
 
 /**
- * Three `mat3x3<f32>` of three 16-byte columns each, then two u32, padded to the
- * 16 bytes a uniform struct binds at. Must match `OUTPUT_SPACE_BYTES` in
+ * Three `mat3x3<f32>` of three 16-byte columns each, four u32, then the mask's
+ * `mat3x3<f32>`. Must match `OUTPUT_SPACE_BYTES` in
  * src-tauri/src/export_rendering.rs.
  */
-export const OUTPUT_SPACE_BUFFER_SIZE = 160;
+export const OUTPUT_SPACE_BUFFER_SIZE = 208;
 
 /** Where each field starts, in units of the view that writes it. */
 const TO_DESTINATION = 0;
@@ -27,6 +28,22 @@ const TO_PROOF = 12;
 const FROM_PROOF = 24;
 const CURVE_WORD = 36;
 const PROOF_WORD = 37;
+const MASK_WORD = 38;
+const MASK_TINT_WORD = 39;
+const TO_MASK = 40;
+
+/** MASK_ ids in chunks/outputTransform.wgsl. */
+const MASK_BEFORE = 1;
+const MASK_AFTER = 2;
+
+/** The pixels of the preview painted as outside a gamut. */
+export interface GamutMask {
+    space: OutputSpaceId;
+    /** 0xRRGGBB. */
+    tint: number;
+    /** Test what the output transform produces rather than what it was given. */
+    afterTransform: boolean;
+}
 
 export interface OutputSpaceBuffer {
     buffer: GPUBuffer;
@@ -35,6 +52,8 @@ export interface OutputSpaceBuffer {
      * space an export would be written in on the way.
      */
     set: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
+    /** Paint the pixels outside a gamut, or stop with null. Preview only. */
+    setMask: (mask: GamutMask | null) => void;
     destroy: () => void;
 }
 
@@ -60,7 +79,11 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
         }
     }
 
-    function set(destination: OutputSpaceId, proof: OutputSpaceId | null) {
+    let destination: OutputSpaceId = gpu.displaySpace;
+    let proof: OutputSpaceId | null = null;
+    let mask: GamutMask | null = null;
+
+    function write() {
         floats.fill(0);
         writeMatrix(TO_DESTINATION, workingToDestination(destination));
 
@@ -74,12 +97,34 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
         words[CURVE_WORD] = transferFor(destination);
         words[PROOF_WORD] = proof ? 1 : 0;
 
+        if (mask) {
+            words[MASK_WORD] = mask.afterTransform ? MASK_AFTER : MASK_BEFORE;
+            words[MASK_TINT_WORD] = mask.tint & 0xffffff;
+            writeMatrix(
+                TO_MASK,
+                mask.afterTransform
+                    ? spaceToSpace(destination, mask.space)
+                    : workingToDestination(mask.space),
+            );
+        }
+
         gpu.device.queue.writeBuffer(buffer, 0, staging);
+    }
+
+    function set(to: OutputSpaceId, proofAgainst: OutputSpaceId | null) {
+        destination = to;
+        proof = proofAgainst;
+        write();
+    }
+
+    function setMask(next: GamutMask | null) {
+        mask = next;
+        write();
     }
 
     function destroy() {
         buffer.destroy();
     }
 
-    return { buffer, set, destroy };
+    return { buffer, set, setMask, destroy };
 }

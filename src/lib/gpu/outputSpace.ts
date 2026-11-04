@@ -126,6 +126,13 @@ export function destinationToWorking(id: OutputSpaceId): Float32Array {
     return new Float32Array(multiplyMat3(invertMat3(working), destination));
 }
 
+/** Linear RGB of one space → linear RGB of another, column-major. */
+export function spaceToSpace(from: OutputSpaceId, to: OutputSpaceId): Float32Array {
+    const source = rgbToXyz(PRIMARIES[from], D65);
+    const target = rgbToXyz(PRIMARIES[to], D65);
+    return new Float32Array(multiplyMat3(invertMat3(target), source));
+}
+
 /** Linear RGB of a space → CIE XYZ, column-major. */
 export function spaceToXyz(id: OutputSpaceId): Float32Array {
     return new Float32Array(rgbToXyz(PRIMARIES[id], D65));

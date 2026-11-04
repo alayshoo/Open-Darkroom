@@ -214,7 +214,7 @@ export function createColorSpacePipeline(gpu: GPUSession): ColorSpacePipeline {
         layout: chromaticity.layout,
         entries: [
             { binding: 0, resource: { buffer: xyBins } },
-            { binding: 1, resource: { buffer: scale } },
+            { binding: 1, resource: { buffer: stats } },
             { binding: 2, resource: { buffer: overlay.buffer } },
         ],
     });

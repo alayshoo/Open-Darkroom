@@ -74,6 +74,29 @@ const OFF_IMAGE = vec4f(0.0);
 // What is left of the image outside the crop tool's box: black at 55% over it.
 const OUTSIDE_KEEP: f32 = 0.45;
 
+// A channel this far below zero, relative to the brightest, is outside the
+// masked gamut rather than sitting on its boundary.
+const MASK_TOLERANCE: f32 = 1e-3;
+const MASK_STRIPE_PX: f32 = 6.0;
+
+fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> bool {
+  let rgb = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
+  let peak = max(rgb.r, max(rgb.g, rgb.b));
+  if (peak <= GAMUT_EPSILON) { return false; }
+  return min(rgb.r, min(rgb.g, rgb.b)) < -MASK_TOLERANCE * peak;
+}
+
+// Diagonal stripes of the mask's tint, so it never reads as part of the image.
+fn mask_paint(position: vec2f, packed: u32) -> vec3f {
+  let tint = vec3f(
+    f32((packed >> 16u) & 255u),
+    f32((packed >> 8u) & 255u),
+    f32(packed & 255u),
+  ) / 255.0;
+  let stripe = u32(floor((position.x + position.y) / MASK_STRIPE_PX)) % 2u;
+  return select(tint, tint * 0.35, stripe == 1u);
+}
+
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let src = crop.origin + position.x * crop.axis_x + position.y * crop.axis_y;
@@ -96,7 +119,11 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
 
   // Shaded here rather than by an overlay, so the shade turns with the image
   // on the same frame.
-  var rgb = to_destination(working, outputSpace);
+  let linear = to_destination_linear(working, outputSpace);
+  var rgb = encode_transfer(linear, outputSpace.curve);
+  if (outputSpace.mask != MASK_OFF && outside_mask(working, linear, outputSpace)) {
+    rgb = mask_paint(position.xy, outputSpace.mask_tint);
+  }
   if (any(position.xy < crop.keep_min) || any(position.xy > crop.keep_max)) {
     rgb *= OUTSIDE_KEEP;
   }
