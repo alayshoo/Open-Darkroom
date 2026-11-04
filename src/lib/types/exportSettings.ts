@@ -29,7 +29,7 @@ export const defaultExportSettings: ExportSettings = {
     webpCompression: 6,
     tiffBitDepth: 8,
     jxlLossless: false,
-    jxlQuality: 95,
+    jxlQuality: 99,
     jxlEffort: 7,
     jxlBitDepth: 16,
     isBw: false,

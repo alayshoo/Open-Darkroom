@@ -202,7 +202,7 @@
                     min={1}
                     max={100}
                     step={1}
-                    defaultValue={95}
+                    defaultValue={99}
                     bind:value={settings.jxlQuality}
                     stepAnimation={false}
                     springy={false}
