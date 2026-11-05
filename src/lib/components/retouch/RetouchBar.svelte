@@ -7,10 +7,13 @@
 
 	let {
 		open = false,
+		ready = true,
 		strokes = 0,
 		onclear,
 	}: {
 		open?: boolean;
+		// Whether the full resolution is in and the brushes can paint.
+		ready?: boolean;
 		// How many strokes the image holds.
 		strokes?: number;
 		onclear?: () => void;
@@ -100,9 +103,13 @@
 				<RevertButton disabled={strokes === 0} label="Clear all" onrevert={() => onclear?.()} />
 			</div>
 			<p class="hint shrink-0" class:suppressed={!hintShown} aria-hidden={!hintShown} bind:clientWidth={hintWidth}>
-				{altKey}-click picks a source<br />
-				{altKey}-drag sizes, and softens upwards<br />
-				Space pans
+				{#if ready}
+					{altKey}-click picks a source<br />
+					{altKey}-drag sizes, and softens upwards<br />
+					Space pans
+				{:else}
+					Loading full resolution…
+				{/if}
 			</p>
 		</div>
 	</div>

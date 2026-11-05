@@ -588,9 +588,10 @@
 
     // ===== Retouch =====
 
-    // Whether the brushes have every pixel of the image to paint on.
+    // Whether the brushes have every pixel of the image to paint on. The tools
+    // open before then; the canvas holds back painting until it is.
     let retouchReady = $state(false);
-    let canRetouch = $derived(!!imagePayload && retouchReady && !isCropping);
+    let canRetouch = $derived(!!imagePayload && !isCropping);
 
     $effect(() => {
         if (!canRetouch) retouchTool.mode = null;
@@ -1127,7 +1128,7 @@
     <div class="chrome-scrim" class:shifted={presets.open}>
         <div class="scrim-fill"></div>
     </div>
-    <RetouchBar open={isRetouching} strokes={edit.retouch.length} onclear={clearRetouch} />
+    <RetouchBar open={isRetouching} ready={retouchReady} strokes={edit.retouch.length} onclear={clearRetouch} />
     <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
         <div class="presets-slide h-full">
             <PresetsPanel
@@ -1169,7 +1170,7 @@
                 />
             </div>
             <div class="toolbar-rest flex flex-col items-center gap-1" class:away={isCropping} inert={isCropping}>
-                <RetouchTools disabled={!canRetouch} ontoggle={toggleRetouch} />
+                <RetouchTools disabled={isCropping} ontoggle={toggleRetouch} />
                 <PresetsButton
                     active={presets.open}
                     disabled={isCropping}
