@@ -8,6 +8,7 @@ import {
     OUTPUT_SPACE_IDS,
     PRIMARIES,
     spaceToXyz,
+    xyzToSpace,
     type OutputSpaceId,
 } from "./outputSpace";
 
@@ -45,8 +46,10 @@ export const GAMUT_TINTS: Record<OutputSpaceId, string> = {
 /** Where each field starts, in words. A WGSL mat3x3 occupies three vec4 columns. */
 const DESTINATION_TO_XYZ = 0;
 const SPACES_OFFSET = 12;
-/** Words per GamutSpace: three chromaticities, the flag and the tint. */
-const SPACE_WORDS = 8;
+/** Words per GamutSpace: three chromaticities, the flag, the tint, and the
+ *  XYZ → RGB matrix at the next 16-byte boundary. */
+const SPACE_WORDS = 20;
+const SPACE_FROM_XYZ = 8;
 const LOCUS_OFFSET = SPACES_OFFSET + GAMUT_SPACES * SPACE_WORDS;
 const TRANSFORMED_WORD = LOCUS_OFFSET + LOCUS_POINTS * 2;
 const VOLUME_WORD = TRANSFORMED_WORD + 1;
@@ -92,6 +95,14 @@ export function createGamutOverlayBuffer(gpu: GPUSession): GamutOverlayBuffer {
     const floats = new Float32Array(staging);
     const words = new Uint32Array(staging);
 
+    // A WGSL mat3x3<f32> is three 16-byte columns, not nine packed floats, so
+    // each column goes into its own vec4 slot.
+    function writeMatrix(at: number, m: Float32Array) {
+        for (let col = 0; col < 3; col++) {
+            floats.set(m.subarray(col * 3, col * 3 + 3), at + col * 4);
+        }
+    }
+
     SPECTRAL_LOCUS.forEach(([x, y], i) => {
         floats[LOCUS_OFFSET + i * 2] = x;
         floats[LOCUS_OFFSET + i * 2 + 1] = y;
@@ -104,15 +115,8 @@ export function createGamutOverlayBuffer(gpu: GPUSession): GamutOverlayBuffer {
             floats[at + primary * 2 + 1] = y;
         });
         words[at + 7] = packTint(GAMUT_TINTS[id]);
+        writeMatrix(at + SPACE_FROM_XYZ, xyzToSpace(id));
     });
-
-    // A WGSL mat3x3<f32> is three 16-byte columns, not nine packed floats, so
-    // each column goes into its own vec4 slot.
-    function writeMatrix(at: number, m: Float32Array) {
-        for (let col = 0; col < 3; col++) {
-            floats.set(m.subarray(col * 3, col * 3 + 3), at + col * 4);
-        }
-    }
 
     function set(state: GamutOverlayState) {
         writeMatrix(DESTINATION_TO_XYZ, spaceToXyz(state.destination));

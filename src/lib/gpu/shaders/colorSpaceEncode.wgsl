@@ -78,13 +78,14 @@ const OUTSIDE_KEEP: f32 = 0.45;
 
 const MASK_STRIPE_PX: f32 = 6.0;
 
-// Whether the chromaticity falls outside the masked triangle, by the same edge
-// distances and tolerance the panel's inside_gamut() counts with.
+// Whether the colour falls outside the masked gamut, by the same edge distances,
+// tolerances and brightness test the panel's outside_gamut() counts with.
 fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> bool {
   let weighted = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
   let sum = weighted.r + weighted.g + weighted.b;
   if (sum < COLORIMETRY_EPSILON) { return false; }
-  return any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE));
+  if (any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE))) { return true; }
+  return above_gamut(weighted / space.mask_sums, dot(working, LUMA));
 }
 
 // Diagonal stripes of the mask's tint, so it never reads as part of the image.

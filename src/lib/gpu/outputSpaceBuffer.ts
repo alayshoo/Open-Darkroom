@@ -19,10 +19,10 @@ import {
 
 /**
  * Three `mat3x3<f32>` of three 16-byte columns each, four u32, then the mask's
- * `mat3x3<f32>` and `vec3f`, padded to 16. Must match `OUTPUT_SPACE_BYTES` in
- * src-tauri/src/export_rendering.rs.
+ * `mat3x3<f32>` and two `vec3f`, each padded to 16. Must match
+ * `OUTPUT_SPACE_BYTES` in src-tauri/src/export_rendering.rs.
  */
-export const OUTPUT_SPACE_BUFFER_SIZE = 224;
+export const OUTPUT_SPACE_BUFFER_SIZE = 240;
 
 /** Where each field starts, in units of the view that writes it. */
 const TO_DESTINATION = 0;
@@ -34,6 +34,7 @@ const MASK_WORD = 38;
 const MASK_TINT_WORD = 39;
 const TO_MASK = 40;
 const MASK_HEIGHTS = 52;
+const MASK_SUMS = 56;
 
 /** MASK_ ids in chunks/outputTransform.wgsl. */
 const MASK_BEFORE = 1;
@@ -129,6 +130,7 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
             }
             writeMatrix(TO_MASK, toMask);
             floats.set(heights, MASK_HEIGHTS);
+            floats.set(sums, MASK_SUMS);
         }
 
         gpu.device.queue.writeBuffer(buffer, 0, staging);

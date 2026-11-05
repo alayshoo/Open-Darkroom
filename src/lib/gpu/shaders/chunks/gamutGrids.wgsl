@@ -56,6 +56,8 @@ struct GamutSpace {
   enabled: u32,
   // Triangle colour, 0xRRGGBB.
   tint:    u32,
+  // CIE XYZ → the space's linear RGB.
+  from_xyz: mat3x3<f32>,
 }
 
 struct GamutOverlay {
@@ -87,6 +89,21 @@ fn inside_gamut(space: GamutSpace, xy: vec2f) -> bool {
     edge_distance(space.blue, space.red, xy),
   );
   return all(d >= vec3f(-GAMUT_TOLERANCE)) || all(d <= vec3f(GAMUT_TOLERANCE));
+}
+
+// Channels within this of white count as inside, for the same reason.
+const VOLUME_TOLERANCE: f32 = 1e-3;
+
+// Whether a colour is too bright for a space at its saturation: a channel past
+// white while the luminance is not. Past white is exposure clipping, which every
+// space resolves alike.
+fn above_gamut(rgb: vec3f, luminance: f32) -> bool {
+  return luminance <= 1.0 && any(rgb > vec3f(1.0 + VOLUME_TOLERANCE));
+}
+
+// Whether a colour falls outside a space's gamut, by chromaticity or brightness.
+fn outside_gamut(space: GamutSpace, xyz: vec3f, xy: vec2f) -> bool {
+  return !inside_gamut(space, xy) || above_gamut(space.from_xyz * xyz, xyz.y);
 }
 
 // A 0xRRGGBB tint as a colour.
