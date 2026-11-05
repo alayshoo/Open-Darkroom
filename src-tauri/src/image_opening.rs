@@ -391,22 +391,40 @@ pub fn compute_retouched_histograms_in(
     Ok(histograms)
 }
 
+/// Bytes of retouched blocks and journal kept between histogram requests. The
+/// journal gives way first; once the blocks alone pass it nothing is kept.
+pub const MAX_RETOUCHED_BYTES: usize = 512 << 20;
+
 /// The retouched histograms of one image, kept between requests: the strokes
 /// laid over it with what each wrote over, and the counts for the last crop.
 pub struct RetouchedHistograms {
     journal: StrokeJournal,
     blocks: RetouchedBlocks,
+    blocks_bytes: usize,
     crop: Option<CropPayload>,
     histograms: Option<Histograms>,
+    budget: usize,
 }
 
 impl RetouchedHistograms {
     pub fn new() -> Self {
-        Self::with_journal(StrokeJournal::new())
+        Self::with_budget(MAX_RETOUCHED_BYTES)
     }
 
-    pub fn with_journal(journal: StrokeJournal) -> Self {
-        Self { journal, blocks: RetouchedBlocks::new(), crop: None, histograms: None }
+    pub fn with_budget(budget: usize) -> Self {
+        Self {
+            journal: StrokeJournal::new(),
+            blocks: RetouchedBlocks::new(),
+            blocks_bytes: 0,
+            crop: None,
+            histograms: None,
+            budget,
+        }
+    }
+
+    /// Bytes of retouched blocks and journal held for the next request.
+    pub fn held_bytes(&self) -> usize {
+        self.journal.bytes() + self.blocks_bytes
     }
 
     /// The histograms of `src` within `crop` with `strokes` laid over it. Only
@@ -436,7 +454,8 @@ impl RetouchedHistograms {
         let mut source = LinearSource::with_blocks(src, width, height, channels, luts, blocks);
         // Each block that changes comes out of the counts as it was, and goes back in as it ends up.
         let mut changed = HashSet::new();
-        let followed = follow_strokes(device, queue, passes, &mut source, &mut self.journal, strokes, |key, held| {
+        let journal = &mut self.journal;
+        let followed = follow_strokes(device, queue, passes, &mut source, journal, strokes, self.budget, |key, held| {
             if let Some(counts) = &mut counts {
                 if changed.insert(key) {
                     binning.count_block(counts, key, held, false);
@@ -456,10 +475,15 @@ impl RetouchedHistograms {
                 counts
             }
             (Err(e), _) => {
-                *self = Self::with_journal(StrokeJournal::with_cap(self.journal.cap()));
+                *self = Self::with_budget(self.budget);
                 return Err(e);
             }
         };
+        if source.bytes() > self.budget {
+            *self = Self::with_budget(self.budget);
+            return Ok(histograms);
+        }
+        self.blocks_bytes = source.bytes();
         self.blocks = source.into_blocks();
         self.crop = Some(*crop);
         self.histograms = Some(histograms.clone());
