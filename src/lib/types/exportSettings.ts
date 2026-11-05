@@ -15,7 +15,7 @@ export interface ExportSettings {
     jxlLossless: boolean;
     jxlQuality: number;       // 1-100 (lossy only), 90 is visually lossless
     jxlEffort: number;        // 1-9
-    jxlBitDepth: number;      // 8-16
+    jxlBitDepth: number;      // 8-16 (lossless only; lossy is always 16)
     isBw: boolean;
 }
 

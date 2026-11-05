@@ -160,23 +160,25 @@
                 </button>
             </div>
         </div>
-        <div class="setting flex flex-col gap-1.5">
-            <div class="setting-header flex justify-between items-baseline">
-                <span class="setting-label">{isRgb ? "RGB" : "Greyscale"} bit depth</span>
-                <span class="setting-value">{settings.jxlBitDepth}-bit</span>
+        {#if settings.jxlLossless}
+            <div class="setting flex flex-col gap-1.5">
+                <div class="setting-header flex justify-between items-baseline">
+                    <span class="setting-label">{isRgb ? "RGB" : "Greyscale"} bit depth</span>
+                    <span class="setting-value">{settings.jxlBitDepth}-bit</span>
+                </div>
+                <SingleValSliderInt
+                    min={8}
+                    max={16}
+                    step={1}
+                    defaultValue={8}
+                    bind:value={settings.jxlBitDepth}
+                    ></SingleValSliderInt>
+                <div class="setting-hints flex justify-between -mt-2">
+                    <span>Small</span>
+                    <span>Smooth gradients</span>
+                </div>
             </div>
-            <SingleValSliderInt
-                min={8}
-                max={16}
-                step={1}
-                defaultValue={8}
-                bind:value={settings.jxlBitDepth}
-                ></SingleValSliderInt>
-            <div class="setting-hints flex justify-between -mt-2">
-                <span>Small</span>
-                <span>Smooth gradients</span>
-            </div>
-        </div>
+        {/if}
         {#if !settings.jxlLossless}
             <div class="setting flex flex-col gap-1.5">
                 <div class="setting-header flex justify-between items-baseline">
