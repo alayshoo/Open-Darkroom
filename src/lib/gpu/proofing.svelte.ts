@@ -18,7 +18,7 @@ class Proofing {
     enabled = $state(false);
 
     /** The export space to proof against, mirrored from the export settings. */
-    target = $state<OutputSpaceId>("srgb");
+    target = $state<OutputSpaceId>("display-p3");
 
     /** What the render chain should be told, which is nothing while this is off. */
     get space(): OutputSpaceId | null {

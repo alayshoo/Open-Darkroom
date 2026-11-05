@@ -21,7 +21,7 @@ export interface ExportSettings {
 
 export const defaultExportSettings: ExportSettings = {
     format: "jxl",
-    outputSpace: "srgb",
+    outputSpace: "display-p3",
     pngCompression: 6,
     jpegQuality: 90,
     webpLossless: true,
