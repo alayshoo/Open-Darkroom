@@ -170,7 +170,7 @@
                     min={8}
                     max={16}
                     step={1}
-                    defaultValue={8}
+                    defaultValue={16}
                     bind:value={settings.jxlBitDepth}
                     ></SingleValSliderInt>
                 <div class="setting-hints flex justify-between -mt-2">

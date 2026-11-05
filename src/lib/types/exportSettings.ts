@@ -31,6 +31,6 @@ export const defaultExportSettings: ExportSettings = {
     jxlLossless: false,
     jxlQuality: 95,
     jxlEffort: 7,
-    jxlBitDepth: 8,
+    jxlBitDepth: 16,
     isBw: false,
 };
