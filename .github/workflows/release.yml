@@ -36,21 +36,35 @@ jobs:
           fi
 
       # Every platform uploads into one draft, reusing a draft a failed run left behind.
+      # The body is the version's CHANGELOG.md section followed by the install notes.
       - id: release
         if: steps.version.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
-          BODY: |
+          INSTALL: |
             **Windows:** download the `.msi` and run it. Windows may warn that the installer is unrecognised; choose More info, then Run anyway.
 
             **macOS:** download the `.dmg`, open it and drag Open Darkroom into Applications. It runs on both Apple Silicon and Intel Macs. It is not signed by Apple, so the first launch is blocked: open System Settings, Privacy & Security, and choose Open Anyway.
         run: |
+          changes=$(awk -v heading="## [${TAG#v}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && (/^## / || /^\[[^]]+\]: /) { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d')
+          if [ -z "$changes" ]; then
+            echo "::warning::CHANGELOG.md has no section for $TAG"
+            BODY="$INSTALL"
+          else
+            BODY=$(printf '%s\n\n---\n\n%s' "$changes" "$INSTALL")
+          fi
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -n1)
           if [ -z "$id" ]; then
             id=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
               -f name="Open Darkroom $TAG" -f body="$BODY" -F draft=true --jq .id)
+          else
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f body="$BODY" > /dev/null
           fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 

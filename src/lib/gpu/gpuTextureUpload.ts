@@ -51,7 +51,8 @@ export function uploadRawPixelsToGPU(
               label: "RAW Image Texture",
               size: { width, height },
               format: "rgba16float",
-              usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+              // Copied out of as well as into, so strokes can be retouched in.
+              usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
           });
 
     // writeTexture copies a CPU byte array → GPU texture. The view is passed

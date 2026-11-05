@@ -55,7 +55,7 @@ export async function initializeGPU(): Promise<GPUSession> {
  * browser would convert back and the preview would end up slightly desaturated
  * for nothing — so the display's own gamut decides.
  */
-function detectDisplaySpace(): OutputSpaceId {
+export function detectDisplaySpace(): OutputSpaceId {
     if (typeof window === "undefined" || !window.matchMedia) return "srgb";
     return window.matchMedia("(color-gamut: p3)").matches ? "display-p3" : "srgb";
 }

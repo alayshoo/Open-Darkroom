@@ -1,6 +1,7 @@
 // $lib/types/gpuTypes.ts
 
 import type { OutputSpaceId } from "$lib/gpu/outputSpace";
+import type { GamutMask } from "$lib/gpu/outputSpaceBuffer";
 
 // Stores the GPU reference and format for display to
 // be shared accross svelte components.
@@ -77,10 +78,14 @@ export interface Renderer {
     loadImage: (image: GPUImage, srcToWorking: Float32Array) => void;
     // Swaps in a finer copy of the same image, once it has arrived.
     setSource: (image: GPUImage) => void;
+    // The source's pixels changed in place, as a stroke being retouched in.
+    sourceChanged: () => void;
     setSliders: (sliders: Sliders) => void;
     // Where the preview is being encoded to, and the export space it is being
     // proofed against — `null` for a preview showing the display's own gamut.
     setOutputSpace: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
+    // The pixels painted as outside a gamut, or null for none.
+    setGamutMask: (mask: GamutMask | null) => void;
     setToneMap: (toneMap: ToneMap) => void;
     // The baked point curves, or null while every curve is the identity.
     setCurves: (lut: Float32Array | null) => void;

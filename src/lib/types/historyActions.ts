@@ -3,6 +3,7 @@
 import type { Sliders } from "$lib/types/imgParameters";
 import type { Curves } from "$lib/types/curves";
 import type { Crop } from "$lib/types/crop";
+import type { Retouch } from "$lib/types/retouch";
 
 export type Action =
   | {
@@ -31,6 +32,13 @@ export type Action =
       oldValue: Crop;
       newValue: Crop;
     }
-  // future-proof:
-  // | { type: 'mask-draw'; maskId: string; strokeData: ... }
+  // One heal or clone stroke, added after the rest
+  | {
+      type: "retouchAdd";
+      stroke: Retouch;
+    }
+  | {
+      type: "retouchClear";
+      strokes: Retouch[];
+    }
   ;

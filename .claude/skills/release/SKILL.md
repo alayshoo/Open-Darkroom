@@ -1,6 +1,6 @@
 ---
 name: release
-description: A skill to be used when prompted only. Merges main into the release branch, which triggers the GitHub release build of the Windows and macOS installers.
+description: A skill to be used when prompted only. Bumps the version, writes the changelog and merges main into the release branch, which triggers the GitHub release build of the Windows and macOS installers.
 ---
 
 # Release
@@ -9,7 +9,7 @@ Day to day work merges into `main`, the nightly build. A release is `main` merge
 
 ## When to use
 
-ONLY use this skill when the user prompts you. Invoking it is explicit permission to bump the version, push the bump to `main` and merge into `release`.
+ONLY use this skill when the user prompts you. Invoking it is explicit permission to bump the version, write the changelog, push both to `main` and merge into `release`.
 
 ## Steps
 
@@ -30,13 +30,21 @@ ONLY use this skill when the user prompts you. Invoking it is explicit permissio
    - `src-tauri/Cargo.toml`
    - the `open-darkroom` entry in `src-tauri/Cargo.lock`
 
-   MSI needs a plain `major.minor.patch` with numbers only, no `-beta` style suffix. Commit as `Bump version to X.Y.Z` and push to `main`.
+   MSI needs a plain `major.minor.patch` with numbers only, no `-beta` style suffix.
 
-4. **Check CI.** The Tests workflow must be green on the `main` head. If it is red, stop and report rather than releasing.
+4. **Write the changelog.** The release workflow uses this section as the GitHub release notes. Add a section for the new version to the top of `CHANGELOG.md`, above the previous release, following the format of the sections already there:
+   - A `## [X.Y.Z] - YYYY-MM-DD` heading with today's date, and a `[X.Y.Z]: https://github.com/alayshoo/Open-Darkroom/compare/vPREV...vX.Y.Z` link added to the top of the link list at the foot of the file.
+   - Entries grouped under `### Added`, `### Changed`, `### Fixed` and `### Removed`, leaving out any group with nothing in it.
+   - Work out what changed from `git log origin/release..origin/main`, reading the commit bodies and the merged pull requests, not just the subject lines.
+   - Write for people using the app, not for developers: one line per change, describing what they will notice. Fold a feature and its follow-up fixes into one entry, and leave out refactors, tests, CI, tooling and other changes with no visible effect.
 
-5. **Merge.** Open a pull request from `main` into `release` titled `Release vX.Y.Z`, with a short list of what changed since the last release (from `git log origin/release..origin/main`). Merge it with a merge commit, never squash or rebase, so `main` stays an ancestor of `release` and the next release merges cleanly.
+   Show the user the new section and wait for their go-ahead before committing. Then commit the bump and the changelog together as `Release X.Y.Z` (or `Update the changelog for X.Y.Z` if no bump was needed) and push to `main`.
 
-6. **Report.** Give the user the PR link and point them at the Actions tab for the release build. Do not wait on the build unless asked.
+5. **Check CI.** The Tests workflow must be green on the `main` head. If it is red, stop and report rather than releasing.
+
+6. **Merge.** Open a pull request from `main` into `release` titled `Release vX.Y.Z`, with the version's changelog section as its description. Merge it with a merge commit, never squash or rebase, so `main` stays an ancestor of `release` and the next release merges cleanly.
+
+7. **Report.** Give the user the PR link and point them at the Actions tab for the release build. Do not wait on the build unless asked.
 
 ## Limits
 

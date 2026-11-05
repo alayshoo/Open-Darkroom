@@ -55,7 +55,7 @@ function sliderBlocks(markup: string): SliderBlock[] {
       return {
         name: one(/name="([^"]*)"/),
         unit: one(/unit="([^"]*)"/),
-        boundKey: one(/bind:value=\{sliders\.(\w+)\}/),
+        boundKey: one(/bind:value=\{edit\.sliders\.(\w+)\}/),
         historyKey: one(/key:\s*"(\w+)"/),
         numbers,
       };

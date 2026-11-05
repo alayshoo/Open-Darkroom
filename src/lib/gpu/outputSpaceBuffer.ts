@@ -9,17 +9,20 @@
 import type { GPUSession } from "$lib/types/gpuTypes";
 import {
     destinationToWorking,
+    PRIMARIES,
+    spaceToSpace,
+    spaceToXyz,
     transferFor,
     workingToDestination,
     type OutputSpaceId,
 } from "./outputSpace";
 
 /**
- * Three `mat3x3<f32>` of three 16-byte columns each, then two u32, padded to the
- * 16 bytes a uniform struct binds at. Must match `OUTPUT_SPACE_BYTES` in
+ * Three `mat3x3<f32>` of three 16-byte columns each, four u32, then the mask's
+ * `mat3x3<f32>` and `vec3f`, padded to 16. Must match `OUTPUT_SPACE_BYTES` in
  * src-tauri/src/export_rendering.rs.
  */
-export const OUTPUT_SPACE_BUFFER_SIZE = 160;
+export const OUTPUT_SPACE_BUFFER_SIZE = 224;
 
 /** Where each field starts, in units of the view that writes it. */
 const TO_DESTINATION = 0;
@@ -27,6 +30,37 @@ const TO_PROOF = 12;
 const FROM_PROOF = 24;
 const CURVE_WORD = 36;
 const PROOF_WORD = 37;
+const MASK_WORD = 38;
+const MASK_TINT_WORD = 39;
+const TO_MASK = 40;
+const MASK_HEIGHTS = 52;
+
+/** MASK_ ids in chunks/outputTransform.wgsl. */
+const MASK_BEFORE = 1;
+const MASK_AFTER = 2;
+
+/** The pixels of the preview painted as outside a gamut. */
+export interface GamutMask {
+    space: OutputSpaceId;
+    /** 0xRRGGBB. */
+    tint: number;
+    /** Test what the output transform produces rather than what it was given. */
+    afterTransform: boolean;
+}
+
+/** Each primary's X+Y+Z, and the triangle's height in xy above the edge opposite it. */
+function triangleTerms(space: OutputSpaceId) {
+    const xyz = spaceToXyz(space);
+    const sums = [0, 1, 2].map((i) => xyz[i * 3] + xyz[i * 3 + 1] + xyz[i * 3 + 2]);
+    const p = PRIMARIES[space];
+    const heights = p.map(([x, y], i) => {
+        const [ax, ay] = p[(i + 1) % 3];
+        const [bx, by] = p[(i + 2) % 3];
+        const cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+        return Math.abs(cross) / Math.hypot(bx - ax, by - ay);
+    });
+    return { sums, heights };
+}
 
 export interface OutputSpaceBuffer {
     buffer: GPUBuffer;
@@ -35,6 +69,8 @@ export interface OutputSpaceBuffer {
      * space an export would be written in on the way.
      */
     set: (destination: OutputSpaceId, proof: OutputSpaceId | null) => void;
+    /** Paint the pixels outside a gamut, or stop with null. Preview only. */
+    setMask: (mask: GamutMask | null) => void;
     destroy: () => void;
 }
 
@@ -60,7 +96,11 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
         }
     }
 
-    function set(destination: OutputSpaceId, proof: OutputSpaceId | null) {
+    let destination: OutputSpaceId = gpu.displaySpace;
+    let proof: OutputSpaceId | null = null;
+    let mask: GamutMask | null = null;
+
+    function write() {
         floats.fill(0);
         writeMatrix(TO_DESTINATION, workingToDestination(destination));
 
@@ -74,12 +114,40 @@ export function createOutputSpaceBuffer(gpu: GPUSession): OutputSpaceBuffer {
         words[CURVE_WORD] = transferFor(destination);
         words[PROOF_WORD] = proof ? 1 : 0;
 
+        if (mask) {
+            words[MASK_WORD] = mask.afterTransform ? MASK_AFTER : MASK_BEFORE;
+            words[MASK_TINT_WORD] = mask.tint & 0xffffff;
+
+            // Rows weighted by each primary's X+Y+Z, so the shader can find the
+            // chromaticity's distance from each edge as inside_gamut() does.
+            const toMask = mask.afterTransform
+                ? spaceToSpace(destination, mask.space)
+                : workingToDestination(mask.space);
+            const { sums, heights } = triangleTerms(mask.space);
+            for (let col = 0; col < 3; col++) {
+                for (let row = 0; row < 3; row++) toMask[col * 3 + row] *= sums[row];
+            }
+            writeMatrix(TO_MASK, toMask);
+            floats.set(heights, MASK_HEIGHTS);
+        }
+
         gpu.device.queue.writeBuffer(buffer, 0, staging);
+    }
+
+    function set(to: OutputSpaceId, proofAgainst: OutputSpaceId | null) {
+        destination = to;
+        proof = proofAgainst;
+        write();
+    }
+
+    function setMask(next: GamutMask | null) {
+        mask = next;
+        write();
     }
 
     function destroy() {
         buffer.destroy();
     }
 
-    return { buffer, set, destroy };
+    return { buffer, set, setMask, destroy };
 }

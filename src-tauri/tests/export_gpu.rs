@@ -293,7 +293,8 @@ fn progress_increases_and_finishes_at_one() {
     .expect("render");
 
     let seen = seen.into_inner().unwrap();
-    assert_eq!(seen.len(), 3, "30 rows in chunks of 10");
+    assert_eq!(seen.len(), 4, "a start marker, then 30 rows in chunks of 10");
+    assert_eq!(seen[0], 0.0, "the render announces where its rows begin");
     assert!(seen.windows(2).all(|w| w[1] > w[0]), "must increase: {seen:?}");
     assert_eq!(*seen.last().unwrap(), 1.0, "must finish at 100%");
     assert!(seen.iter().all(|&p| (0.0..=1.0).contains(&p)), "{seen:?}");
@@ -321,7 +322,7 @@ fn a_ragged_final_chunk_still_reports_completion() {
     .expect("render");
 
     let seen = seen.into_inner().unwrap();
-    assert_eq!(seen.len(), 3, "25 rows in chunks of 10 leaves a 5-row tail");
+    assert_eq!(seen.len(), 4, "a start marker, then a 5-row tail after two chunks of 10");
     assert_eq!(*seen.last().unwrap(), 1.0);
 }
 

@@ -1,5 +1,6 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
+    import { untrack } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { slide } from "svelte/transition";
@@ -24,6 +25,10 @@
     import CropButton from "$lib/components/inputs/cropButton.svelte";
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
     import CropTools from "$lib/components/inputs/cropTools.svelte";
+    import RetouchTools from "$lib/components/inputs/retouchTools.svelte";
+    import RetouchBar from "$lib/components/retouch/RetouchBar.svelte";
+    import { retouchTool } from "$lib/retouch/retouchTool.svelte";
+    import { type Retouch, type RetouchMode, retouchEqual } from "$lib/types/retouch";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";
@@ -67,6 +72,7 @@
     } from "$lib/types/curves";
 
     import { type ImagePayload } from "$lib/types/imagePayload";
+    import { type ImageEdit, newImageEdit } from "$lib/types/imageEdit";
     import {
         type Crop,
         FULL_FRAME,
@@ -100,6 +106,7 @@
     import { actionMode, actionPage } from "$lib/history/actionControls";
 
     import { createKeydownHandler, isTextField } from "$lib/config/keyboardShortcuts";
+    import type { ShortcutId } from "$lib/config/shortcutRegistry";
 
     // ===== Control Modes =====
 
@@ -252,18 +259,15 @@
 
     // ===== Variables =====
 
-    // Copy, don't alias: $state() proxies the object it is given, so passing the
-    // exported default directly would write every slider drag back into it.
-    let sliders: Sliders = $state({ ...defaultSlidersRGB });
+    // Everything done to the open image, as one document. Each image opened
+    // starts a fresh one.
+    let edit: ImageEdit = $state(newImageEdit(0, 0));
 
-    let curves: Curves = $state(defaultCurves());
     let curveHistogramCanvas: HTMLCanvasElement | null = $state(null);
     let masterHistogramCanvas: HTMLCanvasElement | null = $state(null);
     let curveChannel: CurveChannel = $state("master");
 
     // ===== B&W toggle logic =====
-    let isRgb = $state(true);
-    let savedColorValues: Partial<typeof sliders> | null = null;
 
     /* The colour keys are in transit for as long as the toggle animates them,
        so anything reading them has to wait rather than judge them mid-flight —
@@ -288,32 +292,32 @@
     let pageCount = $derived(isDarkroom ? 2 : 3);
 
     // B&W leaves the colour curves out, the way it pins the colour sliders.
-    let curveLut = $derived(bakeCurveLut(curves, isRgb));
+    let curveLut = $derived(bakeCurveLut(edit.curves, edit.isRgb));
     let pagerEl = $derived<HTMLDivElement | null>(
         isDarkroom ? pagerElDarkroom : pagerElNormal,
     );
 
     function handleColorModeToggle(isBw: boolean) {
         if (isBw) {
-            savedColorValues = {};
+            edit.heldColour = {};
             const colorKeys = Object.keys(overridesBW) as (keyof Sliders)[];
             for (const k of colorKeys) {
-                (savedColorValues as any)[k] = sliders[k];
+                (edit.heldColour as any)[k] = edit.sliders[k];
             }
             animateObject(
-                sliders as unknown as Record<string, number>,
+                edit.sliders as unknown as Record<string, number>,
                 overridesBW as Record<string, number>,
                 COLOR_ANIM_MS,
             );
             markColorAnimating();
-        } else if (savedColorValues) {
+        } else if (edit.heldColour) {
             animateObject(
-                sliders as unknown as Record<string, number>,
-                savedColorValues as Record<string, number>,
+                edit.sliders as unknown as Record<string, number>,
+                edit.heldColour as Record<string, number>,
                 COLOR_ANIM_MS,
             );
             markColorAnimating();
-            savedColorValues = null;
+            edit.heldColour = null;
         }
     }
 
@@ -341,7 +345,7 @@
             if (payload) {
                 imagePayload = payload;
                 zoom = null;
-                resetEdit();
+                resetEdit(payload.fullWidth, payload.fullHeight);
             }
         } catch (e) {
             imagePayload = null;
@@ -351,12 +355,10 @@
 
     // An edit belongs to one image, so a newly opened one starts from defaults
     // with an empty history.
-    function resetEdit() {
-        sliders = { ...defaultSlidersRGB };
-        curves = defaultCurves();
-        isRgb = true;
-        savedColorValues = null;
-        crop = { ...FULL_FRAME };
+    function resetEdit(width: number, height: number) {
+        retouchTool.mode = null;
+        edit = newImageEdit(width, height);
+        retouchTool.resetSource();
         cancelCrop();
         history.clear();
     }
@@ -365,7 +367,6 @@
 
     // What is applied, and what the overlay is editing while the tool is open.
     // The preview shows the whole frame for as long as the tool is.
-    let crop: Crop = $state({ ...FULL_FRAME });
     let draftCrop: Crop = $state({ ...FULL_FRAME });
     let isCropping = $state(false);
     let isStraightening = $state(false);
@@ -405,8 +406,9 @@
 
     function enterCrop() {
         presets.open = false;
+        retouchTool.mode = null;
         zoom = null;
-        draftCrop = { ...crop };
+        draftCrop = { ...edit.crop };
         isCropping = true;
         holdAspectOnEntry();
     }
@@ -453,10 +455,10 @@
     function applyCrop() {
         isCropping = false;
         isStraightening = false;
-        if (cropsEqual(draftCrop, crop)) return;
+        if (cropsEqual(draftCrop, edit.crop)) return;
         zoom = null;
-        commit({ type: "crop", oldValue: { ...crop }, newValue: { ...draftCrop } });
-        crop = { ...draftCrop };
+        commit({ type: "crop", oldValue: { ...edit.crop }, newValue: { ...draftCrop } });
+        edit.crop = { ...draftCrop };
     }
 
     function cancelCrop() {
@@ -477,9 +479,9 @@
     function flipShortcut(horizontal: boolean) {
         if (!imagePayload) return;
         if (isCropping) return flipDraft(horizontal);
-        const flipped = flipCrop(crop, horizontal);
-        commit({ type: "crop", oldValue: { ...crop }, newValue: flipped });
-        crop = flipped;
+        const flipped = flipCrop(edit.crop, horizontal);
+        commit({ type: "crop", oldValue: { ...edit.crop }, newValue: flipped });
+        edit.crop = flipped;
     }
 
     function toggleCrop() {
@@ -492,18 +494,19 @@
     // left outside it stops weighing on the black and white points.
     let inputHistograms: ChannelHistograms | null = $state(null);
     let histogramRequest = 0;
-    // One binning in flight at a time; crops arriving meanwhile collapse into the latest.
+    // One binning in flight at a time; requests arriving meanwhile collapse into the latest.
     let histogramBinning = false;
-    let histogramPending: Crop | null = null;
+    let histogramPending: HistogramInput | null = null;
+    type HistogramInput = { crop: Crop; strokes: Retouch[] };
 
-    function binCrop(kept: Crop) {
+    function binCrop(input: HistogramInput) {
         if (histogramBinning) {
-            histogramPending = kept;
+            histogramPending = input;
             return;
         }
         histogramBinning = true;
         const request = histogramRequest;
-        cropHistograms(kept)
+        cropHistograms(input.crop, input.strokes)
             .then((h) => {
                 if (request === histogramRequest) inputHistograms = h;
             })
@@ -516,18 +519,30 @@
             });
     }
 
+    // The strokes both histograms bin. They are out of sight while a brush is
+    // in hand, so they catch up once it is put down.
+    let histogramStrokes = $state.raw<Retouch[]>([]);
+    $effect(() => {
+        if (isRetouching) return;
+        const strokes = $state.snapshot(edit.retouch) as Retouch[];
+        const held = untrack(() => histogramStrokes);
+        if (strokes.length === held.length && strokes.every((s, i) => retouchEqual(s, held[i]))) return;
+        histogramStrokes = strokes;
+    });
+
     $effect(() => {
         const payload = imagePayload;
-        const kept = { ...crop };
+        const kept = { ...edit.crop };
+        const strokes = histogramStrokes;
         ++histogramRequest;
         histogramPending = null;
 
         if (!payload) {
             inputHistograms = null;
-        } else if (isFullFrame(kept)) {
+        } else if (isFullFrame(kept) && strokes.length === 0) {
             inputHistograms = { r: payload.histR, g: payload.histG, b: payload.histB };
         } else {
-            binCrop(kept);
+            binCrop({ crop: kept, strokes });
         }
     });
 
@@ -556,12 +571,14 @@
 
     async function handleExport() {
         isExportPending = true;
+        // A focused control would otherwise keep taking keys under the overlay.
+        (document.activeElement as HTMLElement)?.blur();
         const unlisten = await listen("export:started", () => {
             showExportModal = true;
         });
         if (isCropping) applyCrop();
         try {
-            await exportImage(sliders, curveLut, colorSpaceDebug.toneMap, crop, exportSettings);
+            await exportImage(edit, curveLut, colorSpaceDebug.toneMap, exportSettings);
         } finally {
             unlisten();
             isExportPending = false;
@@ -569,11 +586,48 @@
         }
     }
 
+    // ===== Retouch =====
+
+    // Whether the brushes have every pixel of the image to paint on. The tools
+    // open before then; the canvas holds back painting until it is.
+    let retouchReady = $state(false);
+    let canRetouch = $derived(!!imagePayload && !isCropping);
+
+    $effect(() => {
+        if (!canRetouch) retouchTool.mode = null;
+    });
+
+    // The presets need the side bar the brushes send away.
+    $effect(() => {
+        if (presets.open) untrack(() => (retouchTool.mode = null));
+    });
+
+    let isRetouching = $derived(retouchTool.mode !== null);
+
+    function toggleRetouch(mode: RetouchMode) {
+        if (!canRetouch) return;
+        presets.open = false;
+        loupe.picking = false;
+        retouchTool.toggle(mode);
+    }
+
+    function addRetouch(stroke: Retouch) {
+        commit({ type: "retouchAdd", stroke });
+        edit.retouch = [...edit.retouch, stroke];
+    }
+
+    function clearRetouch() {
+        if (edit.retouch.length === 0) return;
+        const strokes = $state.snapshot(edit.retouch) as Retouch[];
+        commit({ type: "retouchClear", strokes });
+        edit.retouch = [];
+    }
+
     // ===== History =====
     const stateAccessors: StateAccessors = {
-        getSlider: (key) => sliders[key as keyof Sliders],
+        getSlider: (key) => edit.sliders[key as keyof Sliders],
         setSlider: (key, val) => {
-            (sliders as unknown as Record<string, typeof val>)[key] = val;
+            (edit.sliders as unknown as Record<string, typeof val>)[key] = val;
         },
         // Numbers travel to their new values the way the colour-mode toggle
         // moves them; anything else lands at once.
@@ -581,19 +635,23 @@
             const numeric: Record<string, number> = {};
             for (const [key, val] of Object.entries(values)) {
                 if (typeof val === "number") numeric[key] = val;
-                else (sliders as unknown as Record<string, typeof val>)[key] = val;
+                else (edit.sliders as unknown as Record<string, typeof val>)[key] = val;
             }
             animateObject(
-                sliders as unknown as Record<string, number>,
+                edit.sliders as unknown as Record<string, number>,
                 numeric,
             );
         },
         setCurves: (next) => {
-            curves = cloneCurves(next);
+            edit.curves = cloneCurves(next);
         },
         setCrop: (value) => {
-            crop = { ...value };
+            edit.crop = { ...value };
             cancelCrop();
+        },
+        getRetouch: () => edit.retouch,
+        setRetouch: (strokes) => {
+            edit.retouch = [...strokes];
         },
     };
 
@@ -605,7 +663,7 @@
     // only with nothing to throw away does it reach the history.
     function leaveCropForHistory(): boolean {
         if (!isCropping) return false;
-        const discarded = !cropsEqual(draftCrop, crop);
+        const discarded = !cropsEqual(draftCrop, edit.crop);
         cancelCrop();
         return discarded;
     }
@@ -644,23 +702,23 @@
     function applySliderSet(values: Partial<Sliders>, curveValues: Partial<Curves> = {}) {
         const next: Partial<Sliders> = { ...values };
 
-        if (!isRgb) {
-            const held: Partial<Sliders> = { ...(savedColorValues ?? {}) };
+        if (!edit.isRgb) {
+            const held: Partial<Sliders> = { ...(edit.heldColour ?? {}) };
             for (const key of Object.keys(overridesBW) as (keyof Sliders)[]) {
                 if (key in next) {
                     (held as any)[key] = next[key];
                     delete next[key];
                 }
             }
-            savedColorValues = held;
+            edit.heldColour = held;
         }
 
         const oldValues: Partial<Sliders> = {};
         for (const key of Object.keys(next) as (keyof Sliders)[]) {
-            (oldValues as any)[key] = sliders[key];
+            (oldValues as any)[key] = edit.sliders[key];
         }
 
-        const oldCurves = cloneCurves($state.snapshot(curves) as Curves);
+        const oldCurves = cloneCurves($state.snapshot(edit.curves) as Curves);
         const newCurves = cloneCurves({ ...oldCurves, ...curveValues });
         const curvesChange = curvesEqual(oldCurves, newCurves)
             ? {}
@@ -674,8 +732,8 @@
     // In B&W the colour keys hold their overrides, so anything that saves the
     // sliders takes the colour values set aside for the toggle back instead.
     function colourSliders(): Sliders {
-        if (isRgb || !savedColorValues) return sliders;
-        return { ...sliders, ...savedColorValues };
+        if (edit.isRgb || !edit.heldColour) return edit.sliders;
+        return { ...edit.sliders, ...edit.heldColour };
     }
 
     // All three act on the sliders of the mode the user is looking at, which
@@ -687,7 +745,7 @@
             await copyAdjustments(
                 colourSliders(),
                 activeKeys,
-                isDarkroom ? undefined : ($state.snapshot(curves) as Curves),
+                isDarkroom ? undefined : ($state.snapshot(edit.curves) as Curves),
             );
         } catch (e) {
             console.error("Failed to copy adjustments:", e);
@@ -732,8 +790,8 @@
 
     function handleInvertShortcut() {
         if (!isDarkroom || sidebarInactive) return;
-        sliders.invert = !sliders.invert;
-        handleInvertToggle(sliders.invert);
+        edit.sliders.invert = !edit.sliders.invert;
+        handleInvertToggle(edit.sliders.invert);
     }
 
     function handleResetAdjustments() {
@@ -746,7 +804,7 @@
        through a lerp, which need not be bit-exact. */
     function isAtDefault(key: keyof Sliders) {
         const def = defaultSlidersRGB[key];
-        const val = sliders[key];
+        const val = edit.sliders[key];
         if (typeof def === "number" && typeof val === "number") {
             return Math.abs(val - def) <= SLIDER_TOLERANCE;
         }
@@ -755,7 +813,7 @@
 
     let isColourMixerIdentity = $derived(HSL_KEYS.every(isAtDefault));
 
-    let isCurvesIdentity = $derived(curvesEqual(curves, defaultCurves()));
+    let isCurvesIdentity = $derived(curvesEqual(edit.curves, defaultCurves()));
 
     // ===== Presets =====
 
@@ -777,10 +835,10 @@
     /* What the preview shows: the committed state with the hovered preset laid
        over it, minus what applying it in B&W would divert. */
     let shownSliders: Sliders = $derived.by(() => {
-        if (!previewPreset) return sliders;
-        const next = { ...sliders };
+        if (!previewPreset) return edit.sliders;
+        const next = { ...edit.sliders };
         for (const [key, value] of Object.entries(previewPreset.sliders)) {
-            if (!isRgb && key in overridesBW) continue;
+            if (!edit.isRgb && key in overridesBW) continue;
             (next as any)[key] = value;
         }
         return next;
@@ -788,7 +846,7 @@
 
     let shownCurveLut = $derived(
         previewPreset?.curves
-            ? bakeCurveLut({ ...curves, ...previewPreset.curves }, isRgb)
+            ? bakeCurveLut({ ...edit.curves, ...previewPreset.curves }, edit.isRgb)
             : curveLut,
     );
 
@@ -798,13 +856,13 @@
     }
 
     function currentCurves() {
-        return cloneCurves($state.snapshot(curves) as Curves);
+        return cloneCurves($state.snapshot(edit.curves) as Curves);
     }
 
     // A new preset starts from whatever has been changed, or from the whole
     // mode when nothing has.
     function openNewPreset() {
-        let fields = changedFieldIds(colourSliders(), curves);
+        let fields = changedFieldIds(colourSliders(), edit.curves);
         if (fields.size === 0) fields = modeFieldIds(isDarkroom ? "darkroom" : "lighter-room");
         presetDialog = { editing: null, name: "", fields };
     }
@@ -857,7 +915,7 @@
     let isIdentity = $derived(
         (isDarkroom || isCurvesIdentity) &&
         activeKeys.every(
-            (key) => ((!isRgb || isColorAnimating) && key in overridesBW) || isAtDefault(key),
+            (key) => ((!edit.isRgb || isColorAnimating) && key in overridesBW) || isAtDefault(key),
         ),
     );
 
@@ -866,6 +924,9 @@
     // build still needs to be measurable — turning the debug tools on in
     // settings brings F1/F2 back.
     debugStats.enabled = import.meta.env.DEV;
+
+    // A brush in hand keeps the keyboard to itself, bar undo and redo.
+    const RETOUCH_SHORTCUTS: ReadonlySet<ShortcutId> = new Set(["healTool", "cloneTool", "undo", "redo"]);
 
     const handleKeydown = createKeydownHandler({
         handlers: {
@@ -879,6 +940,8 @@
             pasteAdjustments: handlePasteAdjustments,
             resetAdjustments: handleResetAdjustments,
             toggleCrop: toggleCrop,
+            healTool: () => toggleRetouch("heal"),
+            cloneTool: () => toggleRetouch("clone"),
             flipHorizontal: () => flipShortcut(true),
             flipVertical: () => flipShortcut(false),
             autoLevels: handleAutoLevels,
@@ -906,11 +969,17 @@
         },
         closeSettings: () => settings.close(),
         isSettingsOpen: () => settings.open,
+        allows: (id) => !isRetouching || RETOUCH_SHORTCUTS.has(id),
     });
 
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        // Nothing but the window itself answers while an export runs.
+        if (isExportPending) {
+            e.preventDefault();
+            return;
+        }
         // The preset dialog takes the keyboard while it is up.
         if (presetDialog) {
             if (e.key === "Escape") {
@@ -923,6 +992,11 @@
         if (customAspectOpen) return;
         if (loupe.picking && e.key === "Escape" && !settings.open && !isTextField(e.target)) {
             loupe.picking = false;
+            e.preventDefault();
+            return;
+        }
+        if (retouchTool.mode && e.key === "Escape" && !settings.open && !isTextField(e.target)) {
+            retouchTool.mode = null;
             e.preventDefault();
             return;
         }
@@ -954,6 +1028,7 @@
     pasteAdjustments={handlePasteAdjustments}
     resetAdjustments={handleResetAdjustments}
     openSettings={(section) => settings.show(section)}
+    busy={showExportModal}
 ></TitleBar>
 <!-- Shared by both modes, so the two sets of controls stay one and the same. -->
 {#snippet unsharpMask()}
@@ -963,7 +1038,7 @@
         >
         <Loupe />
         <SingleValSliderGroup
-            bind:value={sliders.usmAmount}
+            bind:value={edit.sliders.usmAmount}
             defaultValue={0}
             name="Amount"
             unit="%"
@@ -984,7 +1059,7 @@
                 })}
         ></SingleValSliderGroup>
         <SingleValSliderGroup
-            bind:value={sliders.usmRadius}
+            bind:value={edit.sliders.usmRadius}
             defaultValue={1}
             name="Radius"
             unit="px"
@@ -1003,7 +1078,7 @@
                 })}
         ></SingleValSliderGroup>
         <SingleValSliderGroup
-            bind:value={sliders.usmLumaThreshold}
+            bind:value={edit.sliders.usmLumaThreshold}
             defaultValue={0}
             name="Luma Threshold"
             unit="%"
@@ -1024,7 +1099,7 @@
                 })}
         ></SingleValSliderGroup>
         <SingleValSliderGroup
-            bind:value={sliders.usmDetailThreshold}
+            bind:value={edit.sliders.usmDetailThreshold}
             defaultValue={0}
             name="Detail Threshold"
             unit="%"
@@ -1053,6 +1128,7 @@
     <div class="chrome-scrim" class:shifted={presets.open}>
         <div class="scrim-fill"></div>
     </div>
+    <RetouchBar open={isRetouching} ready={retouchReady} strokes={edit.retouch.length} onclear={clearRetouch} />
     <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
         <div class="presets-slide h-full">
             <PresetsPanel
@@ -1077,25 +1153,30 @@
             class:dimmed={!imagePayload}
             inert={!imagePayload}
         >
-            <CropButton active={isCropping} ontoggle={toggleCrop} />
-            <CropTools
-                visible={isCropping}
-                bind:straightening={isStraightening}
-                bind:aspectMenuOpen
-                aspect={aspectLock}
-                aspectRatio={lockedAspect}
-                canReset={!isFullFrame(draftCrop)}
-                onturn={turnDraft}
-                onflip={flipDraft}
-                onaspect={setAspect}
-                oncustom={() => (customAspectOpen = true)}
-                onreset={resetDraft}
-            />
-            <PresetsButton
-                active={presets.open}
-                disabled={isCropping}
-                ontoggle={() => presets.toggle()}
-            />
+            <div class="crop-group relative">
+                <CropButton active={isCropping} ontoggle={toggleCrop} />
+                <CropTools
+                    visible={isCropping}
+                    bind:straightening={isStraightening}
+                    bind:aspectMenuOpen
+                    aspect={aspectLock}
+                    aspectRatio={lockedAspect}
+                    canReset={!isFullFrame(draftCrop)}
+                    onturn={turnDraft}
+                    onflip={flipDraft}
+                    onaspect={setAspect}
+                    oncustom={() => (customAspectOpen = true)}
+                    onreset={resetDraft}
+                />
+            </div>
+            <div class="toolbar-rest flex flex-col items-center gap-1" class:away={isCropping} inert={isCropping}>
+                <RetouchTools disabled={isCropping} ontoggle={toggleRetouch} />
+                <PresetsButton
+                    active={presets.open}
+                    disabled={isCropping}
+                    ontoggle={() => presets.toggle()}
+                />
+            </div>
         </div>
         <div
             data-tauri-drag-region
@@ -1122,8 +1203,11 @@
                 sliders={shownSliders}
                 curveLut={shownCurveLut}
                 {imagePayload}
-                crop={isCropping ? draftCrop : crop}
+                crop={isCropping ? draftCrop : edit.crop}
                 showWhole={isCropping}
+                retouch={edit.retouch}
+                onretouch={addRetouch}
+                bind:retouchReady
                 bind:zoom
                 bind:zoomable
             >
@@ -1144,7 +1228,14 @@
             <DebugStatsOverlay />
         {/if}
     </div>
-    <div class="side-bar flex w-[23%] flex-col gap-3" onpointerdowncapture={endLoupeOnPress}>
+    <!-- Holds the side bar's room in the row; the bar itself only slides. -->
+    <div class="side-bar-space shrink-0" class:away={isRetouching}></div>
+    <div
+        class="side-bar flex flex-col gap-3"
+        class:away={isRetouching}
+        inert={isRetouching}
+        onpointerdowncapture={endLoupeOnPress}
+    >
         <div
             class="histogram-panel glass shrink-0 rounded-[12px]"
             class:dimmed={settings.debugTools && !debugStats.histogramEnabled}
@@ -1158,10 +1249,11 @@
                     sliders={shownSliders}
                     curveLut={shownCurveLut}
                     {imagePayload}
-                    {crop}
+                    crop={edit.crop}
+                    retouch={histogramStrokes}
                     curveCanvas={curveHistogramCanvas}
                     masterCanvas={masterHistogramCanvas}
-                    curveChannel={isRgb ? curveChannel : "master"}
+                    curveChannel={edit.isRgb ? curveChannel : "master"}
                 />
             </div>
         </div>
@@ -1171,14 +1263,14 @@
                 class:dimmed={exportMenuOpen || sidebarInactive}
                 inert={sidebarInactive}
             >
-                <ColorModeToggle bind:isRgb onToggle={handleColorModeToggle} />
+                <ColorModeToggle bind:isRgb={edit.isRgb} onToggle={handleColorModeToggle} />
                 <!-- Stays mounted and fades. It is the last item in a
                      left-aligned row, so holding its width costs no layout —
                      and a plain opacity crossfade never touches layout at all,
                      where `slide` animated width/padding/margin and reflowed
                      the row on every frame. -->
                 <div class="invert-slot flex items-center gap-2" class:shown={isDarkroom}>
-                    <InvertToggle bind:isInverted={sliders.invert} onToggle={handleInvertToggle} />
+                    <InvertToggle bind:isInverted={edit.sliders.invert} onToggle={handleInvertToggle} />
                     <AutoLevelsButton disabled={!inputHistograms} onauto={handleAutoLevels} />
                 </div>
                 <!-- Pushed to the far end of the row, opposite the toggles. -->
@@ -1215,7 +1307,7 @@
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <span class="section-title pb-1.5">Sharpness</span>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.clarity}
+                                        bind:value={edit.sliders.clarity}
                                         defaultValue={0}
                                         name="Clarity"
                                         unit="%"
@@ -1234,7 +1326,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.texture}
+                                        bind:value={edit.sliders.texture}
                                         defaultValue={0}
                                         name="Texture"
                                         unit="%"
@@ -1258,7 +1350,7 @@
                             </div>
                             <!-- Light & Color Panel -->
                             <div class="controls-page">
-                                {#if isRgb}
+                                {#if edit.isRgb}
                                     <div
                                         class="slider-section flex flex-col mt-4 ml-4 mr-3"
                                         transition:slide={{ duration: 200 }}
@@ -1267,7 +1359,7 @@
                                             >White Balance</span
                                         >
                                         <SingleValSliderGroup
-                                            bind:value={sliders.wbTemp}
+                                            bind:value={edit.sliders.wbTemp}
                                             defaultValue={5500}
                                             name="Temperature"
                                             unit="K"
@@ -1290,7 +1382,7 @@
                                                 })}
                                         ></SingleValSliderGroup>
                                         <SingleValSliderGroup
-                                            bind:value={sliders.wbTint}
+                                            bind:value={edit.sliders.wbTint}
                                             defaultValue={0}
                                             name="Tint"
                                             unit="%"
@@ -1313,10 +1405,10 @@
                                 {/if}
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <span class="section-title pb-1.5">
-                                        {isRgb ? "Light & Colour" : "Light"}
+                                        {edit.isRgb ? "Light & Colour" : "Light"}
                                     </span>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.exposure}
+                                        bind:value={edit.sliders.exposure}
                                         defaultValue={0}
                                         name="Exposure"
                                         unit="EV"
@@ -1334,7 +1426,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.contrast}
+                                        bind:value={edit.sliders.contrast}
                                         defaultValue={0}
                                         name="Contrast"
                                         unit="%"
@@ -1352,7 +1444,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.brightness}
+                                        bind:value={edit.sliders.brightness}
                                         defaultValue={0}
                                         name="Brightness"
                                         unit=""
@@ -1370,7 +1462,7 @@
                                                 newValue: newVal,
                                             })}
                                     ></SingleValSliderGroup>
-                                    {#if isRgb}
+                                    {#if edit.isRgb}
                                         <div
                                             transition:slide={{ duration: 200 }}
                                         >
@@ -1378,7 +1470,7 @@
                                                 class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"
                                             ></div>
                                             <SingleValSliderGroup
-                                                bind:value={sliders.vibrance}
+                                                bind:value={edit.sliders.vibrance}
                                                 defaultValue={0}
                                                 name="Vibrance"
                                                 unit="%"
@@ -1397,7 +1489,7 @@
                                                     })}
                                             ></SingleValSliderGroup>
                                             <SingleValSliderGroup
-                                                bind:value={sliders.saturation}
+                                                bind:value={edit.sliders.saturation}
                                                 defaultValue={0}
                                                 name="Saturation"
                                                 unit="%"
@@ -1419,7 +1511,7 @@
                                     {/if}
                                     <div class="sliders-separator h-0.5 rounded-[1px] mt-3 mb-2 mr-1.5"></div>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.highlights}
+                                        bind:value={edit.sliders.highlights}
                                         defaultValue={0}
                                         name="Highlights"
                                         min={-100}
@@ -1439,7 +1531,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.shadows}
+                                        bind:value={edit.sliders.shadows}
                                         defaultValue={0}
                                         name="Shadows"
                                         unit=""
@@ -1460,7 +1552,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.whites}
+                                        bind:value={edit.sliders.whites}
                                         defaultValue={0}
                                         name="Whites"
                                         min={-100}
@@ -1480,7 +1572,7 @@
                                             })}
                                     ></SingleValSliderGroup>
                                     <SingleValSliderGroup
-                                        bind:value={sliders.blacks}
+                                        bind:value={edit.sliders.blacks}
                                         defaultValue={0}
                                         name="Blacks"
                                         min={-100}
@@ -1506,10 +1598,10 @@
                             <div class="controls-page">
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <CurveEditor
-                                        bind:curves
+                                        bind:curves={edit.curves}
                                         bind:channel={curveChannel}
                                         bind:histogramCanvas={curveHistogramCanvas}
-                                        {isRgb}
+                                        isRgb={edit.isRgb}
                                         onCommit={(oldCurves, newCurves) =>
                                             commit({ type: "curves", oldCurves, newCurves })}
                                     >
@@ -1518,14 +1610,14 @@
                                         {/snippet}
                                     </CurveEditor>
                                 </div>
-                                {#if isRgb}
+                                {#if edit.isRgb}
                                     <div
                                         class="slider-section flex flex-col mt-4 ml-4 mr-3"
                                         transition:slide={{ duration: 200 }}
                                     >
                                         <span class="section-title pb-1.5">HSL</span>
                                         <SingleValSliderGroup
-                                            bind:value={sliders.hue}
+                                            bind:value={edit.sliders.hue}
                                             defaultValue={0}
                                             name="Hue"
                                             unit="º"
@@ -1544,7 +1636,7 @@
                                                 })}
                                         ></SingleValSliderGroup>
                                         <SingleValSliderGroup
-                                            bind:value={sliders.vibrance}
+                                            bind:value={edit.sliders.vibrance}
                                             defaultValue={0}
                                             name="Vibrance"
                                             unit="%"
@@ -1563,7 +1655,7 @@
                                                 })}
                                         ></SingleValSliderGroup>
                                         <SingleValSliderGroup
-                                            bind:value={sliders.saturation}
+                                            bind:value={edit.sliders.saturation}
                                             defaultValue={0}
                                             name="Saturation"
                                             unit="%"
@@ -1595,7 +1687,7 @@
                                             />
                                         </div>
                                         <HslBandGroup
-                                            bind:sliders
+                                            bind:sliders={edit.sliders}
                                             onCommit={(key, oldVal, newVal) =>
                                                 commit({
                                                     type: "slider",
@@ -1632,9 +1724,9 @@
                                 <div class="slider-section flex flex-col mt-4 ml-4 mr-3">
                                     <TripleValSliderHistGroup
                                         name="Red Input"
-                                        bind:valueA={sliders.redBlackPoint}
-                                        bind:valueB={sliders.redGamma}
-                                        bind:valueC={sliders.redWhitePoint}
+                                        bind:valueA={edit.sliders.redBlackPoint}
+                                        bind:valueB={edit.sliders.redGamma}
+                                        bind:valueC={edit.sliders.redWhitePoint}
                                         onCommitA={(oldValue, newValue) =>
                                             commit({ type: "slider", key: "redBlackPoint", oldValue, newValue })}
                                         onCommitB={(oldValue, newValue) =>
@@ -1655,9 +1747,9 @@
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Green Input"
-                                        bind:valueA={sliders.greenBlackPoint}
-                                        bind:valueB={sliders.greenGamma}
-                                        bind:valueC={sliders.greenWhitePoint}
+                                        bind:valueA={edit.sliders.greenBlackPoint}
+                                        bind:valueB={edit.sliders.greenGamma}
+                                        bind:valueC={edit.sliders.greenWhitePoint}
                                         onCommitA={(oldValue, newValue) =>
                                             commit({ type: "slider", key: "greenBlackPoint", oldValue, newValue })}
                                         onCommitB={(oldValue, newValue) =>
@@ -1678,9 +1770,9 @@
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="Blue Input"
-                                        bind:valueA={sliders.blueBlackPoint}
-                                        bind:valueB={sliders.blueGamma}
-                                        bind:valueC={sliders.blueWhitePoint}
+                                        bind:valueA={edit.sliders.blueBlackPoint}
+                                        bind:valueB={edit.sliders.blueGamma}
+                                        bind:valueC={edit.sliders.blueWhitePoint}
                                         onCommitA={(oldValue, newValue) =>
                                             commit({ type: "slider", key: "blueBlackPoint", oldValue, newValue })}
                                         onCommitB={(oldValue, newValue) =>
@@ -1701,9 +1793,9 @@
                                     ></TripleValSliderHistGroup>
                                     <TripleValSliderHistGroup
                                         name="RGB Input"
-                                        bind:valueA={sliders.masterBlackPoint}
-                                        bind:valueB={sliders.masterGamma}
-                                        bind:valueC={sliders.masterWhitePoint}
+                                        bind:valueA={edit.sliders.masterBlackPoint}
+                                        bind:valueB={edit.sliders.masterGamma}
+                                        bind:valueC={edit.sliders.masterWhitePoint}
                                         onCommitA={(oldValue, newValue) =>
                                             commit({ type: "slider", key: "masterBlackPoint", oldValue, newValue })}
                                         onCommitB={(oldValue, newValue) =>
@@ -1724,8 +1816,8 @@
                                     ></TripleValSliderHistGroup>
                                     <DoubleValSliderGroup
                                         name="RGB Output"
-                                        bind:valueA={sliders.rgbOutputBlack}
-                                        bind:valueB={sliders.rgbOutputWhite}
+                                        bind:valueA={edit.sliders.rgbOutputBlack}
+                                        bind:valueB={edit.sliders.rgbOutputWhite}
                                         onCommitA={(oldValue, newValue) =>
                                             commit({ type: "slider", key: "rgbOutputBlack", oldValue, newValue })}
                                         onCommitB={(oldValue, newValue) =>
@@ -1747,7 +1839,7 @@
         </div>
         <div class="side-panel-footer glass flex relative justify-center items-center h-12 rounded-[12px] shrink-0" bind:this={footerEl}>
             {#if exportMenuOpen}
-                <ExportSettingsMenu bind:settings={exportSettings} {isRgb} />
+                <ExportSettingsMenu bind:settings={exportSettings} isRgb={edit.isRgb} />
             {/if}
             <div
                 class="footer-item absolute"
@@ -1844,6 +1936,10 @@
 
     .app-shell {
         --presets-width: 260px;
+        /* Smoothstep, from a scrim band's inner edge out to the window edge. */
+        --scrim-ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
+            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
+            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
         /* 32px title bar + the same 12px inset used on the other three sides */
         top: 44px;
         bottom: 12px;
@@ -1944,10 +2040,6 @@
         content: "";
         position: absolute;
         inset: 0;
-        /* Smoothstep, from each band's inner edge out to the window edge. */
-        --ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
-            rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
-            rgba(0, 0, 0, 0.84) 75%, rgba(0, 0, 0, 0.97) 90%, black;
         /* The corner tile runs the same ramp, pushed out past the inner radius
            (the first 31.25% of the tile), so it meets both bands exactly. */
         background:
@@ -1964,9 +2056,9 @@
                     black
                 )
                 0 0 / var(--reach-x) var(--reach-y) no-repeat,
-            linear-gradient(to top, var(--ramp)) var(--reach-x) 0 /
+            linear-gradient(to top, var(--scrim-ramp)) var(--reach-x) 0 /
                 calc(100% - var(--reach-x)) var(--top) no-repeat,
-            linear-gradient(to left, var(--ramp)) 0 var(--reach-y) /
+            linear-gradient(to left, var(--scrim-ramp)) 0 var(--reach-y) /
                 var(--left) calc(100% - var(--reach-y)) no-repeat;
         transition: opacity 0.5s ease;
     }
@@ -2005,9 +2097,6 @@
         transition: opacity 0.2s ease;
     }
 
-    /* Opens as a column of its own, pushing the toolbar right and re-centring
-       the image in what is left. Closed, its negative margin cancels the
-       shell's gap; open, it also covers the toolbar's bleed to the edge. */
     .presets-column {
         width: 0;
         margin-right: -12px;
@@ -2046,6 +2135,16 @@
         z-index: 1;
     }
 
+    /* Fades out of the crop tools' way, and back once they have folded up. */
+    .toolbar-rest {
+        transition: opacity 0.18s ease 0.18s;
+    }
+
+    .toolbar-rest.away {
+        opacity: 0;
+        transition-delay: 0s;
+    }
+
     /* At the foot of the icon column. The button's chip, inset 3px inside its
        box, sits as far from the window's bottom edge as from its left. */
     .toolbar-zoom {
@@ -2072,13 +2171,40 @@
         display: none;
     }
 
+    /* While a brush is in hand it gives its room and its gap to the image.
+       Back only once the brush bar has dropped away. */
+    .side-bar-space {
+        width: max(23%, 300px);
+        transition:
+            width 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s,
+            margin-left 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
+    }
+
+    .side-bar-space.away {
+        width: 0;
+        margin-left: -12px;
+        transition-delay: 0s;
+    }
+
+    /* Over its space rather than in the row, so leaving moves it by transform
+       alone and never lays it out or repaints it. */
     .side-bar {
-        min-width: 300px;
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: max(23%, 300px);
         /* A faint lift so labels and values hold up over a bright image. */
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-        position: relative;
         z-index: 10;
         pointer-events: auto;
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1) 0.25s;
+    }
+
+    /* Past the window's right edge, far enough that the panels' shadows go too. */
+    .side-bar.away {
+        transform: translateX(calc(100% + 52px));
+        transition-delay: 0s;
     }
 
     .quick-actions {

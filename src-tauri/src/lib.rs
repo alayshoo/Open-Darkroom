@@ -10,8 +10,11 @@ pub mod output_space;
 pub mod image_opening;
 pub mod full_resolution;
 pub mod export_rendering;
+pub mod retouch;
 pub mod shaders;
 pub mod export_encoding;
+pub mod export_progress;
+pub mod jxl_encoding;
 mod export;
 mod presets;
 

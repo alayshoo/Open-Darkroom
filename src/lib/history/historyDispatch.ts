@@ -2,6 +2,7 @@ import type { Action } from "$lib/types/historyActions";
 import type { Sliders } from "$lib/types/imgParameters";
 import type { Curves } from "$lib/types/curves";
 import type { Crop } from "$lib/types/crop";
+import type { Retouch } from "$lib/types/retouch";
 
 export type StateAccessors = {
     getSlider: (key: string) => number | boolean;
@@ -9,9 +10,8 @@ export type StateAccessors = {
     setSliders: (values: Partial<Sliders>) => void;
     setCurves: (curves: Curves) => void;
     setCrop: (crop: Crop) => void;
-    // future:
-    // getMask: (id: string) => MaskData;
-    // setMask: (id: string, data: MaskData) => void;
+    getRetouch: () => Retouch[];
+    setRetouch: (strokes: Retouch[]) => void;
 };
 
 export function applyAction(action: Action, state: StateAccessors) {
@@ -29,7 +29,12 @@ export function applyAction(action: Action, state: StateAccessors) {
         case "crop":
             state.setCrop(action.newValue);
             break;
-        // case 'mask-draw': ...
+        case "retouchAdd":
+            state.setRetouch([...state.getRetouch(), action.stroke]);
+            break;
+        case "retouchClear":
+            state.setRetouch([]);
+            break;
     }
 }
 
@@ -47,6 +52,12 @@ export function undoAction(action: Action, state: StateAccessors) {
             break;
         case "crop":
             state.setCrop(action.oldValue);
+            break;
+        case "retouchAdd":
+            state.setRetouch(state.getRetouch().slice(0, -1));
+            break;
+        case "retouchClear":
+            state.setRetouch(action.strokes);
             break;
     }
 }

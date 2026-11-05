@@ -25,6 +25,8 @@
 //!include "chunks/luma.wgsl"
 //!include "chunks/outputTransform.wgsl"
 //!include "chunks/cropView.wgsl"
+//!include "chunks/colorimetry.wgsl"
+//!include "chunks/gamutGrids.wgsl"
 
 @group(0) @binding(0) var compositeTexture: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> outputSpace: OutputSpace;
@@ -74,6 +76,24 @@ const OFF_IMAGE = vec4f(0.0);
 // What is left of the image outside the crop tool's box: black at 55% over it.
 const OUTSIDE_KEEP: f32 = 0.45;
 
+const MASK_STRIPE_PX: f32 = 6.0;
+
+// Whether the chromaticity falls outside the masked triangle, by the same edge
+// distances and tolerance the panel's inside_gamut() counts with.
+fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> bool {
+  let weighted = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
+  let sum = weighted.r + weighted.g + weighted.b;
+  if (sum < COLORIMETRY_EPSILON) { return false; }
+  return any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE));
+}
+
+// Diagonal stripes of the mask's tint, so it never reads as part of the image.
+fn mask_paint(position: vec2f, packed: u32) -> vec3f {
+  let tint = unpack_tint(packed);
+  let stripe = u32(floor((position.x + position.y) / MASK_STRIPE_PX)) % 2u;
+  return select(tint, tint * 0.35, stripe == 1u);
+}
+
 @fragment
 fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let src = crop.origin + position.x * crop.axis_x + position.y * crop.axis_y;
@@ -96,7 +116,11 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
 
   // Shaded here rather than by an overlay, so the shade turns with the image
   // on the same frame.
-  var rgb = to_destination(working, outputSpace);
+  let linear = to_destination_linear(working, outputSpace);
+  var rgb = encode_transfer(linear, outputSpace.curve);
+  if (outputSpace.mask != MASK_OFF && outside_mask(working, linear, outputSpace)) {
+    rgb = mask_paint(position.xy, outputSpace.mask_tint);
+  }
   if (any(position.xy < crop.keep_min) || any(position.xy > crop.keep_max)) {
     rgb *= OUTSIDE_KEEP;
   }

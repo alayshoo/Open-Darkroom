@@ -12,10 +12,11 @@
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
-use crate::color::{linearize_u16_f32, LINEAR_F32_BYTES_PER_PIXEL};
+use crate::color::LINEAR_F32_BYTES_PER_PIXEL;
 use crate::crop::{crop_view, crop_view_to_bytes, CropPayload};
 use crate::icc::{Matrix3, SourceSpace};
 use crate::output_space::OutputSpace;
+use crate::retouch::{apply_retouch, LinearSource, RetouchPayload};
 
 pub use crate::shaders::{
     CALC_PARAMS_WGSL, CALC_SHARP_TEXTURE_WGSL, COLOR_SPACE_ENCODE_WGSL, COMPOSITE_WGSL,
@@ -126,9 +127,10 @@ pub const CURVES_OFFSET: u64 = 384;
 pub const CURVE_LUT_ENTRIES: usize = 256;
 
 /// Size of the `OutputSpace` uniform read by colorSpaceEncode.wgsl and
-/// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, then two
-/// u32, padded to the 16 bytes a uniform struct binds at.
-pub const OUTPUT_SPACE_BYTES: u64 = 160;
+/// histogram.wgsl: three `mat3x3<f32>` of three 16-byte columns each, four u32,
+/// then the preview mask's `mat3x3<f32>` and `vec3f`, padded to 16. An export
+/// leaves the mask at zero.
+pub const OUTPUT_SPACE_BYTES: u64 = 224;
 
 /// Size of the `Sliders` uniform consumed by calcParams.wgsl. The struct's 57
 /// f32 fields occupy 228 bytes; a uniform struct is bound 16-aligned, so the
@@ -507,6 +509,33 @@ pub fn view_to_bytes(v: &ViewPayload) -> [u8; VIEW_BYTES] {
 
 // ── Core GPU render ───────────────────────────────────────────────────────────
 
+/// A device on the fastest adapter there is, for one export or one retouched
+/// histogram.
+pub async fn request_device(label: &'static str) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    let adapter = wgpu::Instance::default()
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        })
+        .await
+        .map_err(|e| format!("No GPU adapter found: {e}"))?;
+
+    let info = adapter.get_info();
+    println!("{label}: adapter = {} ({:?})", info.name, info.backend);
+
+    adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some(label),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        })
+        .await
+        .map_err(|e| format!("GPU device creation failed: {e}"))
+}
+
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
 ///
 /// See [`render_image_with_chunk_rows`]; this uses the default [`CHUNK_ROWS`].
@@ -529,6 +558,7 @@ pub async fn render_image(
         channels,
         sliders,
         &CropPayload::FULL_FRAME,
+        &[],
         space,
         output,
         bit_depth,
@@ -545,7 +575,8 @@ pub struct RenderedImage {
     pub height: u32,
 }
 
-/// Run the GPU pipeline over the cropped region only.
+/// Run the GPU pipeline over the cropped region only, with `retouch` laid
+/// over the source first.
 #[allow(clippy::too_many_arguments)]
 pub async fn render_cropped_image(
     pixels_u16: &[u16],
@@ -554,6 +585,7 @@ pub async fn render_cropped_image(
     channels: usize,
     sliders: &SlidersPayload,
     crop: &CropPayload,
+    retouch: &[RetouchPayload],
     space: &SourceSpace,
     output: OutputSpace,
     bit_depth: u8,
@@ -566,6 +598,7 @@ pub async fn render_cropped_image(
         channels,
         sliders,
         crop,
+        retouch,
         space,
         output,
         bit_depth,
@@ -584,8 +617,8 @@ pub async fn render_cropped_image(
 ///
 /// `pixels_u16` is interleaved at `width` × `height`, `channels` samples per
 /// pixel — 3 for a source with no alpha, 4 for one with. The image is rendered
-/// `chunk_rows` rows at a time; `on_progress` is called after each chunk with
-/// the fraction completed, in (0, 1].
+/// `chunk_rows` rows at a time; `on_progress` is called with 0 once set-up is
+/// done, then after each chunk with the fraction completed, in (0, 1].
 ///
 /// `chunk_rows` is exposed so tests can vary the chunking — rendering an image
 /// in one pass and in several must produce identical output.
@@ -609,6 +642,7 @@ pub async fn render_image_with_chunk_rows(
         channels,
         sliders,
         &CropPayload::FULL_FRAME,
+        &[],
         space,
         output,
         bit_depth,
@@ -630,6 +664,7 @@ pub async fn render_cropped_with_chunk_rows(
     channels: usize,
     sliders: &SlidersPayload,
     crop: &CropPayload,
+    retouch: &[RetouchPayload],
     space: &SourceSpace,
     output: OutputSpace,
     bit_depth: u8,
@@ -669,30 +704,7 @@ pub async fn render_cropped_with_chunk_rows(
 
     // ── 1. Initialise wgpu ────────────────────────────────────────────────────
 
-    let instance = wgpu::Instance::default();
-
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        })
-        .await
-        .map_err(|e| format!("No GPU adapter found: {e}"))?;
-
-    let info = adapter.get_info();
-    println!("export: adapter = {} ({:?})", info.name, info.backend);
-
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("export_device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        })
-        .await
-        .map_err(|e| format!("GPU device creation failed: {e}"))?;
+    let (device, queue) = request_device("export_device").await?;
 
     // ── 2. Slider uniform + params storage buffers ────────────────────────────
 
@@ -1123,6 +1135,11 @@ pub async fn render_cropped_with_chunk_rows(
     // Output buffer: 3 × u8 per pixel for 8-bit, 3 × u16-as-LE (6 bytes) for 16-bit
     let bytes_per_output_pixel = if bit_depth >= 16 { 6usize } else { 3usize };
     let luts = space.luts(|v| v);
+
+    // The strokes are laid over the whole source before any chunk renders, so
+    // a stroke taking its pixels from outside a chunk still finds them.
+    let mut source = LinearSource::new(pixels_u16, width, height, channels, &luts);
+    apply_retouch(&device, &queue, &mut source, retouch)?;
     let total_pixels = (out_width * out_height) as usize;
     let mut output_rgb = vec![0u8; total_pixels * bytes_per_output_pixel];
 
@@ -1146,6 +1163,9 @@ pub async fn render_cropped_with_chunk_rows(
         wgpu::TextureView,
     )> = None;
 
+    // Everything before this point is set-up; zero marks where the rows begin.
+    on_progress(0.0);
+
     while row_start < out_height {
         let row_end = (row_start + chunk_rows).min(out_height);
         let chunk_height = row_end - row_start;
@@ -1167,23 +1187,7 @@ pub async fn render_cropped_with_chunk_rows(
             let region_width = region_x1 - region_x0;
             let region_height = region_y1 - region_y0;
 
-            let chunk_bytes = if region_width == width {
-                let pixel_start = (region_y0 * width) as usize;
-                let pixel_count = (region_height * width) as usize;
-                linearize_u16_f32(
-                    &pixels_u16[pixel_start * channels..(pixel_start + pixel_count) * channels],
-                    channels,
-                    &luts,
-                )
-            } else {
-                let row_len = region_width as usize * channels;
-                let mut region = Vec::with_capacity(row_len * region_height as usize);
-                for y in region_y0..region_y1 {
-                    let at = (y as usize * width as usize + region_x0 as usize) * channels;
-                    region.extend_from_slice(&pixels_u16[at..at + row_len]);
-                }
-                linearize_u16_f32(&region, channels, &luts)
-            };
+            let chunk_bytes = source.read(region_x0, region_y0, region_width, region_height);
 
             let region_size = wgpu::Extent3d {
                 width: region_width,
