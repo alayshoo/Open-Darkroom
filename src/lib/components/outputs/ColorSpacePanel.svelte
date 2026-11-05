@@ -446,8 +446,9 @@
                 working space before the output transform.
             {/if}
             {#if colorSpaceDebug.mask}
-                Striped on the preview: what falls outside
-                {OUTPUT_SPACE_LABELS[colorSpaceDebug.mask]}.
+                On the preview, stripes mark colour outside
+                {OUTPUT_SPACE_LABELS[colorSpaceDebug.mask]}'s triangle and a
+                checkerboard marks colour inside it but too bright for it.
             {/if}
         </p>
     </div>

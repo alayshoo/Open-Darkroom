@@ -244,7 +244,7 @@
             class="pill px-3 py-1.25 border-0 rounded-[6px]"
             class:active={proofing.warning}
             aria-pressed={proofing.warning}
-            title="Paint the pixels this space cannot hold on the preview"
+            title="Mark the pixels this space cannot hold: stripes for colour outside its hues and saturation, a checkerboard for colour too bright for it"
             onclick={() => proofing.toggleWarning()}
         >
             {proofing.warning ? "On" : "Off"}
