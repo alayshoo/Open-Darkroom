@@ -185,7 +185,7 @@
                 min={8}
                 max={16}
                 step={1}
-                defaultValue={16}
+                defaultValue={8}
                 bind:value={settings.jxlBitDepth}
                 ></SingleValSliderInt>
             <div class="setting-hints flex justify-between -mt-2">
@@ -203,7 +203,7 @@
                     min={1}
                     max={100}
                     step={1}
-                    defaultValue={99}
+                    defaultValue={95}
                     bind:value={settings.jxlQuality}
                     stepAnimation={false}
                     springy={false}
@@ -250,6 +250,19 @@
                 </button>
             {/each}
         </div>
+    </div>
+
+    <div class="setting flex flex-row gap-2 justify-between items-center">
+        <span class="setting-label">Gamut warning</span>
+        <button
+            class="pill px-3 py-1.25 border-0 rounded-[6px]"
+            class:active={proofing.warning}
+            aria-pressed={proofing.warning}
+            title="Paint the pixels this space cannot hold on the preview"
+            onclick={() => proofing.toggleWarning()}
+        >
+            {proofing.warning ? "On" : "Off"}
+        </button>
     </div>
 
     <div class="setting flex flex-row gap-2 justify-between items-center">

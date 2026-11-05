@@ -20,7 +20,7 @@ export interface ExportSettings {
 }
 
 export const defaultExportSettings: ExportSettings = {
-    format: "png",
+    format: "jxl",
     outputSpace: "srgb",
     pngCompression: 6,
     jpegQuality: 90,
@@ -29,9 +29,9 @@ export const defaultExportSettings: ExportSettings = {
     webpCompression: 6,
     tiffBitDepth: 8,
     jxlLossless: false,
-    jxlQuality: 99,
+    jxlQuality: 95,
     jxlEffort: 7,
-    jxlBitDepth: 16,
+    jxlBitDepth: 8,
     isBw: false,
 };
 
