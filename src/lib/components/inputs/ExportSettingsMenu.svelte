@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { defaultOutputSpace, exportBitDepth, type ExportSettings } from "$lib/types/exportSettings";
+    import type { ExportSettings } from "$lib/types/exportSettings";
     import { OUTPUT_SPACE_IDS, OUTPUT_SPACE_LABELS } from "$lib/gpu/outputSpace";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import SingleValSliderInt from "./values/SingleValSliderInt.svelte";
@@ -14,22 +14,6 @@
 
     $effect(() => {
         settings.isBw = !isRgb;
-    });
-
-    // What the format last defaulted from, keyed on depth past 8 bits so a depth
-    // slider does not override a hand-picked space. A plain variable: tracking
-    // it would make the effect below retrigger on its own write.
-    const defaultingKey = () => `${settings.format}:${exportBitDepth(settings) > 8}`;
-    let lastDefaultedFor = defaultingKey();
-
-    // Changing format or bit depth re-picks the space, so 8-bit lands on sRGB
-    // and deeper files on the working space without anyone having to think
-    // about it. An explicit choice then stands until the format moves again.
-    $effect(() => {
-        const key = defaultingKey();
-        if (key === lastDefaultedFor) return;
-        lastDefaultedFor = key;
-        settings.outputSpace = defaultOutputSpace(exportBitDepth(settings));
     });
 </script>
 

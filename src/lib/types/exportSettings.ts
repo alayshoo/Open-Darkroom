@@ -1,4 +1,4 @@
-import { WORKING_SPACE, type OutputSpaceId } from "$lib/gpu/outputSpace";
+import type { OutputSpaceId } from "$lib/gpu/outputSpace";
 
 export type ExportFormat = "png" | "jpeg" | "webp" | "tiff" | "jxl";
 
@@ -34,23 +34,3 @@ export const defaultExportSettings: ExportSettings = {
     jxlBitDepth: 8,
     isBw: false,
 };
-
-/** Bits per channel the chosen format is written at. */
-export function exportBitDepth(settings: ExportSettings): number {
-    if (settings.format === "tiff") return settings.tiffBitDepth;
-    if (settings.format === "jxl") return settings.jxlBitDepth;
-    return 8;
-}
-
-/**
- * The space a format is written in unless the choice is overridden.
- *
- * Eight bits is for sending somewhere, where sRGB is the only space that can be
- * relied on to be read correctly. More is for keeping, and spending that
- * precision on sRGB's gamut would throw away most of what the working space was
- * holding — so a 16-bit file defaults to the working space itself, which is the
- * one destination that converts nothing at all.
- */
-export function defaultOutputSpace(bitDepth: number): OutputSpaceId {
-    return bitDepth > 8 ? WORKING_SPACE : "srgb";
-}
