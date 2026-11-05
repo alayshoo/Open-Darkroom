@@ -253,7 +253,7 @@
     </div>
 
     <div class="setting flex flex-row gap-2 justify-between items-center">
-        <span class="setting-label">Out of Gamut Mask</span>
+        <span class="setting-label">Out of Gamut Warning</span>
         <button
             class="pill px-3 py-1.25 border-0 rounded-[6px]"
             class:active={proofing.warning}
