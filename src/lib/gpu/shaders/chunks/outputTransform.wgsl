@@ -49,6 +49,8 @@ struct OutputSpace {
   to_mask: mat3x3<f32>,
   // The masked triangle's height in xy above the edge opposite each primary.
   mask_heights: vec3f,
+  // Each primary's X+Y+Z, the row scales of `to_mask`.
+  mask_sums: vec3f,
 }
 
 const MASK_OFF: u32 = 0u;

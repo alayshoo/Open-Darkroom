@@ -58,7 +58,7 @@ pub struct ExportSettings {
     pub jxl_quality: u8,
     /// JPEG XL encoder effort, 1 (fastest) – 9 (smallest).
     pub jxl_effort: u8,
-    /// JPEG XL bits per channel, 8 – 16.
+    /// JPEG XL lossless bits per channel, 8 – 16. Lossy is always 16.
     pub jxl_bit_depth: u8,
     /// Whether the image is in black-and-white mode (greyscale output for TIFF
     /// and JPEG XL).
@@ -71,9 +71,15 @@ impl ExportSettings {
         match self.format {
             ExportFormat::Tiff => self.tiff_bit_depth,
             // Anything past 8 bits is rendered at 16 and requantised by libjxl.
-            ExportFormat::Jxl if self.jxl_bit_depth > 8 => 16,
+            ExportFormat::Jxl if self.jxl_depth() > 8 => 16,
             _ => 8,
         }
+    }
+
+    /// Bits per channel the JPEG XL file declares. Lossy quantises far coarser
+    /// than any input depth, so it takes the full 16 bits at no cost in size.
+    fn jxl_depth(&self) -> u8 {
+        if self.jxl_lossless { self.jxl_bit_depth } else { 16 }
     }
 
     /// Whether the encoder reports how much of the file it has written.
@@ -184,7 +190,7 @@ fn encode(
             lossless: settings.jxl_lossless,
             quality: settings.jxl_quality,
             effort: settings.jxl_effort,
-            bit_depth: settings.jxl_bit_depth,
+            bit_depth: settings.jxl_depth(),
             greyscale,
         }, &icc, path),
     }

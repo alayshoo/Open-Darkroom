@@ -78,20 +78,38 @@ const OUTSIDE_KEEP: f32 = 0.45;
 
 const MASK_STRIPE_PX: f32 = 6.0;
 
-// Whether the chromaticity falls outside the masked triangle, by the same edge
-// distances and tolerance the panel's inside_gamut() counts with.
-fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> bool {
+// How a pixel falls outside the masked gamut.
+const OUTSIDE_NONE: u32 = 0u;
+// Its chromaticity is outside the triangle.
+const OUTSIDE_CHROMATICITY: u32 = 1u;
+// Inside the triangle, but too bright for the space at that saturation.
+const OUTSIDE_BRIGHTNESS: u32 = 2u;
+
+// By the same edge distances, tolerances and brightness test the panel's
+// outside_gamut() counts with.
+fn outside_mask(working: vec3f, destination: vec3f, space: OutputSpace) -> u32 {
   let weighted = space.to_mask * select(working, destination, space.mask == MASK_AFTER);
   let sum = weighted.r + weighted.g + weighted.b;
-  if (sum < COLORIMETRY_EPSILON) { return false; }
-  return any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE));
+  if (sum < COLORIMETRY_EPSILON) { return OUTSIDE_NONE; }
+  if (any(weighted / sum * space.mask_heights < vec3f(-GAMUT_TOLERANCE))) {
+    return OUTSIDE_CHROMATICITY;
+  }
+  if (above_gamut(weighted / space.mask_sums, dot(working, LUMA))) {
+    return OUTSIDE_BRIGHTNESS;
+  }
+  return OUTSIDE_NONE;
 }
 
-// Diagonal stripes of the mask's tint, so it never reads as part of the image.
-fn mask_paint(position: vec2f, packed: u32) -> vec3f {
+// The mask's tint in a pattern that never reads as part of the image: diagonal
+// stripes outside the triangle, a checkerboard where only brightness is out.
+fn mask_paint(position: vec2f, packed: u32, outside: u32) -> vec3f {
   let tint = unpack_tint(packed);
-  let stripe = u32(floor((position.x + position.y) / MASK_STRIPE_PX)) % 2u;
-  return select(tint, tint * 0.35, stripe == 1u);
+  let cell = vec2u(floor(position / MASK_STRIPE_PX));
+  var dark = u32(floor((position.x + position.y) / MASK_STRIPE_PX)) % 2u == 1u;
+  if (outside == OUTSIDE_BRIGHTNESS) {
+    dark = (cell.x + cell.y) % 2u == 1u;
+  }
+  return select(tint, tint * 0.35, dark);
 }
 
 @fragment
@@ -118,8 +136,11 @@ fn fs_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
   // on the same frame.
   let linear = to_destination_linear(working, outputSpace);
   var rgb = encode_transfer(linear, outputSpace.curve);
-  if (outputSpace.mask != MASK_OFF && outside_mask(working, linear, outputSpace)) {
-    rgb = mask_paint(position.xy, outputSpace.mask_tint);
+  if (outputSpace.mask != MASK_OFF) {
+    let outside = outside_mask(working, linear, outputSpace);
+    if (outside != OUTSIDE_NONE) {
+      rgb = mask_paint(position.xy, outputSpace.mask_tint, outside);
+    }
   }
   if (any(position.xy < crop.keep_min) || any(position.xy > crop.keep_max)) {
     rgb *= OUTSIDE_KEEP;

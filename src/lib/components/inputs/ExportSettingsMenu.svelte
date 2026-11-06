@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { defaultOutputSpace, exportBitDepth, type ExportSettings } from "$lib/types/exportSettings";
+    import type { ExportSettings } from "$lib/types/exportSettings";
     import { OUTPUT_SPACE_IDS, OUTPUT_SPACE_LABELS } from "$lib/gpu/outputSpace";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import SingleValSliderInt from "./values/SingleValSliderInt.svelte";
@@ -14,22 +14,6 @@
 
     $effect(() => {
         settings.isBw = !isRgb;
-    });
-
-    // What the format last defaulted from, keyed on depth past 8 bits so a depth
-    // slider does not override a hand-picked space. A plain variable: tracking
-    // it would make the effect below retrigger on its own write.
-    const defaultingKey = () => `${settings.format}:${exportBitDepth(settings) > 8}`;
-    let lastDefaultedFor = defaultingKey();
-
-    // Changing format or bit depth re-picks the space, so 8-bit lands on sRGB
-    // and deeper files on the working space without anyone having to think
-    // about it. An explicit choice then stands until the format moves again.
-    $effect(() => {
-        const key = defaultingKey();
-        if (key === lastDefaultedFor) return;
-        lastDefaultedFor = key;
-        settings.outputSpace = defaultOutputSpace(exportBitDepth(settings));
     });
 </script>
 
@@ -176,23 +160,25 @@
                 </button>
             </div>
         </div>
-        <div class="setting flex flex-col gap-1.5">
-            <div class="setting-header flex justify-between items-baseline">
-                <span class="setting-label">{isRgb ? "RGB" : "Greyscale"} bit depth</span>
-                <span class="setting-value">{settings.jxlBitDepth}-bit</span>
+        {#if settings.jxlLossless}
+            <div class="setting flex flex-col gap-1.5">
+                <div class="setting-header flex justify-between items-baseline">
+                    <span class="setting-label">{isRgb ? "RGB" : "Greyscale"} bit depth</span>
+                    <span class="setting-value">{settings.jxlBitDepth}-bit</span>
+                </div>
+                <SingleValSliderInt
+                    min={8}
+                    max={16}
+                    step={1}
+                    defaultValue={16}
+                    bind:value={settings.jxlBitDepth}
+                    ></SingleValSliderInt>
+                <div class="setting-hints flex justify-between -mt-2">
+                    <span>Small</span>
+                    <span>Smooth gradients</span>
+                </div>
             </div>
-            <SingleValSliderInt
-                min={8}
-                max={16}
-                step={1}
-                defaultValue={16}
-                bind:value={settings.jxlBitDepth}
-                ></SingleValSliderInt>
-            <div class="setting-hints flex justify-between -mt-2">
-                <span>Small</span>
-                <span>Smooth gradients</span>
-            </div>
-        </div>
+        {/if}
         {#if !settings.jxlLossless}
             <div class="setting flex flex-col gap-1.5">
                 <div class="setting-header flex justify-between items-baseline">
@@ -203,7 +189,7 @@
                     min={1}
                     max={100}
                     step={1}
-                    defaultValue={99}
+                    defaultValue={95}
                     bind:value={settings.jxlQuality}
                     stepAnimation={false}
                     springy={false}
@@ -250,6 +236,19 @@
                 </button>
             {/each}
         </div>
+    </div>
+
+    <div class="setting flex flex-row gap-2 justify-between items-center">
+        <span class="setting-label">Out of Gamut Warning</span>
+        <button
+            class="pill px-3 py-1.25 border-0 rounded-[6px]"
+            class:active={proofing.warning}
+            aria-pressed={proofing.warning}
+            title="Mark the pixels this space cannot hold: stripes for colour outside its hues and saturation, a checkerboard for colour too bright for it"
+            onclick={() => proofing.toggleWarning()}
+        >
+            {proofing.warning ? "On" : "Off"}
+        </button>
     </div>
 
     <div class="setting flex flex-row gap-2 justify-between items-center">
