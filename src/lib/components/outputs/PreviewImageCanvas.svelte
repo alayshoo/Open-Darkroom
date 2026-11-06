@@ -281,7 +281,7 @@
 
     $effect(() => {
         if (!renderer) return;
-        renderer.setGamutMask(colorSpaceDebug.activeMask);
+        renderer.setGamutMask(colorSpaceDebug.activeMask ?? proofing.mask);
         renderer.requestRender();
     });
 

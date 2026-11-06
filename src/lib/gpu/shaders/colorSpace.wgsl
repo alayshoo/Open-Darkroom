@@ -76,7 +76,8 @@ fn main(
 
     // Black has no chromaticity.
     if (sum >= COLORIMETRY_EPSILON) {
-      bin_chromaticity(vec2f(xyz.x, xyz.y) / sum);
+      let xy = vec2f(xyz.x, xyz.y) / sum;
+      bin_chromaticity(xy);
       if (overlay.volume != 0u) {
         bin_volume(xyz_to_oklab(xyz));
       }
@@ -84,7 +85,7 @@ fn main(
       atomicAdd(&local_stats[STAT_COUNTED], 1u);
       for (var s = 0u; s < GAMUT_SPACES; s++) {
         let space = overlay.spaces[s];
-        if (space.enabled != 0u && !inside_gamut(space, vec2f(xyz.x, xyz.y) / sum)) {
+        if (space.enabled != 0u && outside_gamut(space, xyz, xy)) {
           atomicAdd(&local_stats[STAT_OUTSIDE + s], 1u);
         }
       }

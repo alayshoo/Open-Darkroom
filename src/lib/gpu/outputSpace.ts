@@ -134,6 +134,11 @@ export function spaceToXyz(id: OutputSpaceId): Float32Array {
     return new Float32Array(rgbToXyz(PRIMARIES[id], D65));
 }
 
+/** CIE XYZ → linear RGB of a space, column-major. */
+export function xyzToSpace(id: OutputSpaceId): Float32Array {
+    return new Float32Array(invertMat3(rgbToXyz(PRIMARIES[id], D65)));
+}
+
 /** The working space's, which the shaders hold as M_WORKING_TO_XYZ. */
 export function workingToXyz(): Float32Array {
     return spaceToXyz(WORKING_SPACE);

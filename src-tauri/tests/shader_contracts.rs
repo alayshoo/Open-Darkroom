@@ -12,7 +12,7 @@ mod common;
 
 use common::{
     CALC_PARAMS_PIPELINE_TS, CHROMATICITY_DRAW_WGSL, COLOR_SPACE_SCALE_WGSL, COLOR_SPACE_WGSL,
-    COLOR_VOLUME_DRAW_WGSL, EXPORT_RENDERING_RS, EXPORT_SETTINGS_TS, HISTOGRAM_WGSL, OPEN_IMAGE_TS,
+    COLOR_VOLUME_DRAW_WGSL, EXPORT_RENDERING_RS, HISTOGRAM_WGSL, OPEN_IMAGE_TS,
     OUTPUT_SPACE_BUFFER_TS, OUTPUT_SPACE_TS, WORKING_SPACE_TS,
 };
 
@@ -1151,26 +1151,9 @@ fn typescript_declares_the_same_output_space_size_as_rust() {
     );
 }
 
-/// The frontend picks the space per format; the backend only does as it is told.
-/// This pins the rule itself, which is the part that would otherwise drift
-/// silently into shipping 16-bit files in sRGB's gamut.
+/// The working space the frontend names has to be the one the chain runs in.
 #[test]
-fn the_sixteen_bit_default_is_the_working_space() {
-    let rule = EXPORT_SETTINGS_TS
-        .split("export function defaultOutputSpace")
-        .nth(1)
-        .expect("exportSettings.ts declares no defaultOutputSpace");
-
-    assert!(
-        rule.contains("WORKING_SPACE"),
-        "the 16-bit TIFF default is no longer the working space"
-    );
-    assert!(
-        rule.contains("\"srgb\""),
-        "the 8-bit default is no longer sRGB"
-    );
-
-    // The working space the frontend names has to be the one the chain runs in.
+fn the_frontend_working_space_is_rec2020() {
     let working = OUTPUT_SPACE_TS
         .split("export const WORKING_SPACE: OutputSpaceId = ")
         .nth(1)

@@ -121,10 +121,20 @@ fn the_cost_model_ranks_the_encoders_sensibly() {
 }
 
 #[test]
-fn any_jxl_depth_above_eight_renders_at_sixteen() {
+fn any_lossless_jxl_depth_above_eight_renders_at_sixteen() {
+    for depth in 8u8..=16 {
+        let mut s = settings(ExportFormat::Jxl);
+        s.jxl_lossless = true;
+        s.jxl_bit_depth = depth;
+        assert_eq!(s.bit_depth(), if depth == 8 { 8 } else { 16 }, "{depth}-bit");
+    }
+}
+
+#[test]
+fn lossy_jxl_renders_at_sixteen_whatever_the_depth_setting() {
     for depth in 8u8..=16 {
         let mut s = settings(ExportFormat::Jxl);
         s.jxl_bit_depth = depth;
-        assert_eq!(s.bit_depth(), if depth == 8 { 8 } else { 16 }, "{depth}-bit");
+        assert_eq!(s.bit_depth(), 16, "{depth}-bit");
     }
 }
