@@ -4,6 +4,19 @@ All notable changes to Open Darkroom are listed here, newest first. Each release
 
 Versions follow [semantic versioning](https://semver.org): major for big or breaking changes, minor for new features, patch for fixes only.
 
+## [1.2.0] - 2026-11-06
+
+### Added
+- An Out of Gamut Warning toggle in the export menu marks on the preview the pixels the chosen export colour space cannot hold.
+
+### Changed
+- Export now defaults to lossy JPEG XL in Display P3 at quality 95. Lossless JPEG XL defaults to 16 bits.
+- Lossy JPEG XL always encodes at 16 bits, so the bit depth setting only shows for lossless.
+- The export colour space stays where you set it instead of changing when you switch format or bit depth.
+
+### Fixed
+- Colours too bright for a colour space now count as out of gamut in the preview mask and in the colour space panel's percentages, even when their hue is inside the space. They show as a checkerboard, and colours outside the space's triangle keep the stripes.
+
 ## [1.1.0] - 2026-11-05
 
 ### Added
@@ -43,6 +56,7 @@ The first release.
 - Export to TIFF, PNG, JPEG and WebP in sRGB, Display P3, Adobe RGB or Rec. 2020, with the ICC profile embedded.
 - Windows `.msi` and universal macOS `.dmg` installers.
 
+[1.2.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/alayshoo/Open-Darkroom/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/alayshoo/Open-Darkroom/releases/tag/v1.0.0
