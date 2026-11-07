@@ -1,7 +1,7 @@
 // tests/unit/historyControls.test.ts
 //
 // Undo and redo bring the edited controls into view: the mode they belong to
-// and the page they sit on. The page is also checked as text, the way
+// and the page they sit on. The controls are also checked as text, the way
 // sharpnessPage.test.ts does, so the page maps cannot drift from the markup.
 
 import { describe, expect, it } from "vitest";
@@ -23,7 +23,10 @@ import { defaultCurves } from "$lib/types/curves";
 import { FULL_FRAME } from "$lib/types/crop";
 import type { Action } from "$lib/types/historyActions";
 
-import PAGE from "../../src/routes/+page.svelte?raw";
+import LIGHTER from "../../src/lib/components/editor/LighterRoomPages.svelte?raw";
+import DARKROOM from "../../src/lib/components/editor/DarkroomPages.svelte?raw";
+import UNSHARP_MASK from "../../src/lib/components/editor/UnsharpMask.svelte?raw";
+import EDITOR from "../../src/lib/editor/editor.svelte.ts?raw";
 
 const slider = (key: keyof Sliders): Action => ({ type: "slider", key, oldValue: 0, newValue: 1 });
 const sliders = (keys: (keyof Sliders)[], withCurves = false): Action => ({
@@ -124,25 +127,23 @@ describe("actionPage", () => {
     });
 });
 
-/** The markup between two markers, with the shared snippets rendered in place. */
-function section(from: string, to: string): string {
-    const start = PAGE.indexOf(from);
-    const end = PAGE.indexOf(to, start);
-    if (start < 0 || end < 0) throw new Error(`markers ${from} … ${to} not found in +page.svelte`);
-    return PAGE.slice(start, end).replace(/\{@render (\w+)\(\)\}/g, (_, name) =>
-        section(`{#snippet ${name}()}`, "{/snippet}"),
-    );
+/** The markup between two markers, or to the end, with the shared unsharp mask in place. */
+function section(markup: string, from: string, to?: string): string {
+    const start = markup.indexOf(from);
+    const end = to ? markup.indexOf(to, start) : markup.length;
+    if (start < 0 || end < 0) throw new Error(`markers ${from} … ${to} not found`);
+    return markup.slice(start, end).replaceAll("<UnsharpMask />", UNSHARP_MASK);
 }
 
 const PANELS = {
     "lighter-room": [
-        section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->"),
-        section("<!-- Light & Color Panel -->", "<!-- Curves, HSL & Colour Mixer Panel -->"),
-        section("<!-- Curves, HSL & Colour Mixer Panel -->", "bind:this={pagerElDarkroom}"),
+        section(LIGHTER, "<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->"),
+        section(LIGHTER, "<!-- Light & Color Panel -->", "<!-- Curves, HSL & Colour Mixer Panel -->"),
+        section(LIGHTER, "<!-- Curves, HSL & Colour Mixer Panel -->", "<style>"),
     ],
     darkroom: [
-        section("<!-- Darkroom Sharpness Panel -->", "<!-- Input Levels Panel -->"),
-        section("<!-- Input Levels Panel -->", 'class="side-panel-footer'),
+        section(DARKROOM, "<!-- Darkroom Sharpness Panel -->", "<!-- Input Levels Panel -->"),
+        section(DARKROOM, "<!-- Input Levels Panel -->"),
     ],
 };
 
@@ -159,7 +160,7 @@ describe("page maps", () => {
             expect(panels.length).toBe(pages.length);
             panels.forEach((markup, i) => {
                 const bound = new Set(
-                    [...markup.matchAll(/bind:value[ABC]?=\{edit\.sliders\.(\w+)\}/g)].map((m) => m[1]),
+                    [...markup.matchAll(/bind:value[ABC]?=\{editor\.edit\.sliders\.(\w+)\}/g)].map((m) => m[1]),
                 );
                 if (markup.includes("<HslBandGroup")) HSL_KEYS.forEach((k) => bound.add(k));
                 expect(bound, `${mode} page ${i}`).toEqual(new Set(pages[i]));
@@ -184,7 +185,7 @@ describe("darkroom history wiring", () => {
             /<(TripleValSliderHistGroup|TripleValSliderGroup|DoubleValSliderGroup)\b([\s\S]*?)><\/\1>/g,
         )) {
             const group = `${tag} "${body.match(/name="([^"]*)"/)?.[1] ?? "?"}"`;
-            for (const [, slot, bound] of body.matchAll(/bind:value([ABC])=\{edit\.sliders\.(\w+)\}/g)) {
+            for (const [, slot, bound] of body.matchAll(/bind:value([ABC])=\{editor\.edit\.sliders\.(\w+)\}/g)) {
                 const handler = body.match(new RegExp(`onCommit${slot}=\\{[^}]*key:\\s*"(\\w+)"`));
                 out.push({ group, slot, bound, committed: handler?.[1] ?? "" });
             }
@@ -193,7 +194,7 @@ describe("darkroom history wiring", () => {
     }
 
     it("gives every value a commit handler under its own key", () => {
-        const all = bindings(PAGE);
+        const all = bindings(LIGHTER + DARKROOM);
         expect(all.length).toBeGreaterThan(0);
         for (const b of all) {
             expect(b.committed, `${b.group} value ${b.slot} commits nothing`).not.toBe("");
@@ -207,8 +208,8 @@ describe("darkroom history wiring", () => {
             ...bindings(markup).map((b) => b.committed),
             ...[...markup.matchAll(/<SingleValSliderGroup\b[\s\S]*?key:\s*"(\w+)"/g)].map((m) => m[1]),
         ]);
-        // The invert toggle sits above the pager and commits through handleInvertToggle.
-        expect(PAGE).toMatch(/function handleInvertToggle[\s\S]*?key:\s*"invert"/);
+        // The invert toggle sits above the pager and commits through toggleInvert.
+        expect(EDITOR).toMatch(/toggleInvert = [\s\S]*?key:\s*"invert"/);
         committed.add("invert");
         expect(committed).toEqual(new Set(modeKeys(true)));
     });
