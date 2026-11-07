@@ -20,6 +20,7 @@ import { presets } from "$lib/presets/presets.svelte";
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import { FULL_FRAME } from "$lib/types/crop";
 import type { GPUSession } from "$lib/types/gpuTypes";
+import type { ImageMetadata } from "$lib/types/imageMetadata";
 
 const SIZE = 8;
 const HIST_BYTES = 3 * 256 * 4;
@@ -55,6 +56,19 @@ function rowsBand(y: number, rows: number): ArrayBuffer {
     return buffer;
 }
 
+const SHOT: ImageMetadata = {
+    fileName: "DSCF4127.RAF",
+    make: "Fujifilm",
+    model: "X-T3",
+    lens: "FUJIFILM XF23mmF2 R WR",
+    focalLength: 23,
+    aperture: 2.8,
+    exposureTime: [1, 250],
+    iso: 160,
+    exposureBias: -2 / 3,
+    dateTaken: "2024:03:12 14:03:22",
+};
+
 // Every export the page asks for, and the text on the stubbed clipboard.
 const exports: any[] = [];
 let clipboard = "";
@@ -66,6 +80,7 @@ function stubTauri() {
             if (cmd === "open_image_file") return openPayload();
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
+            if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
             if (cmd === "export_image") return void exports.push(JSON.parse(JSON.stringify(args)));
             if (cmd === "plugin:clipboard-manager|write_text") return void (clipboard = args.text);
             if (cmd === "plugin:clipboard-manager|read_text") return clipboard;
@@ -179,6 +194,7 @@ describe("with an image open", () => {
         await vi.waitFor(() => expect(isInert(".controls-section")).toBe(false));
         if (retouchTool.mode) retouchTool.mode = null;
         presets.open = false;
+        editor.infoOpen = false;
         for (const darkroom of [true, false]) {
             await setMode(darkroom);
             await goToPage(1);
@@ -261,8 +277,8 @@ describe("with an image open", () => {
 
     it("opens the presets beside the toolbar and closes them for the crop tool", async () => {
         presets.toggle();
-        await vi.waitFor(() => expect($(".presets-column")!.classList.contains("open")).toBe(true));
-        expect(isInert(".presets-column")).toBe(false);
+        await vi.waitFor(() => expect($(".panel-column")!.classList.contains("open")).toBe(true));
+        expect(isInert(".panel-column")).toBe(false);
         expect($(".chrome-scrim")!.classList.contains("shifted")).toBe(true);
         await userEvent.keyboard("r");
         await vi.waitFor(() => expect(presets.open).toBe(false));
@@ -335,5 +351,48 @@ describe("with an image open", () => {
         await userEvent.keyboard("{Control>}z{/Control}");
         expect((await exported()).crop).toEqual(FULL_FRAME);
         await vi.waitFor(() => expect(editor.inputHistograms!.r.some((n) => n > 0)).toBe(true));
+    });
+
+    it("lists how the image was shot in the info panel", async () => {
+        button("Image info").click();
+        await vi.waitFor(() => expect($(".panel-column")!.classList.contains("open")).toBe(true));
+        const rows = () =>
+            [...document.querySelectorAll(".info-panel .row")].map((r) => [
+                r.querySelector("dt")!.textContent,
+                r.querySelector("dd")!.textContent,
+            ]);
+        await vi.waitFor(() => expect(rows()).toHaveLength(10));
+        expect(rows()).toEqual([
+            ["File", "DSCF4127.RAF"],
+            ["Dimensions", `${SIZE} × ${SIZE}`],
+            ["Camera", "Fujifilm X-T3"],
+            ["Lens", "FUJIFILM XF23mmF2 R WR"],
+            ["Focal length", "23 mm"],
+            ["Aperture", "f/2.8"],
+            ["Shutter", "1/250 s"],
+            ["ISO", "160"],
+            ["Exposure", "−0.7 EV"],
+            ["Taken", "12 Mar 2024, 14:03"],
+        ]);
+        await userEvent.keyboard("{Control>}i{/Control}");
+        await vi.waitFor(() => expect($(".panel-column")!.classList.contains("open")).toBe(false));
+    });
+
+    it("takes turns with the presets and the brushes in the one column", async () => {
+        await userEvent.keyboard("{Control>}i{/Control}");
+        await vi.waitFor(() => expect(editor.infoOpen).toBe(true));
+        presets.toggle();
+        await vi.waitFor(() => expect(editor.infoOpen).toBe(false));
+        expect($(".panel-column")!.classList.contains("open")).toBe(true);
+        await vi.waitFor(() => expect($(".presets-panel")).not.toBeNull());
+
+        await userEvent.keyboard("{Control>}i{/Control}");
+        await vi.waitFor(() => expect(presets.open).toBe(false));
+        await vi.waitFor(() => expect($(".info-panel")).not.toBeNull());
+
+        button("Heal").click();
+        await vi.waitFor(() => expect(retouchTool.mode).toBe("heal"));
+        expect(editor.infoOpen).toBe(false);
+        await userEvent.keyboard("{Escape}");
     });
 });

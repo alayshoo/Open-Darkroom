@@ -6,6 +6,7 @@
     import ColorSpacePanel from "$lib/components/outputs/ColorSpacePanel.svelte";
     import RetouchBar from "$lib/components/retouch/RetouchBar.svelte";
     import PresetsPanel from "$lib/components/presets/PresetsPanel.svelte";
+    import InfoPanel from "./InfoPanel.svelte";
     import PresetModal from "$lib/components/presets/PresetModal.svelte";
     import ExportModal from "$lib/components/ExportModal.svelte";
     import CustomAspectModal from "$lib/components/CustomAspectModal.svelte";
@@ -28,6 +29,15 @@
 
     $effect(() => holdPageZoom());
 
+    // The presets and the info panel take turns in one column. The last one
+    // shown stays in it while the column slides shut.
+    let panelOpen = $derived(presets.open || editor.infoOpen);
+    let shownPanel = $state<"presets" | "info">("presets");
+    $effect(() => {
+        if (presets.open) shownPanel = "presets";
+        else if (editor.infoOpen) shownPanel = "info";
+    });
+
     // A brush in hand keeps the keyboard to itself, bar undo and redo.
     const RETOUCH_SHORTCUTS: ReadonlySet<ShortcutId> = new Set(["healTool", "cloneTool", "undo", "redo"]);
 
@@ -39,6 +49,7 @@
             redo: editor.redo,
             changeMode: editor.toggleMode,
             openImage: editor.open,
+            toggleInfo: editor.toggleInfo,
             copyAdjustments: editor.copyAdjustments,
             pasteAdjustments: editor.pasteAdjustments,
             resetAdjustments: editor.resetAdjustments,
@@ -128,23 +139,27 @@
      side bar sit on a higher layer and simply paint over the overflow. -->
 <div class="canvas-backdrop"></div>
 <div class="app-shell flex absolute flex-row gap-3">
-    <div class="chrome-scrim" class:shifted={presets.open}>
+    <div class="chrome-scrim" class:shifted={panelOpen}>
         <div class="scrim-fill"></div>
     </div>
     <RetouchBar open={editor.isRetouching} ready={editor.retouchReady} strokes={editor.edit.retouch.length} onclear={editor.clearRetouch} />
-    <div class="presets-column shrink-0" class:open={presets.open} inert={!presets.open}>
-        <div class="presets-slide h-full">
-            <PresetsPanel
-                list={presets.list}
-                canApply={!editor.sidebarInactive}
-                onapply={editor.applyPreset}
-                onhover={(preset) => (editor.hoveredPresetId = preset?.id ?? null)}
-                onadd={editor.openNewPreset}
-                onimport={editor.importPresets}
-                onedit={editor.openEditPreset}
-                onexport={editor.exportPreset}
-                ondelete={editor.deletePreset}
-            />
+    <div class="panel-column shrink-0" class:open={panelOpen} inert={!panelOpen}>
+        <div class="panel-slide h-full">
+            {#if shownPanel === "info"}
+                <InfoPanel />
+            {:else}
+                <PresetsPanel
+                    list={presets.list}
+                    canApply={!editor.sidebarInactive}
+                    onapply={editor.applyPreset}
+                    onhover={(preset) => (editor.hoveredPresetId = preset?.id ?? null)}
+                    onadd={editor.openNewPreset}
+                    onimport={editor.importPresets}
+                    onedit={editor.openEditPreset}
+                    onexport={editor.exportPreset}
+                    ondelete={editor.deletePreset}
+                />
+            {/if}
         </div>
     </div>
     <EditorToolbar />
@@ -215,7 +230,7 @@
     }
 
     .app-shell {
-        --presets-width: 260px;
+        --panel-width: 260px;
         /* Smoothstep, from a scrim band's inner edge out to the window edge. */
         --scrim-ramp: transparent, rgba(0, 0, 0, 0.06) 15%, rgba(0, 0, 0, 0.22) 30%,
             rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0.65) 60%,
@@ -260,20 +275,20 @@
         transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    /* Follows the toolbar when the presets column opens: the panel width plus
+    /* Follows the toolbar when the panel column opens: the panel width plus
        the gap either side of it. */
     .chrome-scrim.shifted {
-        transform: translateX(calc(var(--presets-width) + 24px));
+        transform: translateX(calc(var(--panel-width) + 24px));
     }
 
     /* What the shift uncovers at the window edge, held at the darkness both
-       bands reach there, so the presets sit under the same cast. */
+       bands reach there, so the panel sits under the same cast. */
     .scrim-fill {
         position: absolute;
         top: 0;
         bottom: 0;
         right: 100%;
-        width: calc(var(--presets-width) + 24px);
+        width: calc(var(--panel-width) + 24px);
         background: black;
         opacity: calc(
             var(--scrimStrength) * 1.35 - var(--scrimStrength) * var(--scrimStrength) * 0.35
@@ -328,7 +343,7 @@
         opacity: calc(var(--scrimStrength) * 0.35);
     }
 
-    .presets-column {
+    .panel-column {
         width: 0;
         margin-right: -12px;
         position: relative;
@@ -339,22 +354,22 @@
             margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .presets-column.open {
-        width: var(--presets-width);
+    .panel-column.open {
+        width: var(--panel-width);
         margin-right: 12px;
     }
 
     /* The panel keeps its width and slides in with the toolbar rather than
        being squeezed, so its list never reflows mid-animation. */
-    .presets-slide {
+    .panel-slide {
         /* Laps 4px into the shell's edge inset, so the names sit 18px in. */
-        width: calc(var(--presets-width) + 4px);
+        width: calc(var(--panel-width) + 4px);
         margin-left: -4px;
         transform: translateX(calc(-100% - 24px));
         transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
-    .presets-column.open .presets-slide {
+    .panel-column.open .panel-slide {
         transform: translateX(0);
     }
 

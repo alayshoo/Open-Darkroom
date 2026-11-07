@@ -5,6 +5,7 @@
     import RetouchTools from "$lib/components/inputs/retouchTools.svelte";
     import PresetsButton from "$lib/components/inputs/presetsButton.svelte";
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
+    import InfoButton from "$lib/components/inputs/infoButton.svelte";
     import { loupe } from "$lib/gpu/loupe.svelte";
     import { presets } from "$lib/presets/presets.svelte";
     import { isFullFrame } from "$lib/types/crop";
@@ -47,10 +48,11 @@
     </div>
     <div
         data-tauri-drag-region
-        class="toolbar-zoom absolute flex justify-center"
+        class="toolbar-zoom absolute flex flex-col items-center gap-1"
         class:dimmed={!editor.imagePayload}
         inert={!editor.imagePayload}
     >
+        <InfoButton active={editor.infoOpen} ontoggle={editor.toggleInfo} />
         <ZoomButton
             fitted={editor.zoom === null}
             disabled={editor.isCropping || loupe.picking || (editor.zoom === null && !editor.zoomable)}

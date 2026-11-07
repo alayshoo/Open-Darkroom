@@ -42,6 +42,7 @@ import {
     defaultCurves,
 } from "$lib/types/curves";
 import { type ImagePayload } from "$lib/types/imagePayload";
+import { type ImageMetadata } from "$lib/types/imageMetadata";
 import { type ImageEdit, newImageEdit } from "$lib/types/imageEdit";
 import { type Crop, FULL_FRAME, cropsEqual, isFullFrame, turnCrop, flipCrop } from "$lib/types/crop";
 import {
@@ -55,7 +56,7 @@ import {
 import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
-import { openImage } from "$lib/utils/openImage";
+import { fetchImageMetadata, openImage } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { exportImage } from "$lib/utils/exportImage";
 import { animateObject } from "$lib/utils/animateObject";
@@ -77,6 +78,12 @@ class Editor {
     edit = $state<ImageEdit>(newImageEdit(0, 0));
 
     imagePayload = $state<ImagePayload | null>(null);
+
+    /** How the open image was shot, once the backend has said. */
+    metadata = $state.raw<ImageMetadata | null>(null);
+
+    /** Whether the info panel is open. It shares its column with the presets. */
+    infoOpen = $state(false);
 
     // ===== Control modes and pages =====
 
@@ -302,11 +309,30 @@ class Editor {
                 this.imagePayload = payload;
                 this.zoom = null;
                 this.#resetEdit(payload.fullWidth, payload.fullHeight);
+                this.#loadMetadata(payload.imageId);
             }
         } catch (e) {
             this.imagePayload = null;
+            this.metadata = null;
             console.error("Failed to open image:", e);
         }
+    };
+
+    #loadMetadata(imageId: number) {
+        this.metadata = null;
+        fetchImageMetadata(imageId)
+            .then((metadata) => {
+                if (this.imagePayload?.imageId === imageId) this.metadata = metadata;
+            })
+            .catch((e) => console.error("Failed to read image metadata:", e));
+    }
+
+    toggleInfo = () => {
+        if (!this.infoOpen) {
+            presets.open = false;
+            retouchTool.mode = null;
+        }
+        this.infoOpen = !this.infoOpen;
     };
 
     // An edit belongs to one image, so a newly opened one starts from defaults
@@ -483,6 +509,7 @@ class Editor {
     toggleRetouch = (mode: RetouchMode) => {
         if (!this.canRetouch) return;
         presets.open = false;
+        this.infoOpen = false;
         loupe.picking = false;
         retouchTool.toggle(mode);
     };
@@ -763,6 +790,11 @@ class Editor {
 
             $effect(() => {
                 if (!presets.open) this.hoveredPresetId = null;
+            });
+
+            // The presets and the info panel take turns in the same column.
+            $effect(() => {
+                if (presets.open) untrack(() => (this.infoOpen = false));
             });
         });
     }
