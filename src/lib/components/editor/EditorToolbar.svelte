@@ -1,5 +1,4 @@
 <!-- lib/components/editor/EditorToolbar.svelte -->
-<svelte:options runes />
 <script lang="ts">
     import CropButton from "$lib/components/inputs/cropButton.svelte";
     import CropTools from "$lib/components/inputs/cropTools.svelte";
@@ -97,10 +96,5 @@
         bottom: 0;
         z-index: 1;
         transition: opacity 0.2s ease;
-    }
-
-    .dimmed {
-        opacity: 0.25;
-        pointer-events: none;
     }
 </style>

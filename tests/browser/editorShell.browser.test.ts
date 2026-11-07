@@ -14,6 +14,7 @@ import "$lib/styles/palette.css";
 import "$lib/styles/glass.css";
 
 import { initializeGPU } from "$lib/gpu/gpuInit";
+import { editor } from "$lib/editor/editor.svelte";
 import { history } from "$lib/history/history.svelte";
 import { presets } from "$lib/presets/presets.svelte";
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
@@ -310,5 +311,29 @@ describe("with an image open", () => {
         await goToPage(0);
         button("Auto black and white points").click();
         await vi.waitFor(() => expect(history.stack.map((a) => a.type)).toEqual(["sliders"]));
+    });
+
+    it("keeps the edit, its page and its history while the editor is away", async () => {
+        await nudge("Exposure");
+        const exposure = value("Exposure");
+        await goToPage(2);
+        await vi.waitFor(() => expect(editor.activePageNormal).toBe(2));
+        const Page = (await import("../../src/routes/+page.svelte")).default;
+        unmount(app);
+        expect($(".controls-pager")).toBeNull();
+
+        // The store keeps itself consistent with nothing mounted.
+        editor.flipShortcut(true);
+        await vi.waitFor(() => expect(editor.inputHistograms!.r.every((n) => n === 0)).toBe(true));
+
+        app = mount(Page, { target: document.body, context: new Map([["gpu", () => gpu]]) });
+        await vi.waitFor(() => expect(isInert(".controls-section")).toBe(false));
+        expect(value("Exposure")).toBe(exposure);
+        await vi.waitFor(() => expect(Math.round(pager().scrollLeft / pager().clientWidth)).toBe(2));
+        expect(history.stack.map((a) => a.type)).toEqual(["slider", "crop"]);
+
+        await userEvent.keyboard("{Control>}z{/Control}");
+        expect((await exported()).crop).toEqual(FULL_FRAME);
+        await vi.waitFor(() => expect(editor.inputHistograms!.r.some((n) => n > 0)).toBe(true));
     });
 });

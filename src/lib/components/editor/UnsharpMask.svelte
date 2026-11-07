@@ -1,5 +1,4 @@
 <!-- lib/components/editor/UnsharpMask.svelte -->
-<svelte:options runes />
 <script lang="ts">
     import Loupe from "$lib/components/outputs/Loupe.svelte";
     import SingleValSliderGroup from "$lib/components/inputs/values/SingleValSliderGroup.svelte";
@@ -93,12 +92,3 @@
             })}
     ></SingleValSliderGroup>
 </div>
-
-<style>
-    .section-title {
-        font-family: var(--font-ui);
-        font-size: 18px;
-        font-weight: 600;
-        color: var(--color1);
-    }
-</style>

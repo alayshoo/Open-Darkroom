@@ -1,5 +1,4 @@
 <!-- routes/+page.svelte -->
-<svelte:options runes />
 <script lang="ts">
     import TitleBar from "$lib/components/window/TitleBar.svelte";
     import Editor from "$lib/components/editor/Editor.svelte";

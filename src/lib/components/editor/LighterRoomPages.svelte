@@ -1,5 +1,4 @@
 <!-- lib/components/editor/LighterRoomPages.svelte -->
-<svelte:options runes />
 <script lang="ts">
     import { slide } from "svelte/transition";
 
@@ -409,13 +408,6 @@
 </ControlsPage>
 
 <style>
-    .section-title {
-        font-family: var(--font-ui);
-        font-size: 18px;
-        font-weight: 600;
-        color: var(--color1);
-    }
-
     .sliders-separator {
         background: var(--color5);
     }

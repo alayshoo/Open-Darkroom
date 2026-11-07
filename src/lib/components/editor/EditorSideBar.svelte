@@ -17,13 +17,9 @@
     import LighterRoomPages from "./LighterRoomPages.svelte";
     import DarkroomPages from "./DarkroomPages.svelte";
 
-    /* The two control pagers sit side by side on an imaginary strip: the normal
-       one to the left, the darkroom one to the right. Each always enters from
-       and leaves towards its own side, so switching modes reads as the strip
-       sliding across rather than as two pagers swapping places. The travel is
-       expressed in percent of the pager's own width, which `fly` cannot do
-       since it only takes pixels, and .controls-pager-wrapper clips whatever
-       hangs outside. */
+    // The pagers sit on one strip, lighter room left and darkroom right, and each
+    // slides in and out on its own side. The travel is a percentage of the
+    // pager's width, which `fly` cannot express.
     function slideX(
         node: Element,
         { direction = 1, duration = MODE_SLIDE_MS }: { direction?: number; duration?: number } = {},
@@ -146,11 +142,8 @@
             inert={editor.sidebarInactive}
         >
             <ColorModeToggle bind:isRgb={editor.edit.isRgb} onToggle={editor.toggleColorMode} />
-            <!-- Stays mounted and fades. It is the last item in a
-                 left-aligned row, so holding its width costs no layout —
-                 and a plain opacity crossfade never touches layout at all,
-                 where `slide` animated width/padding/margin and reflowed
-                 the row on every frame. -->
+            <!-- Stays mounted and fades on opacity alone, so the row never
+                 reflows. -->
             <div class="invert-slot flex items-center gap-2" class:shown={editor.isDarkroom}>
                 <InvertToggle bind:isInverted={editor.edit.sliders.invert} onToggle={editor.toggleInvert} />
                 <AutoLevelsButton disabled={!editor.inputHistograms} onauto={editor.autoLevels} />
@@ -222,12 +215,8 @@
             class:dimmed={editor.sidebarInactive}
             inert={editor.sidebarInactive}
         >
-                <!-- Both groups stay mounted and crossfade on opacity
-                     alone. `blur` animated filter: blur(), and these sit
-                     inside .side-panel-footer — a backdrop-filter surface,
-                     which had to re-run its own blur on every frame the
-                     dots were damaging it. Staying mounted also retires
-                     the outgoing/z-index bookkeeping the outro needed. -->
+                <!-- Both groups stay mounted and crossfade on opacity alone,
+                     which the footer's backdrop blur can composite cheaply. -->
                 <div
                     class="page-dots absolute z-1 flex justify-center items-center gap-3"
                     class:shown={!editor.isDarkroom}
@@ -364,21 +353,13 @@
         transition: opacity 0.2s ease;
     }
 
-    .dimmed {
-        opacity: 0.25;
-        pointer-events: none;
-    }
-
     .controls-pager-wrapper {
         min-height: 0;
         overflow: hidden;
     }
 
-    /* Held only for the length of the slide (see MODE_SLIDE_MS in editor.svelte.ts). Both masks go
-       at once: each is an offscreen surface, and they are nested, so leaving
-       either in place keeps the compositing chain the suspension exists to
-       break. The wrapper's own `overflow: hidden` still clips the strip, so
-       what is lost is the softness of the cut, not the cut itself. */
+    /* Both nested masks are dropped for the length of the slide, so the strip
+       moves as a plain transform. The wrapper still clips it. */
     .controls-pager-wrapper.sliding .controls-pager,
     .controls-pager-wrapper.sliding :global(.controls-page) {
         mask-image: none;
@@ -393,13 +374,8 @@
         scrollbar-width: none;
         backface-visibility: hidden;
 
-        /* Side fades, mirroring the top/bottom ones on .controls-page. The mask
-           sits on the scroll frame rather than the content, so it stays pinned
-           to the panel's edges while the pages travel underneath it.
-
-           The ramps stop where the page's own side margins do — 16px (ml-4) and
-           12px (mr-3) — so a snapped page is untouched and only content in
-           transit passes through the gradient. */
+        /* Side fades pinned to the scroll frame. The ramps end at the page's
+           own margins (ml-4, mr-3), so a snapped page is untouched. */
         mask-image: linear-gradient(
             to right,
             transparent 0,
@@ -423,10 +399,8 @@
         min-width: 72px; /* fit up to 4 dots + gaps */
     }
 
-    /* Both groups are always mounted, stacked on the same centre, and only
-       opacity separates them. `visibility` steps at the far end of the fade so
-       the hidden group stops taking clicks and leaves the tab order, without
-       being display:none — which would kill the transition outright. */
+    /* Both groups are stacked on the same centre. `visibility` steps at the end
+       of the fade, so the hidden group leaves the tab order and takes no clicks. */
     .page-dots-wrapper .page-dots {
         left: 50%;
         top: 50%;

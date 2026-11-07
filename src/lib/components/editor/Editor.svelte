@@ -1,7 +1,5 @@
 <!-- lib/components/editor/Editor.svelte -->
 <script lang="ts">
-    import { untrack } from "svelte";
-
     import PreviewImageCanvas from "$lib/components/outputs/PreviewImageCanvas.svelte";
     import CropOverlay from "$lib/components/outputs/CropOverlay.svelte";
     import DebugStatsOverlay from "$lib/components/outputs/DebugStatsOverlay.svelte";
@@ -29,35 +27,6 @@
     });
 
     $effect(() => holdPageZoom());
-
-    // An export menu left open when the footer goes inactive would stay up,
-    // dimmed and unreachable.
-    $effect(() => {
-        if (editor.sidebarInactive) editor.exportMenuOpen = false;
-    });
-
-    $effect(() => editor.syncHistogramStrokes());
-    $effect(() => editor.updateInputHistograms());
-    $effect(() => editor.syncProofing());
-
-    $effect(() => {
-        if (!editor.canRetouch) retouchTool.mode = null;
-    });
-
-    // The presets need the side bar the brushes send away.
-    $effect(() => {
-        if (presets.open) untrack(() => (retouchTool.mode = null));
-    });
-
-    $effect(() => {
-        if (!presets.open) editor.hoveredPresetId = null;
-    });
-
-    // Frame stats start visible in a dev run and hidden in a release build, so
-    // the numbers are there while working without shipping to a user. A release
-    // build still needs to be measurable — turning the debug tools on in
-    // settings brings F1/F2 back.
-    debugStats.enabled = import.meta.env.DEV;
 
     // A brush in hand keeps the keyboard to itself, bar undo and redo.
     const RETOUCH_SHORTCUTS: ReadonlySet<ShortcutId> = new Set(["healTool", "cloneTool", "undo", "redo"]);
@@ -280,11 +249,9 @@
         pointer-events: auto;
     }
 
-    /* The one gradient the window chrome sits on: down the left edge under the
-       toolbar and across the top under the title bar, turning the corner
-       between them on a rounded inner edge. Two copies are stacked, a dense
-       band and a wide faint tail, and both ramp in on an eased curve, so
-       neither has a visible line where it starts. */
+    /* The gradient under the toolbar and title bar, turning the corner on a
+       rounded inner edge. A dense band and a wide faint tail are stacked, both
+       on an eased ramp so neither shows where it starts. */
     .chrome-scrim {
         position: fixed;
         inset: 0;
@@ -342,10 +309,9 @@
         transition: opacity 0.5s ease;
     }
 
-    /* Each band's depth, and where the corner tile hands over to it: the depth
-       plus an inner radius in proportion to it. The hand-overs stay on
-       multiples of 4px so the seams land on whole device pixels at every
-       common display scale. */
+    /* Each band's depth, and where the corner tile hands over to it. The
+       hand-overs stay on multiples of 4px so the seams land on whole device
+       pixels at common display scales. */
     .chrome-scrim::before {
         --top: 55px;
         --left: 68.75px;

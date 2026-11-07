@@ -1,5 +1,4 @@
 <!-- lib/components/editor/DarkroomPages.svelte -->
-<svelte:options runes />
 <script lang="ts">
     import TripleValSliderHistGroup from "$lib/components/inputs/values/TripleValSliderHistGroup.svelte";
     import DoubleValSliderGroup from "$lib/components/inputs/values/DoubleValSliderGroup.svelte";

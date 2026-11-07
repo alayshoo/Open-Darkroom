@@ -18,6 +18,7 @@ import {
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import { loupe } from "$lib/gpu/loupe.svelte";
 import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
+import { debugStats } from "$lib/gpu/debugStats.svelte";
 import { proofing } from "$lib/gpu/proofing.svelte";
 import { history } from "$lib/history/history.svelte";
 import { applyAction, undoAction, type StateAccessors } from "$lib/history/historyDispatch";
@@ -59,8 +60,7 @@ import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboar
 import { exportImage } from "$lib/utils/exportImage";
 import { animateObject } from "$lib/utils/animateObject";
 
-/* Must match slideX's duration in EditorSideBar; the strip is only mid-flight
-   for that long, and re-masking early would pop the fades back mid-slide. */
+// How long the control pagers take to slide across on a mode change.
 export const MODE_SLIDE_MS = 500;
 
 /* The colour keys are in transit for as long as the toggle animates them, so
@@ -228,14 +228,14 @@ class Editor {
 
     // Jumps without scrolling. A pager that is not mounted yet picks the page
     // up from its active page when it is.
-    jumpToPage(darkroom: boolean, index: number) {
+    jumpToPage = (darkroom: boolean, index: number) => {
         if (darkroom) this.activePageDarkroom = index;
         else this.activePageNormal = index;
         const el = darkroom ? this.pagerElDarkroom : this.pagerElNormal;
         if (el && darkroom === this.isDarkroom) {
             el.scrollTo({ left: index * el.clientWidth, behavior: "instant" });
         }
-    }
+    };
 
     movePage = (right?: boolean) => {
         const next = right
@@ -325,14 +325,14 @@ class Editor {
 
     // ===== Crop =====
 
-    enterCrop() {
+    enterCrop = () => {
         presets.open = false;
         retouchTool.mode = null;
         this.zoom = null;
         this.draftCrop = { ...this.edit.crop };
         this.isCropping = true;
         this.#holdAspectOnEntry();
-    }
+    };
 
     // An uncropped frame takes on the lock. A crop already drawn to another
     // shape is kept, and the lock lets go.
@@ -373,19 +373,19 @@ class Editor {
         this.aspectLock = { ...FREE_ASPECT };
     };
 
-    applyCrop() {
+    applyCrop = () => {
         this.isCropping = false;
         this.isStraightening = false;
         if (cropsEqual(this.draftCrop, this.edit.crop)) return;
         this.zoom = null;
         this.commit({ type: "crop", oldValue: { ...this.edit.crop }, newValue: { ...this.draftCrop } });
         this.edit.crop = { ...this.draftCrop };
-    }
+    };
 
-    cancelCrop() {
+    cancelCrop = () => {
         this.isCropping = false;
         this.isStraightening = false;
-    }
+    };
 
     turnDraft = (clockwise: boolean) => {
         this.draftCrop = turnCrop(this.draftCrop, clockwise);
@@ -397,13 +397,13 @@ class Editor {
     };
 
     // Outside the crop tool a flip lands on the applied crop as its own step.
-    flipShortcut(horizontal: boolean) {
+    flipShortcut = (horizontal: boolean) => {
         if (!this.imagePayload) return;
         if (this.isCropping) return this.flipDraft(horizontal);
         const flipped = flipCrop(this.edit.crop, horizontal);
         this.commit({ type: "crop", oldValue: { ...this.edit.crop }, newValue: flipped });
         this.edit.crop = flipped;
-    }
+    };
 
     toggleCrop = () => {
         if (!this.imagePayload) return;
@@ -433,8 +433,8 @@ class Editor {
             });
     }
 
-    /** Takes up the applied strokes once no brush is in hand. Run as an effect. */
-    syncHistogramStrokes() {
+    // Takes up the applied strokes once no brush is in hand.
+    #syncHistogramStrokes() {
         if (this.isRetouching) return;
         const strokes = $state.snapshot(this.edit.retouch) as Retouch[];
         const held = untrack(() => this.histogramStrokes);
@@ -442,8 +442,8 @@ class Editor {
         this.histogramStrokes = strokes;
     }
 
-    /** Rebins the input histograms for the crop and strokes. Run as an effect. */
-    updateInputHistograms() {
+    // Rebins the input histograms for the crop and strokes.
+    #updateInputHistograms() {
         const payload = this.imagePayload;
         const kept = { ...this.edit.crop };
         const strokes = this.histogramStrokes;
@@ -460,12 +460,6 @@ class Editor {
     }
 
     // ===== Export =====
-
-    // What a soft proof proofs against is whatever the export is set to write,
-    // kept here rather than in the menu so it holds while the menu is closed.
-    syncProofing() {
-        proofing.target = this.exportSettings.outputSpace;
-    }
 
     export = async () => {
         this.isExportPending = true;
@@ -576,10 +570,9 @@ class Editor {
 
     // ===== Adjustments =====
 
-    /* In B&W the colour keys are pinned to their overrides, so an incoming set
-       puts its colour values aside for the toggle back to colour instead of
-       applying them. The whole set lands as one history step, with any curves
-       it carries. */
+    /* In B&W an incoming set puts its colour values aside for the toggle back
+       to colour instead of applying them. The set lands as one history step,
+       with any curves it carries. */
     #applySliderSet(values: Partial<Sliders>, curveValues: Partial<Curves> = {}) {
         const edit = this.edit;
         const next: Partial<Sliders> = { ...values };
@@ -669,14 +662,14 @@ class Editor {
 
     /* The tolerance is there because animated values land on their target
        through a lerp, which need not be bit-exact. */
-    isAtDefault(key: keyof Sliders) {
+    isAtDefault = (key: keyof Sliders) => {
         const def = defaultSlidersRGB[key];
         const val = this.edit.sliders[key];
         if (typeof def === "number" && typeof val === "number") {
             return Math.abs(val - def) <= SLIDER_TOLERANCE;
         }
         return val === def;
-    }
+    };
 
     // ===== Presets =====
 
@@ -736,6 +729,43 @@ class Editor {
     deletePreset = (preset: Preset) => {
         presets.remove(preset.id);
     };
+
+    // The rules that keep the state consistent run for as long as the store
+    // exists, whether or not the editor is on screen.
+    constructor() {
+        // Frame stats start visible in a dev run and hidden in a release build;
+        // turning the debug tools on in settings brings F1/F2 back.
+        debugStats.enabled = import.meta.env.DEV;
+
+        $effect.root(() => {
+            $effect(() => this.#syncHistogramStrokes());
+            $effect(() => this.#updateInputHistograms());
+
+            // What a soft proof proofs against is whatever the export is set to write.
+            $effect(() => {
+                proofing.target = this.exportSettings.outputSpace;
+            });
+
+            // An export menu left open when the footer goes inactive would stay up,
+            // dimmed and unreachable.
+            $effect(() => {
+                if (this.sidebarInactive) this.exportMenuOpen = false;
+            });
+
+            $effect(() => {
+                if (!this.canRetouch) retouchTool.mode = null;
+            });
+
+            // The presets need the side bar the brushes send away.
+            $effect(() => {
+                if (presets.open) untrack(() => (retouchTool.mode = null));
+            });
+
+            $effect(() => {
+                if (!presets.open) this.hoveredPresetId = null;
+            });
+        });
+    }
 }
 
 export const editor = new Editor();
