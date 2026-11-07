@@ -8,6 +8,7 @@ pub mod icc;
 pub mod raw;
 pub mod output_space;
 pub mod image_opening;
+pub mod metadata;
 pub mod full_resolution;
 pub mod export_rendering;
 pub mod retouch;
@@ -33,6 +34,7 @@ pub fn run() {
             grab_cursor,
             image_opening::open_image_file,
             image_opening::crop_histograms,
+            image_opening::image_metadata,
             full_resolution::full_resolution_rows,
             export::export_image,
             presets::export_preset,

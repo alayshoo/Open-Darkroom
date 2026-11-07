@@ -24,6 +24,7 @@ use crate::retouch::{
 };
 use crate::full_resolution::FullResolution;
 use crate::icc::{Matrix3, SourceSpace};
+use crate::metadata::ImageMetadata;
 
 /// The four-channel decode shape, produced whenever the source declares alpha.
 pub type Rgba16Image = ImageBuffer<Rgba<u16>, Vec<u16>>;
@@ -80,6 +81,8 @@ pub struct OriginalImage {
     /// The frontend's tag for this open, so a band asked for an image that has
     /// since been replaced is refused rather than cut from the new one.
     pub id: u32,
+    /// How the file says it was shot.
+    pub metadata: ImageMetadata,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -752,6 +755,7 @@ pub(crate) async fn open_image_file(
     };
 
     let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let metadata = crate::metadata::read(&path);
 
     // Store the original full-resolution image for export. This happens after
     // `prepare_image` so the buffer can be moved into the state rather than
@@ -767,6 +771,7 @@ pub(crate) async fn open_image_file(
             space,
             full_resolution: Arc::default(),
             id: image_id,
+            metadata,
         });
     }
 
@@ -781,6 +786,13 @@ pub(crate) async fn open_image_file(
     );
 
     Ok(Response::new(payload))
+}
+
+/// How the open image was shot, or None once another image has replaced it.
+#[tauri::command]
+pub(crate) fn image_metadata(state: tauri::State<'_, ImageState>, image_id: u32) -> Option<ImageMetadata> {
+    let guard = state.lock().unwrap();
+    guard.as_ref().filter(|img| img.id == image_id).map(|img| img.metadata.clone())
 }
 
 /// The open image's per-channel histograms, binned over only what a crop

@@ -190,6 +190,13 @@ export const shortcutActions = [
         defaults: ["ctrl+o"],
     },
     {
+        id: "toggleInfo",
+        group: "file",
+        label: "Image info",
+        description: "How the open image was shot: camera, lens and exposure.",
+        defaults: ["ctrl+i"],
+    },
+    {
         id: "toggleSettings",
         group: "file",
         label: "Settings",
