@@ -51,9 +51,10 @@ Roll level, all optional and free to fill in later:
   home, or the lab and its chemistry; push or pull either way
 - scanner, notes
 
-Film stocks, cameras, lenses, scanners and home lab chemistry are kept in the
-catalog and managed in Settings. A roll picks from them, or takes what is typed
-as a new one; deleting one leaves its name on the rolls that used it.
+Film stocks, cameras, lenses, scanners, chemistry setups and labs are kept in
+the catalog and managed in Settings. A roll picks from them; a scanner is added
+from what is typed, and the rest are set up in Settings from the roll. Deleting
+one leaves its name on the rolls that used it.
 
 Frame level: frame number, aperture and shutter if logged, location, notes.
 
@@ -71,9 +72,8 @@ It belongs to this computer, but nothing in it is tied to it:
 - the whole catalog exports and imports as one bundle (see Exporting)
 - any library or roll exports on its own and merges into another catalog; an
   imported roll goes into a library chosen on import
-- **Open**: whether the catalog's location can also be moved, for example to an
-  external drive. If it can, it is locked while open, so two computers sharing
-  it through a synced folder cannot both write to it.
+
+Where the catalog itself lives is not configurable for now (see Later).
 
 ### Where the image files are
 
@@ -87,9 +87,18 @@ Importing offers both:
 
 Files in the photo folder are recorded relative to it, so they survive the
 folder moving. Files outside it are recorded by path and by a fingerprint (their
-size plus a hash of their first bytes). A file that has moved, or a catalog
-imported on another computer, finds it again from the fingerprint, or the user
-is asked to point to it. Nothing is lost because a file went missing.
+size plus a hash of their first bytes). Nothing is lost because a file went
+missing:
+
+- When the catalog opens, when the window comes back into focus, and after a
+  file is located, the app looks for missing files on its own. It searches the
+  closest folders still there above where each file was, one level further up,
+  and the photo folder, a few levels deep. Only files of a missing file's size
+  are read, and a match is by fingerprint, so a renamed file is found too.
+- What it finds, its images point at again, and it says how many it found.
+- What it does not find stays marked missing. Opening one, or "Locate file…"
+  from its menu, asks where it went; the file picked must be the same file.
+  The folders around it are then searched for the rest.
 **Open**: which of the two is the default.
 
 ## Edits
@@ -103,8 +112,9 @@ edit written by one build still opens in another.
   lost on a crash.
 - `editFitsSource` guards against a file that changed size underneath its edit.
   Heal and clone strokes are placed in full-resolution pixels.
-- Undo history belongs to the session and is not stored. **Open**: whether it
-  should survive leaving an image.
+- Undo history is stored with the edit, so it is still there when the image is
+  opened again. A history with a step the build cannot read is dropped whole,
+  and only the latest 200 steps are kept.
 
 ## The editor and the library side by side
 
@@ -168,8 +178,9 @@ These land together with the library:
   (alayshoo/Open-Darkroom#63).
 - The first prototype: the catalog (`catalog.rs`, SQLite), opening by path,
   thumbnails rendered through the export WGSL, edits saved as they are made,
-  the library view with roll and frame information, and the fly-back. Not yet:
-  exporting, albums, finding a moved file by fingerprint without being asked.
+  the library view with roll and frame information, the fly-back, undo history
+  kept with the edit, and moved files found by fingerprint. Not yet: exporting,
+  albums.
 
 ### What the prototype settled on
 
@@ -177,12 +188,12 @@ To be revisited once it has been used:
 
 - Imports are referenced in place by default. Copying into the photo folder is
   a setting, and puts each library and roll in a folder of its own.
-- An image has one home, loose in a library or on one roll. There is no inbox:
-  opening a file adds it to the library or roll being looked at, making a first
-  library if there is none.
+- An image has one home, loose in a library or on one roll. There is no inbox
+  at the top of the catalog: opening a file adds it to the library or roll being
+  looked at, making a first library if there is none. Someone who wants an inbox
+  makes a library called that.
 - Rolls are made both ways: a folder imported as a roll, or a new roll that
   frames are added or moved to.
-- Undo history stays with the session.
 - A roll and a library are renamed by double-clicking their name.
 
 ## Open questions
@@ -194,11 +205,8 @@ Settled by the prototype, not ahead of it:
   per file with no ambiguity. Rolls are not tied to the folders the files sit in,
   since scanner software often puts a whole session in one folder and folders get
   renamed. An image in several places at once is better served later by albums.
-  **Open**: whether images can also sit loose at the top of the catalog, as an
-  inbox not yet sorted into a library.
 - **How rolls are made.** Importing a folder as a roll, making an empty roll and
   dragging frames in, or both.
-- **Undo history.** Kept per session only, or stored with the edit.
 
 ## Later
 
@@ -213,3 +221,7 @@ above:
   exported file's metadata.
 - **Shooting log**: a roll's information as a spreadsheet.
 - **Sidecar files**: an optional copy of each edit next to its image.
+- **A shared catalog**: the catalog kept somewhere other than the app's data
+  directory, such as an external drive or a server, so several computers can
+  work in it. It needs a lock, or a way for more than one computer to write to
+  it at once.
