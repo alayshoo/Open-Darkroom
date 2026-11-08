@@ -578,6 +578,23 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
+## L1 — `export_options.rs` (15)
+
+What the export modal adds around the render.
+
+| Test | Asserts |
+|---|---|
+| `the_exif_block_reads_back_as_what_it_was_built_from` | the built block parses back through `metadata.rs` |
+| `an_unknown_shot_still_records_the_orientation_and_no_exif_directory` | an empty shot still writes a valid block |
+| `jpeg_and_png_carry_the_shot_where_an_open_reads_it` | APP1 and eXIf, read back the way an open reads them |
+| `webp_carries_the_shot_in_an_exif_chunk_and_says_so` | the `EXIF` chunk and its `VP8X` flag |
+| `tiff_carries_the_shot_in_its_own_directories` | the primary tags and the EXIF sub-directory, at 8 and 16 bits |
+| `jxl_carries_the_shot_in_an_exif_box` | the `Exif` box beside libjxl's streamed codestream |
+| `without_metadata_no_format_carries_any` | the toggle off writes nothing |
+| `each_mode_lands_its_edge_on_the_number_asked_for`, `an_export_is_never_enlarged`, `a_thin_strip_keeps_at_least_a_pixel` | `target_size`, mirrored by `targetSize` in TypeScript |
+| `a_flat_colour_survives_the_resample_unchanged`, `fine_detail_is_averaged_in_linear_light`, `a_mismatched_buffer_is_refused` | the resample, at 8 and 16 bits |
+| `the_file_name_takes_the_formats_extension_once`, `a_name_no_platform_can_hold_is_refused` | `export_file_name`, mirrored by `exportFileName` |
+
 ## L1 — `tests/unit/` (161, TypeScript)
 
 | Test | Asserts |
@@ -591,6 +608,7 @@ header is there, and the pixels still decode to what went in.
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 | `viewport` × 30 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it; when a fresh sharp region is rendered, put off or kept, and when it is drawn over the backdrop |
 | `fullResolution` × 8 | the band header, band sizing, mip level counts, and how far the blurs reach at a render scale |
+| `exportSettings` × 20 | the export size and file name agree with the Rust cases; a stored copy of the settings is restored as far as it is valid |
 
 ## L3 — `tests/browser/` (50, real WebGPU)
 

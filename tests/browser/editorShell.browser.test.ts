@@ -82,6 +82,10 @@ function stubTauri() {
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
             if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
             if (cmd === "export_image") return void exports.push(JSON.parse(JSON.stringify(args)));
+            if (cmd === "export_defaults") return { folder: "/photos/2024", fileName: "DSCF4127" };
+            if (cmd === "check_export_destination")
+                return { path: `${args.folder}/${args.fileName}.jxl`, exists: args.fileName === "taken" };
+            if (cmd === "pick_export_folder") return "/photos/exports";
             if (cmd === "plugin:clipboard-manager|write_text") return void (clipboard = args.text);
             if (cmd === "plugin:clipboard-manager|read_text") return clipboard;
             if (/^plugin:store\|(entries|keys|values)$/.test(cmd)) return [];
@@ -149,10 +153,23 @@ async function setMode(darkroom: boolean) {
     }, { timeout: 5000 });
 }
 
+const exportDialog = () => $('[role=dialog][aria-labelledby="export-title"]');
+
+/** The primary button once the destination has been checked and allows it. */
+async function exportAction() {
+    return vi.waitFor(() => {
+        const action = exportDialog()?.querySelector<HTMLButtonElement>(".pill.primary");
+        expect(action?.disabled).toBe(false);
+        return action!;
+    });
+}
+
 async function exported() {
     const count = exports.length;
     document.querySelector<HTMLButtonElement>(".export-button")!.click();
+    (await exportAction()).click();
     await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+    await vi.waitFor(() => expect(exportDialog()).toBeNull());
     return exports[count];
 }
 
@@ -245,6 +262,9 @@ describe("with an image open", () => {
         expect(args.crop).toEqual(FULL_FRAME);
         expect(args.retouch).toEqual([]);
         expect(args.settings).toBeTypeOf("object");
+        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127" });
+        expect(args.size).toEqual({ mode: "none", pixels: 2048, percent: 50 });
+        expect(args.metadata).toBe(true);
         expect(Array.isArray(args.sliders.curveLut)).toBe(true);
         expect(history.stack.map((a) => a.type)).toEqual(["slider", "slider"]);
         button("Toggle image inversion").click();
@@ -293,12 +313,60 @@ describe("with an image open", () => {
         await vi.waitFor(() => expect($(".side-bar")!.classList.contains("away")).toBe(false));
     });
 
-    it("opens and closes the export menu", async () => {
-        button("Export settings").click();
-        await vi.waitFor(() => expect($('[role=menu][aria-label="Export settings"]')).not.toBeNull());
-        expect($(".controls-section")!.classList.contains("dimmed")).toBe(true);
-        document.body.click();
-        await vi.waitFor(() => expect($('[role=menu][aria-label="Export settings"]')).toBeNull());
+    it("opens the export modal from the keyboard and closes it on Escape", async () => {
+        await userEvent.keyboard("{Control>}{Shift>}e{/Shift}{/Control}");
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        // The editor's own shortcuts wait while it is up.
+        await userEvent.keyboard("{Control>}z{/Control}");
+        expect(exportDialog()).not.toBeNull();
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
+    });
+
+    it("exports at the size, name and folder the modal is given", async () => {
+        document.querySelector<HTMLButtonElement>(".export-button")!.click();
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        const dialog = exportDialog()!;
+        const pill = (label: string) =>
+            [...exportDialog()!.querySelectorAll<HTMLButtonElement>(".pill")].find((b) => b.textContent?.trim() === label)!;
+
+        pill("Long edge").click();
+        const edge = await vi.waitFor(() => {
+            const field = dialog.querySelector<HTMLInputElement>(".number-input");
+            expect(field).not.toBeNull();
+            return field!;
+        });
+        await userEvent.fill(edge, "4");
+        pill("JPEG").click();
+        pill("Choose…").click();
+        await vi.waitFor(() => expect(dialog.querySelector(".folder")!.textContent).toContain("exports"));
+
+        const name = dialog.querySelector<HTMLInputElement>(".name-input")!;
+        await userEvent.fill(name, "taken");
+        await vi.waitFor(() => expect(dialog.querySelector(".hint.warn")?.textContent).toContain("will be replaced"));
+        expect((await exportAction()).textContent?.trim()).toBe("Replace");
+        await userEvent.fill(name, "a/b");
+        await vi.waitFor(() => expect(dialog.querySelector<HTMLButtonElement>(".pill.primary")!.disabled).toBe(true));
+        await userEvent.fill(name, "roll 3");
+
+        const count = exports.length;
+        (await exportAction()).click();
+        await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+        const args = exports[count];
+        expect(args.destination).toEqual({ folder: "/photos/exports", fileName: "roll 3" });
+        expect(args.settings.format).toBe("jpeg");
+        expect(args.size).toEqual({ mode: "longEdge", pixels: 4, percent: 50 });
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
+
+        // The choices carry over to the next export.
+        document.querySelector<HTMLButtonElement>(".export-button")!.click();
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        expect(pill("JPEG").classList.contains("active")).toBe(true);
+        expect(exportDialog()!.querySelector<HTMLInputElement>(".name-input")!.value).toBe("roll 3");
+        pill("Full size").click();
+        pill("JXL").click();
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
     });
 
     it("reverts the mode's adjustments in one step", async () => {

@@ -30,6 +30,10 @@ export const DEFAULTS = {
      * no more, so shortcuts.svelte.ts checks the shape it gets back.
      */
     shortcuts: {} as Record<string, string[]>,
+    /** The export modal's choices; exportSettings.ts restores what still applies. */
+    exportSettings: {} as Record<string, unknown>,
+    /** The folder the last export was written to. */
+    exportFolder: "",
 };
 
 export type Persisted = typeof DEFAULTS;

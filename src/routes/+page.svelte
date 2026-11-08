@@ -4,16 +4,18 @@
     import Editor from "$lib/components/editor/Editor.svelte";
     import { editor } from "$lib/editor/editor.svelte";
     import { settings } from "$lib/settings/settings.svelte";
+    import { exportDialog } from "$lib/export/exportDialog.svelte";
 </script>
 
 <TitleBar
     undo={editor.undo}
     redo={editor.redo}
     open={editor.open}
+    exportImage={exportDialog.show}
     copyAdjustments={editor.copyAdjustments}
     pasteAdjustments={editor.pasteAdjustments}
     resetAdjustments={editor.resetAdjustments}
     openSettings={(section) => settings.show(section)}
-    busy={editor.showExportModal}
+    busy={exportDialog.open}
 ></TitleBar>
 <Editor />

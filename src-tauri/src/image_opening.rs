@@ -83,6 +83,8 @@ pub struct OriginalImage {
     pub id: u32,
     /// How the file says it was shot.
     pub metadata: ImageMetadata,
+    /// Where the file was opened from, which is where an export starts out.
+    pub path: std::path::PathBuf,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -772,6 +774,7 @@ pub(crate) async fn open_image_file(
             full_resolution: Arc::default(),
             id: image_id,
             metadata,
+            path,
         });
     }
 

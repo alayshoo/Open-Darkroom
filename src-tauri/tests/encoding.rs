@@ -573,6 +573,7 @@ fn png_and_tiff_report_progress_up_to_completion() {
             w,
             h,
             &settings(format),
+            None,
             scratch.path(),
             &mut |p| seen.push(p),
         )

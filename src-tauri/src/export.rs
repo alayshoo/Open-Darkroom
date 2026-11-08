@@ -1,24 +1,50 @@
 // src-tauri/src/export.rs
 //
-// Tauri command handler for image export.
-// Orchestrates: file dialog → GPU render (export_rendering) → encode (export_encoding).
+// Tauri command handlers for image export.
+// Orchestrates: GPU render (export_rendering) → resize (export_size) → encode (export_encoding).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
+use crate::crop::{crop_view, CropPayload};
+use crate::exif_writing::exif_tags;
 use crate::export_encoding::{encode_and_save_with_progress, ExportFormat, ExportSettings};
 use crate::export_progress::{ProgressEvent, ProgressPlan};
-use crate::crop::{crop_view, CropPayload};
 use crate::export_rendering::{render_cropped_image, SlidersPayload};
+use crate::export_size::{resize_rgb, target_size, OutputSize};
 use crate::image_opening::ImageState;
 use crate::retouch::RetouchPayload;
 
-// ── Tauri command ─────────────────────────────────────────────────────────────
+/// Where an export is written: a folder, and a name without its extension.
+#[derive(serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDestination {
+    pub folder: String,
+    pub file_name: String,
+}
+
+/// Where the open image came from, which is where its export starts out.
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDefaults {
+    pub folder: String,
+    pub file_name: String,
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DestinationCheck {
+    pub path: String,
+    pub exists: bool,
+}
+
+// ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn export_image(
     app: tauri::AppHandle,
     state: tauri::State<'_, ImageState>,
@@ -26,38 +52,20 @@ pub(crate) async fn export_image(
     crop: CropPayload,
     retouch: Vec<RetouchPayload>,
     settings: ExportSettings,
+    destination: ExportDestination,
+    size: OutputSize,
+    metadata: bool,
 ) -> Result<(), String> {
+    let path = destination_path(&destination.folder, &destination.file_name, settings.format)?;
     println!(
-        "export_image: opening save dialog ({:?}, {:?})",
-        settings.format, settings.output_space
+        "export_image: {:?}, {:?}, {:?} → {}",
+        settings.format,
+        settings.output_space,
+        size,
+        path.display()
     );
 
-    let (filter_name, extensions): (&str, &[&str]) = match settings.format {
-        ExportFormat::Png => ("PNG Image", &["png"]),
-        ExportFormat::Jpeg => ("JPEG Image", &["jpg", "jpeg"]),
-        ExportFormat::Webp => ("WebP Image", &["webp"]),
-        ExportFormat::Tiff => ("TIFF Image", &["tiff", "tif"]),
-        ExportFormat::Jxl => ("JPEG XL Image", &["jxl"]),
-    };
-
-    let path = app
-        .dialog()
-        .file()
-        .add_filter(filter_name, extensions)
-        .blocking_save_file()
-        .ok_or("No file selected")?
-        .into_path()
-        .map_err(|e| e.to_string())?;
-
-    let path = match settings.format {
-        ExportFormat::Png => ensure_extension(path, "png"),
-        ExportFormat::Jpeg => ensure_extension(path, "jpg"),
-        ExportFormat::Webp => ensure_extension(path, "webp"),
-        ExportFormat::Tiff => ensure_extension(path, "tiff"),
-        ExportFormat::Jxl => ensure_extension(path, "jxl"),
-    };
-
-    let (pixels_u16, width, height, channels, space) = {
+    let (pixels_u16, width, height, channels, space, exif) = {
         let guard = state.lock().unwrap();
         let img = guard.as_ref().ok_or("No image loaded")?;
         (
@@ -66,6 +74,7 @@ pub(crate) async fn export_image(
             img.height,
             img.channels,
             img.space.clone(),
+            metadata.then(|| exif_tags(&img.metadata)),
         )
     };
 
@@ -76,7 +85,8 @@ pub(crate) async fn export_image(
     let _ = app.emit("export:started", ());
 
     let view = crop_view(&crop, width, height);
-    let megapixels = view.width as f32 * view.height as f32 / 1e6;
+    let output = target_size(&size, view.width, view.height);
+    let megapixels = output.0 as f32 * output.1 as f32 / 1e6;
     let plan = Arc::new(ProgressPlan::new(
         settings.encode_seconds_per_megapixel() * megapixels,
     ));
@@ -115,15 +125,23 @@ pub(crate) async fn export_image(
     );
 
     send(plan.encoding(settings.reports_encode_progress()));
-    // Encoding is CPU-bound and can run for minutes, so it stays off the async
-    // runtime's workers.
+    // Resizing and encoding are CPU-bound and can run for minutes, so they
+    // stay off the async runtime's workers.
     let encode_path = path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        encode_and_save_with_progress(
+        let rgb = resize_rgb(
             rendered.rgb,
-            rendered.width,
-            rendered.height,
+            (rendered.width, rendered.height),
+            output,
+            bit_depth,
+            settings.output_space.transfer(),
+        )?;
+        encode_and_save_with_progress(
+            rgb,
+            output.0,
+            output.1,
             &settings,
+            exif.as_ref(),
             &encode_path,
             &mut |fraction| send(plan.encoded(fraction)),
         )
@@ -133,8 +151,8 @@ pub(crate) async fn export_image(
 
     println!(
         "export: saved {} × {} → {} in {} ms total",
-        width,
-        height,
+        output.0,
+        output.1,
         path.display(),
         t.elapsed().as_millis(),
     );
@@ -142,7 +160,78 @@ pub(crate) async fn export_image(
     Ok(())
 }
 
+/// The folder and name the open image's export starts out with.
+#[tauri::command]
+pub(crate) fn export_defaults(state: tauri::State<'_, ImageState>) -> Option<ExportDefaults> {
+    let guard = state.lock().unwrap();
+    let path = &guard.as_ref()?.path;
+    Some(ExportDefaults {
+        folder: path.parent()?.to_string_lossy().into_owned(),
+        file_name: path.file_stem()?.to_string_lossy().into_owned(),
+    })
+}
+
+/// None when the picker is dismissed.
+#[tauri::command]
+pub(crate) async fn pick_export_folder(app: tauri::AppHandle, start: Option<String>) -> Option<String> {
+    let mut dialog = app.dialog().file().set_title("Export to folder");
+    if let Some(start) = start.filter(|s| Path::new(s).is_dir()) {
+        dialog = dialog.set_directory(start);
+    }
+    let folder = dialog.blocking_pick_folder()?.into_path().ok()?;
+    Some(folder.to_string_lossy().into_owned())
+}
+
+/// The file an export would write, and whether one is already there.
+#[tauri::command]
+pub(crate) fn check_export_destination(
+    folder: String,
+    file_name: String,
+    format: ExportFormat,
+) -> Result<DestinationCheck, String> {
+    let path = destination_path(&folder, &file_name, format)?;
+    Ok(DestinationCheck {
+        exists: path.exists(),
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// The characters no file name may hold on any of the platforms the app runs on.
+const FORBIDDEN: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+/// A name without its extension, checked as safe to write on every platform.
+/// An extension the format already uses is dropped rather than doubled.
+pub fn export_file_name(file_name: &str, format: ExportFormat) -> Result<String, String> {
+    let mut stem = file_name.trim();
+    if let Some((before, ext)) = stem.rsplit_once('.') {
+        if format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+            stem = before.trim_end();
+        }
+    }
+    if stem.is_empty() || stem.chars().all(|c| c == '.') {
+        return Err("The file needs a name".to_string());
+    }
+    if let Some(c) = stem.chars().find(|c| FORBIDDEN.contains(c) || c.is_control()) {
+        return Err(format!("A file name cannot contain {c:?}"));
+    }
+    if stem.ends_with('.') {
+        return Err("A file name cannot end with a full stop".to_string());
+    }
+    Ok(format!("{stem}.{}", format.extension()))
+}
+
+pub fn destination_path(folder: &str, file_name: &str, format: ExportFormat) -> Result<PathBuf, String> {
+    let folder = Path::new(folder);
+    if folder.as_os_str().is_empty() {
+        return Err("Choose a folder to export to".to_string());
+    }
+    if !folder.is_dir() {
+        return Err("The folder no longer exists".to_string());
+    }
+    Ok(folder.join(export_file_name(file_name, format)?))
+}
 
 pub(crate) fn ensure_extension(path: PathBuf, ext: &str) -> PathBuf {
     if path.extension().map(|e| e.to_ascii_lowercase()) != Some(ext.into()) {

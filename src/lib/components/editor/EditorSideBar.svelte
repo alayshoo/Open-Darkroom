@@ -8,7 +8,7 @@
     import AutoLevelsButton from "$lib/components/inputs/autoLevelsButton.svelte";
     import RevertButton from "$lib/components/inputs/revertButton.svelte";
     import ExportButton from "$lib/components/inputs/exportButton.svelte";
-    import ExportSettingsMenu from "$lib/components/inputs/ExportSettingsMenu.svelte";
+    import { exportDialog } from "$lib/export/exportDialog.svelte";
     import ModeToggle from "$lib/components/inputs/modeToggle.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
     import { loupe } from "$lib/gpu/loupe.svelte";
@@ -85,19 +85,6 @@
         if (!isDarkroom) lastRestoredDarkroom = null;
     });
 
-    let footerEl: HTMLDivElement | null = $state(null);
-
-    $effect(() => {
-        if (!editor.exportMenuOpen) return;
-        function handleDocClick(e: MouseEvent) {
-            if (!footerEl?.contains(e.target as Node)) {
-                editor.exportMenuOpen = false;
-            }
-        }
-        document.addEventListener("click", handleDocClick);
-        return () => document.removeEventListener("click", handleDocClick);
-    });
-
     // Any press in the sidebar but on the loupe itself settles where it is.
     function endLoupeOnPress(e: PointerEvent) {
         if (!loupe.picking) return;
@@ -138,7 +125,7 @@
     <div class="tools-panel glass flex rounded-[12px] flex-1 flex-col">
         <div
             class="quick-actions flex items-center flex-row gap-2 ml-3 mr-3 mt-2.5"
-            class:dimmed={editor.exportMenuOpen || editor.sidebarInactive}
+            class:dimmed={editor.sidebarInactive}
             inert={editor.sidebarInactive}
         >
             <ColorModeToggle bind:isRgb={editor.edit.isRgb} onToggle={editor.toggleColorMode} />
@@ -158,7 +145,7 @@
         </div>
         <div
             class="controls-section flex relative flex-1 flex-col"
-            class:dimmed={editor.exportMenuOpen || editor.sidebarInactive}
+            class:dimmed={editor.sidebarInactive}
             inert={editor.sidebarInactive}
         >
             <div
@@ -198,17 +185,14 @@
             </div>
         </div>
     </div>
-    <div class="side-panel-footer glass flex relative justify-center items-center h-12 rounded-[12px] shrink-0" bind:this={footerEl}>
-        {#if editor.exportMenuOpen}
-            <ExportSettingsMenu bind:settings={editor.exportSettings} isRgb={editor.edit.isRgb} />
-        {/if}
+    <div class="side-panel-footer glass flex relative justify-center items-center h-12 rounded-[12px] shrink-0">
         <div
             class="footer-item absolute"
             style="left: 10px;"
             class:dimmed={editor.sidebarInactive}
             inert={editor.sidebarInactive}
         >
-            <ExportButton onexport={editor.export} bind:menuOpen={editor.exportMenuOpen} settings={editor.exportSettings}></ExportButton>
+            <ExportButton onclick={exportDialog.show} />
         </div>
         <div
             class="footer-item page-dots-wrapper relative flex justify-center items-center"
@@ -275,10 +259,6 @@
             inset 16px 21px 50px -38px rgba(255, 255, 255, 0.16);
     }
 
-    /* the export settings menu opens upward, out of the footer's own box */
-    .side-panel-footer {
-        overflow: visible;
-    }
 
     /* large panel — only the one holding the sliders. Its inset highlight is
        pulled right back: at full strength the smear across the top-left of a

@@ -19,6 +19,7 @@ use tiff::encoder::colortype::{self, ColorType};
 use tiff::encoder::{TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
+use crate::exif_writing::{exif_block, ExifEntry, ExifTags, ExifValue};
 use crate::jxl_encoding::{encode_jxl, JxlOptions};
 use crate::output_space::OutputSpace;
 
@@ -63,6 +64,23 @@ pub struct ExportSettings {
     /// Whether the image is in black-and-white mode (greyscale output for TIFF
     /// and JPEG XL).
     pub is_bw: bool,
+}
+
+impl ExportFormat {
+    /// The extension a new file is given, first, then any other it may carry.
+    pub fn extensions(self) -> &'static [&'static str] {
+        match self {
+            ExportFormat::Png => &["png"],
+            ExportFormat::Jpeg => &["jpg", "jpeg"],
+            ExportFormat::Webp => &["webp"],
+            ExportFormat::Tiff => &["tiff", "tif"],
+            ExportFormat::Jxl => &["jxl"],
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        self.extensions()[0]
+    }
 }
 
 impl ExportSettings {
@@ -136,11 +154,12 @@ pub fn encode_and_save(
     settings: &ExportSettings,
     path: &Path,
 ) -> Result<(), String> {
-    encode_and_save_with_progress(rgb_bytes, width, height, settings, path, &mut |_| {})
+    encode_and_save_with_progress(rgb_bytes, width, height, settings, None, path, &mut |_| {})
 }
 
-/// As [`encode_and_save`], calling `on_progress` with the fraction written so
-/// far for the formats where [`ExportSettings::reports_encode_progress`] holds.
+/// As [`encode_and_save`], writing `exif` into the file when given, and calling
+/// `on_progress` with the fraction written so far for the formats where
+/// [`ExportSettings::reports_encode_progress`] holds.
 ///
 /// The file is written next to `path` and moved over it only once complete, so
 /// a failed export never leaves a partial file or destroys the one it replaces.
@@ -149,11 +168,12 @@ pub fn encode_and_save_with_progress(
     width: u32,
     height: u32,
     settings: &ExportSettings,
+    exif: Option<&ExifTags>,
     path: &Path,
     on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
     let partial = partial_path(path);
-    let written = encode(rgb_bytes, width, height, settings, &partial, on_progress)
+    let written = encode(rgb_bytes, width, height, settings, exif, &partial, on_progress)
         .and_then(|()| std::fs::rename(&partial, path).map_err(|e| e.to_string()));
     if written.is_err() {
         let _ = std::fs::remove_file(&partial);
@@ -172,6 +192,7 @@ fn encode(
     width: u32,
     height: u32,
     settings: &ExportSettings,
+    exif: Option<&ExifTags>,
     path: &Path,
     on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
@@ -180,19 +201,20 @@ fn encode(
     // sample per pixel, needs a profile naming a single channel.
     let greyscale = settings.greyscale();
     let icc = settings.output_space.icc(greyscale)?;
+    let block = exif.map(exif_block);
 
     match settings.format {
-        ExportFormat::Png  => encode_png(&rgb_bytes, width, height, settings.png_compression, icc, path, on_progress),
-        ExportFormat::Jpeg => encode_jpeg(rgb_bytes, width, height, settings.jpeg_quality, icc, path),
-        ExportFormat::Webp => encode_webp(rgb_bytes, width, height, settings.webp_lossless, settings.webp_quality, settings.webp_compression, &icc, path),
-        ExportFormat::Tiff => encode_tiff(rgb_bytes, width, height, settings.tiff_bit_depth, settings.is_bw, &icc, path, on_progress),
+        ExportFormat::Png  => encode_png(&rgb_bytes, width, height, settings.png_compression, icc, block, path, on_progress),
+        ExportFormat::Jpeg => encode_jpeg(rgb_bytes, width, height, settings.jpeg_quality, icc, block, path),
+        ExportFormat::Webp => encode_webp(rgb_bytes, width, height, settings.webp_lossless, settings.webp_quality, settings.webp_compression, &icc, block.as_deref(), path),
+        ExportFormat::Tiff => encode_tiff(rgb_bytes, width, height, settings.tiff_bit_depth, settings.is_bw, &icc, exif, path, on_progress),
         ExportFormat::Jxl  => encode_jxl(rgb_bytes, width, height, &JxlOptions {
             lossless: settings.jxl_lossless,
             quality: settings.jxl_quality,
             effort: settings.jxl_effort,
             bit_depth: settings.jxl_depth(),
             greyscale,
-        }, &icc, path),
+        }, &icc, block.as_deref(), path),
     }
 }
 
@@ -209,6 +231,7 @@ fn encode_png(
     height: u32,
     compression: u8,
     icc: Vec<u8>,
+    exif: Option<Vec<u8>>,
     path: &Path,
     on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
@@ -223,6 +246,7 @@ fn encode_png(
 
     let mut info = png::Info::with_size(width, height);
     info.icc_profile = Some(Cow::Owned(icc));
+    info.exif_metadata = exif.map(Cow::Owned);
     info.color_type = png::ColorType::Rgb;
     info.bit_depth = png::BitDepth::Eight;
 
@@ -258,11 +282,15 @@ fn encode_jpeg(
     height: u32,
     quality: u8,
     icc: Vec<u8>,
+    exif: Option<Vec<u8>>,
     path: &Path,
 ) -> Result<(), String> {
     let file = File::create(path).map_err(|e| e.to_string())?;
     let mut encoder = JpegEncoder::new_with_quality(BufWriter::new(file), quality);
     encoder.set_icc_profile(icc).map_err(|e| e.to_string())?;
+    if let Some(exif) = exif {
+        encoder.set_exif_metadata(exif).map_err(|e| e.to_string())?;
+    }
     encoder
         .write_image(&rgb_bytes, width, height, image::ExtendedColorType::Rgb8)
         .map_err(|e| e.to_string())
@@ -278,6 +306,7 @@ fn encode_webp(
     quality: u8,
     compression: u8,
     icc: &[u8],
+    exif: Option<&[u8]>,
     path: &Path,
 ) -> Result<(), String> {
     let encoder = webp::Encoder::from_rgb(&rgb_bytes, width, height);
@@ -294,14 +323,17 @@ fn encode_webp(
         encoder.encode(quality as f32)
     };
 
-    let tagged = webp_with_profile(&mem, width, height, icc)?;
+    let tagged = webp_with_profile(&mem, width, height, icc, exif)?;
     std::fs::write(path, &tagged).map_err(|e| e.to_string())
 }
 
 /// Bit 5 of the VP8X flag byte: this file carries an ICC profile.
 const WEBP_ICC_FLAG: u8 = 0x20;
+/// Bit 3: this file carries an EXIF chunk.
+const WEBP_EXIF_FLAG: u8 = 0x08;
 
-/// Rewrap a bare WebP bitstream in the extended format, carrying a profile.
+/// Rewrap a bare WebP bitstream in the extended format, carrying a profile and
+/// optionally EXIF.
 ///
 /// libwebp writes the simple format — one `VP8 ` or `VP8L` chunk and nothing
 /// else — which has nowhere to put a profile. The extended format does, at the
@@ -312,6 +344,7 @@ fn webp_with_profile(
     width: u32,
     height: u32,
     icc: &[u8],
+    exif: Option<&[u8]>,
 ) -> Result<Vec<u8>, String> {
     const HEADER: usize = 12;
 
@@ -325,7 +358,7 @@ fn webp_with_profile(
     }
 
     let mut vp8x = [0u8; 10];
-    vp8x[0] = WEBP_ICC_FLAG;
+    vp8x[0] = WEBP_ICC_FLAG | if exif.is_some() { WEBP_EXIF_FLAG } else { 0 };
     vp8x[4..7].copy_from_slice(&(width - 1).to_le_bytes()[..3]);
     vp8x[7..10].copy_from_slice(&(height - 1).to_le_bytes()[..3]);
 
@@ -336,6 +369,10 @@ fn webp_with_profile(
     riff_chunk(&mut out, b"VP8X", &vp8x);
     riff_chunk(&mut out, b"ICCP", icc);
     out.extend_from_slice(&webp[HEADER..]);
+    // The specification places metadata after the image data.
+    if let Some(exif) = exif {
+        riff_chunk(&mut out, b"EXIF", exif);
+    }
 
     let size = u32::try_from(out.len() - 8).map_err(|_| "WebP file is too large".to_string())?;
     out[4..8].copy_from_slice(&size.to_le_bytes());
@@ -355,12 +392,12 @@ fn riff_chunk(out: &mut Vec<u8>, fourcc: &[u8; 4], payload: &[u8]) {
 
 // ── TIFF ──────────────────────────────────────────────────────────────────────
 
-/// The profile as TIFF's `InterColorProfile` tag wants it: bytes of undefined
-/// type. A plain `[u8]` would be written as BYTE, which is a different tag type
-/// from the one the specification names.
-struct IccProfile<'a>(&'a [u8]);
+/// Bytes of undefined type, as the `InterColorProfile` and `ExifVersion` tags
+/// want them. A plain `[u8]` would be written as BYTE, which is a different tag
+/// type from the one the specification names.
+struct Undefined<'a>(&'a [u8]);
 
-impl TiffValue for IccProfile<'_> {
+impl TiffValue for Undefined<'_> {
     const BYTE_LEN: u8 = 1;
     const FIELD_TYPE: Type = Type::UNDEFINED;
 
@@ -380,6 +417,7 @@ fn encode_tiff(
     bit_depth: u8,
     is_bw: bool,
     icc: &[u8],
+    exif: Option<&ExifTags>,
     path: &Path,
     on_progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
@@ -387,22 +425,36 @@ fn encode_tiff(
     let mut encoder =
         TiffEncoder::new(BufWriter::new(file)).map_err(|e| e.to_string())?;
 
+    // A TIFF is itself the structure EXIF borrows, so the tags go in natively:
+    // the EXIF directory first, since the image's directory has to point at it.
+    let exif_offset = match exif.filter(|t| !t.exif.is_empty()) {
+        Some(tags) => {
+            let mut directory = encoder.extra_directory().map_err(|e| e.to_string())?;
+            for entry in &tags.exif {
+                write_exif_tag(&mut directory, entry)?;
+            }
+            Some(directory.finish_with_offsets().map_err(|e| e.to_string())?.offset)
+        }
+        None => None,
+    };
+    let primary = exif.map_or(&[][..], |t| &t.primary[..]);
+
     // In BW mode R=G=B, so the greyscale paths take the red channel and ignore
     // the rest. render_image already produced u16 little-endian for 16-bit.
     let u16_at = |at: usize| u16::from_le_bytes([rgb_bytes[at], rgb_bytes[at + 1]]);
 
     match (bit_depth, is_bw) {
         (8, false) => write_tiff::<_, colortype::RGB8, _>(
-            &mut encoder, width, height, icc, on_progress, |i| rgb_bytes[i],
+            &mut encoder, width, height, icc, primary, exif_offset, on_progress, |i| rgb_bytes[i],
         ),
         (8, true) => write_tiff::<_, colortype::Gray8, _>(
-            &mut encoder, width, height, icc, on_progress, |i| rgb_bytes[i * 3],
+            &mut encoder, width, height, icc, primary, exif_offset, on_progress, |i| rgb_bytes[i * 3],
         ),
         (16, false) => write_tiff::<_, colortype::RGB16, _>(
-            &mut encoder, width, height, icc, on_progress, |i| u16_at(i * 2),
+            &mut encoder, width, height, icc, primary, exif_offset, on_progress, |i| u16_at(i * 2),
         ),
         (16, true) => write_tiff::<_, colortype::Gray16, _>(
-            &mut encoder, width, height, icc, on_progress, |i| u16_at(i * 6),
+            &mut encoder, width, height, icc, primary, exif_offset, on_progress, |i| u16_at(i * 6),
         ),
         _ => Err(format!("Unsupported TIFF bit depth: {}", bit_depth)),
     }
@@ -413,11 +465,14 @@ fn encode_tiff(
 /// Strip-wise rather than in one call so that no path needs a second copy of
 /// the image: the samples a strip wants are built as it is written, and a
 /// 16-bit RGB export is already the largest buffer in the process.
+#[allow(clippy::too_many_arguments)]
 fn write_tiff<W, C, F>(
     encoder: &mut TiffEncoder<W>,
     width: u32,
     height: u32,
     icc: &[u8],
+    primary: &[ExifEntry],
+    exif_offset: Option<u32>,
     on_progress: &mut dyn FnMut(f32),
     sample: F,
 ) -> Result<(), String>
@@ -434,8 +489,17 @@ where
     // Tags belong to the directory, so this has to precede the image data.
     image
         .encoder()
-        .write_tag(Tag::IccProfile, IccProfile(icc))
+        .write_tag(Tag::IccProfile, Undefined(icc))
         .map_err(|e| e.to_string())?;
+    for entry in primary {
+        write_exif_tag(image.encoder(), entry)?;
+    }
+    if let Some(offset) = exif_offset {
+        image
+            .encoder()
+            .write_tag(Tag::ExifDirectory, offset)
+            .map_err(|e| e.to_string())?;
+    }
 
     let total = width as usize * height as usize * C::SAMPLE_FORMAT.len();
     let mut at = 0usize;
@@ -455,4 +519,21 @@ where
     }
 
     image.finish().map_err(|e| e.to_string())
+}
+
+fn write_exif_tag<W: Write + Seek>(
+    directory: &mut tiff::encoder::DirectoryEncoder<'_, W, tiff::encoder::TiffKindStandard>,
+    (tag, value): &ExifEntry,
+) -> Result<(), String> {
+    use tiff::encoder::{Rational, SRational};
+    let tag = Tag::Unknown(*tag);
+    match value {
+        ExifValue::Ascii(s) => directory.write_tag(tag, s.as_str()),
+        ExifValue::Short(v) => directory.write_tag(tag, *v),
+        ExifValue::Long(v) => directory.write_tag(tag, *v),
+        ExifValue::Rational(n, d) => directory.write_tag(tag, Rational { n: *n, d: *d }),
+        ExifValue::SRational(n, d) => directory.write_tag(tag, SRational { n: *n, d: *d }),
+        ExifValue::Undefined(b) => directory.write_tag(tag, Undefined(b)),
+    }
+    .map_err(|e| e.to_string())
 }

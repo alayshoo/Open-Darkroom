@@ -16,6 +16,7 @@
         undo = () => {},
         redo = () => {},
         open = () => {},
+        exportImage = () => {},
         copyAdjustments = () => {},
         pasteAdjustments = () => {},
         resetAdjustments = () => {},
@@ -27,6 +28,7 @@
         undo?: () => void;
         redo?: () => void;
         open?: () => void;
+        exportImage?: () => void;
         copyAdjustments?: () => void;
         pasteAdjustments?: () => void;
         resetAdjustments?: () => void;
@@ -94,7 +96,11 @@
                         action: open,
                     },
                     { separator: true },
-                    { label: "Export…", shortcut: "Ctrl+Shift+E" },
+                    {
+                        label: "Export…",
+                        shortcut: shortcuts.display("exportImage"),
+                        action: exportImage,
+                    },
                     { separator: true },
                     {
                         label: "Settings",
