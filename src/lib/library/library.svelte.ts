@@ -308,11 +308,6 @@ class Library {
         );
     };
 
-    /** How many rolls are shot on a stock. */
-    rollsOnStock(id: number) {
-        return this.rolls.filter((r) => r.stockId === id).length;
-    }
-
     deleteStock = async (id: number) => {
         const stock = this.filmStocks.find((s) => s.id === id);
         if (!stock) return;

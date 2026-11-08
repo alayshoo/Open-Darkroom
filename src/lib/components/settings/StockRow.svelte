@@ -16,7 +16,6 @@
     let { stock, open = false, ontoggle }: { stock: FilmStock; open?: boolean; ontoggle: () => void } = $props();
 
     let armed = $state(false);
-    let rolls = $derived(library.rollsOnStock(stock.id));
     let summary = $derived(
         [stock.boxIso ? `ISO ${stock.boxIso}` : null, kindLabel(stock.kind), stock.process, stock.formats.join(", ")]
             .filter(Boolean)
@@ -51,9 +50,6 @@
         <FilmCanister colour={stock.colour} colour2={stock.colour2} size={22} />
         <span class="name">{stock.name || "Untitled stock"}</span>
         <span class="summary flex-1">{summary}</span>
-        {#if rolls > 0}
-            <span class="rolls">{rolls} roll{rolls === 1 ? "" : "s"}</span>
-        {/if}
         <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
@@ -137,11 +133,7 @@
             </div>
             <div class="footer wide flex items-center justify-end">
                 <button class="text-button danger" class:armed onclick={remove} onblur={() => (armed = false)}>
-                    {armed
-                        ? rolls > 0
-                            ? `Delete? ${rolls} roll${rolls === 1 ? " keeps" : "s keep"} its name`
-                            : "Click again to delete"
-                        : "Delete stock"}
+                    {armed ? "Click again to delete" : "Delete stock"}
                 </button>
             </div>
         </div>
@@ -171,8 +163,7 @@
         white-space: nowrap;
     }
 
-    .summary,
-    .rolls {
+    .summary {
         font-size: 12px;
         color: var(--color3);
         white-space: nowrap;
