@@ -32,14 +32,16 @@ const FRESH_THUMBNAIL_WAIT_MS = 350;
 // The least time between two looks for moved files on coming back to the window.
 const FOCUS_SEARCH_GAP_MS = 30_000;
 
-/** The open image's edit and undo history, as they are stored. */
-type Saved = { edit: string; history: string };
+/** The open image's edit, and its undo history as it stands, written out only when it is saved. */
+type Saved = { edit: string; history: EditHistory };
 
 function openSaved(): Saved {
-    return {
-        edit: serializeImageEdit(editor.edit),
-        history: serializeEditHistory({ steps: history.stack, pointer: history.pointer }),
-    };
+    return { edit: serializeImageEdit(editor.edit), history: { steps: history.stack.slice(), pointer: history.pointer } };
+}
+
+/** Steps never change once taken, so the same steps in the same order are the same history. */
+function sameHistory(a: EditHistory, b: EditHistory) {
+    return a.pointer === b.pointer && a.steps.length === b.steps.length && a.steps.every((step, i) => step === b.steps[i]);
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -725,7 +727,7 @@ class Library {
 
     #scheduleSave(id: number, saved: Saved) {
         const last = this.#lastSaved.get(id);
-        if (last?.edit === saved.edit && last.history === saved.history) return;
+        if (last?.edit === saved.edit && sameHistory(last.history, saved.history)) return;
         this.#pendingSave = { id, ...saved };
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
         this.#saveTimer = setTimeout(() => void this.flushSave(), SAVE_DELAY_MS);
@@ -743,7 +745,7 @@ class Library {
         if (!pending) return;
         const { id, ...saved } = pending;
         try {
-            const edited = await api.saveEdit(id, saved.edit, saved.history);
+            const edited = await api.saveEdit(id, saved.edit, serializeEditHistory(saved.history));
             this.#lastSaved.set(id, saved);
             this.images = this.images.map((i) => (i.id === id ? { ...i, edited } : i));
         } catch (e) {

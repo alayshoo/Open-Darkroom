@@ -425,6 +425,18 @@ describe("opening an image", () => {
         await vi.waitFor(() => expect(library.images.find((i) => i.id === 2)!.edited).toBe(1234));
     });
 
+    it("saves the history as it is undone and redone", async () => {
+        const saves = () => called("catalog_save_edit").map((c) => parseEditHistory(c.args.history));
+        const before = saves().length;
+        editor.undo();
+        await vi.waitFor(() => expect(saves().length).toBe(before + 1));
+        expect(saves().at(-1)).toMatchObject({ pointer: -1, steps: [{ key: "exposure" }] });
+        editor.redo();
+        await vi.waitFor(() => expect(saves().length).toBe(before + 2));
+        expect(saves().at(-1)).toMatchObject({ pointer: 0, steps: [{ key: "exposure" }] });
+        expect(editor.edit.sliders.exposure).toBe(1);
+    });
+
     it("goes back with the arrow above the crop tool, and in again without reopening", async () => {
         const arrow = $<HTMLButtonElement>('.toolbar [aria-label="Back to library"]')!;
         const crop = $<HTMLButtonElement>('.toolbar [aria-label="Crop"]')!;
