@@ -123,11 +123,7 @@ class Library {
         const id = this.view?.kind === "library" ? this.view.id : this.currentRoll?.libraryId;
         return this.libraries.find((l) => l.id === id) ?? null;
     });
-    /**
-     * The images the grid shows: a roll's frames, or a library's loose images.
-     * With rolls not grouped, a library shows every image in it, each roll's
-     * frames in turn and then the loose ones.
-     */
+    /** A roll's frames, or a library's loose images; ungrouped, every roll's frames come first. */
     shownImages = $derived.by(() => {
         const view = this.view;
         if (!view) return [];
@@ -303,10 +299,7 @@ class Library {
         return stock ? stockLabel(stock) : (roll.info.filmStock ?? "");
     }
 
-    /**
-     * Puts a roll on a stock, or takes it off one. The box speed comes from the
-     * stock, and the rated speed follows it unless it was set apart.
-     */
+    /** Puts a roll on a stock, or off one. The rated speed follows the box speed unless set apart. */
     setRollStock = (rollId: number, stock: FilmStock | null) => {
         const roll = this.rolls.find((r) => r.id === rollId);
         if (!roll) return;
@@ -349,6 +342,8 @@ class Library {
         const stock = this.filmStocks.find((s) => s.id === id);
         if (!stock) return;
         try {
+            // A roll save still waiting would otherwise land after the delete, naming the stock.
+            await this.#saves.flush();
             await api.deleteStock(id);
             const label = stockLabel(stock);
             this.filmStocks = this.filmStocks.filter((s) => s.id !== id);
@@ -413,6 +408,7 @@ class Library {
         const gear = this.gear.find((g) => g.id === id);
         if (!gear) return;
         try {
+            await this.#saves.flush();
             await api.deleteGear(id);
             const label = gearLabel(gear);
             this.gear = this.gear.filter((g) => g.id !== id);
@@ -502,8 +498,10 @@ class Library {
         if (!place) return;
         try {
             const imported = await api.importFolder(place.libraryId, settings.importCopies);
+            if (!imported) return;
             this.#added(imported);
             if (imported.roll) this.show({ kind: "roll", id: imported.roll.id });
+            else if (imported.skipped.length === 0) this.notice = { text: "Every image in that folder is already in the catalog." };
         } catch (e) {
             this.#fail("The folder could not be imported", e);
         }
@@ -554,8 +552,7 @@ class Library {
     moveImages = async (ids: number[], place: Place) => {
         if (ids.length === 0) return;
         try {
-            await api.moveImages(ids, place);
-            await this.load();
+            this.#replace(await api.moveImages(ids, place));
             this.selection = this.selection.filter((id) => !ids.includes(id) || this.shownImages.some((i) => i.id === id));
         } catch (e) {
             this.#fail("The images could not be moved", e);
@@ -626,9 +623,14 @@ class Library {
         void this.findMoved();
     };
 
-    #putBack(records: ImageRecord[]) {
+    /** Takes on newer records of images already shown. */
+    #replace(records: ImageRecord[]) {
         const byId = new Map(records.map((r) => [r.id, r]));
         this.images = this.images.map((i) => byId.get(i.id) ?? i);
+    }
+
+    #putBack(records: ImageRecord[]) {
+        this.#replace(records);
         for (const record of records) {
             this.#thumbsAsked.delete(record.id);
             void this.requestThumbnail(record);
@@ -727,11 +729,16 @@ class Library {
 
     #scheduleSave(id: number, saved: Saved) {
         const last = this.#lastSaved.get(id);
-        if (last?.edit === saved.edit && sameHistory(last.history, saved.history)) return;
+        // The first look at an image just opened is what was stored for it.
+        if (!last) {
+            this.#lastSaved.set(id, saved);
+            return;
+        }
+        if (last.edit === saved.edit && sameHistory(last.history, saved.history)) return;
         this.#pendingSave = { id, ...saved };
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
         this.#saveTimer = setTimeout(() => void this.flushSave(), SAVE_DELAY_MS);
-        if (last?.edit === saved.edit) return;
+        if (last.edit === saved.edit) return;
         if (this.#thumbTimer) clearTimeout(this.#thumbTimer);
         this.#thumbTimer = setTimeout(() => this.#rerenderOpen(), THUMBNAIL_DELAY_MS);
     }
@@ -749,6 +756,8 @@ class Library {
             this.#lastSaved.set(id, saved);
             this.images = this.images.map((i) => (i.id === id ? { ...i, edited } : i));
         } catch (e) {
+            // Tried again with the next flush, unless a newer edit has taken its place.
+            this.#pendingSave ??= pending;
             this.#fail("The edit could not be saved", e);
         }
     };
@@ -785,9 +794,8 @@ class Library {
         } catch (e) {
             console.error("Failed to read the stored edit:", e);
         }
-        const opened = await editor.openLibraryImage(image.path, image.id, stored, storedHistory);
-        if (opened) this.#lastSaved.set(image.id, openSaved());
-        return opened;
+        this.#lastSaved.delete(image.id);
+        return editor.openLibraryImage(image.path, image.id, stored, storedHistory);
     }
 
     /** Opens an image, flying it from its cell into the editor. */

@@ -10,7 +10,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::ExtendedColorType;
 
 use crate::crop::CropPayload;
-use crate::export_rendering::{render_cropped_image, SlidersPayload};
+use crate::export_rendering::{chunk_rows_for_margin, render_cropped_in_view, sharp_margin_rows, SlidersPayload, ViewPayload};
 use crate::icc::SourceSpace;
 use crate::image_opening::{decode_path, downscale_to_max_edge};
 use crate::output_space::OutputSpace;
@@ -27,14 +27,26 @@ pub struct ThumbnailSource {
     pub pixels: Vec<u16>,
     pub width: u32,
     pub height: u32,
+    /// The size of the image it was shrunk from.
+    pub full_width: u32,
+    pub full_height: u32,
     pub channels: usize,
     pub space: SourceSpace,
 }
 
 impl ThumbnailSource {
     pub fn from_pixels(path: &Path, pixels: &[u16], width: u32, height: u32, channels: usize, space: SourceSpace) -> Self {
-        let (pixels, width, height) = downscale_to_max_edge(pixels, width, height, channels, THUMBNAIL_EDGE);
-        Self { path: path.to_path_buf(), pixels, width, height, channels, space }
+        let (pixels, shrunk_width, shrunk_height) = downscale_to_max_edge(pixels, width, height, channels, THUMBNAIL_EDGE);
+        Self {
+            path: path.to_path_buf(),
+            pixels,
+            width: shrunk_width,
+            height: shrunk_height,
+            full_width: width,
+            full_height: height,
+            channels,
+            space,
+        }
     }
 
     /// Decodes the file and keeps only the shrunk copy.
@@ -63,7 +75,12 @@ pub async fn render_thumbnail(
     crop: &CropPayload,
     retouch: &[RetouchPayload],
 ) -> Result<Vec<u8>, String> {
-    let rendered = render_cropped_image(
+    let view = ViewPayload {
+        render_scale: source.width as f32 / source.full_width.max(1) as f32,
+        full_width: source.full_width as f32,
+        full_height: source.full_height as f32,
+    };
+    let rendered = render_cropped_in_view(
         &source.pixels,
         source.width,
         source.height,
@@ -74,6 +91,8 @@ pub async fn render_thumbnail(
         &source.space,
         OutputSpace::Srgb,
         8,
+        chunk_rows_for_margin(sharp_margin_rows(sliders, source.width, source.height)),
+        view,
         |_| {},
     )
     .await?;

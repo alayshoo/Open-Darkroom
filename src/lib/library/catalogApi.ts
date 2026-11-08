@@ -91,11 +91,14 @@ export const updateGear = (id: number, gear: GearFields) => invoke<void>("catalo
 export const deleteGear = (id: number) => invoke<void>("catalog_delete_gear", { id });
 
 export const importFiles = (place: Place, copy: boolean) => invoke<Imported>("catalog_import_files", { place, copy });
+/** Null when the picker is dismissed. */
 export const importFolder = (libraryId: number, copy: boolean) =>
-    invoke<Imported>("catalog_import_folder", { libraryId, copy });
+    invoke<Imported | null>("catalog_import_folder", { libraryId, copy });
 export const openFile = (place: Place, copy: boolean) => invoke<ImageRecord | null>("catalog_open_file", { place, copy });
 
-export const moveImages = (ids: number[], place: Place) => invoke<void>("catalog_move_images", { ids, place });
+/** The moved images' records as they now stand. */
+export const moveImages = async (ids: number[], place: Place) =>
+    (await invoke<ImageRecord[] | null>("catalog_move_images", { ids, place })) ?? [];
 export const removeImages = (ids: number[]) => invoke<void>("catalog_remove_images", { ids });
 export const setFrameInfo = (id: number, info: FrameInfo) => invoke<void>("catalog_set_frame_info", { id, info });
 export interface MovedFiles {

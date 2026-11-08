@@ -413,6 +413,11 @@ describe("opening an image", () => {
         expect(document.querySelector(".library-flyer")).toBeNull();
     });
 
+    it("does not save an edit only for opening the image", async () => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(called("catalog_save_edit").filter((c) => c.args.id === 2)).toHaveLength(0);
+    });
+
     it("saves the edit as it changes, once it settles", async () => {
         const before = called("catalog_save_edit").length;
         editor.edit.sliders.contrast = 20;

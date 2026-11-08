@@ -3,6 +3,7 @@
 // The catalog and thumbnails as Tauri commands. The catalog is opened once,
 // in the app's data directory, when the app starts.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -13,8 +14,8 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::catalog::{
-    find_moved, folder_images, search_roots, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Skipped,
-    Snapshot, StockFields,
+    find_moved, fingerprint, folder_images, prepare_import, search_roots, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place,
+    Roll, RollGear, Skipped, Snapshot, StockFields, Target,
 };
 use crate::crop::CropPayload;
 use crate::export_rendering::SlidersPayload;
@@ -136,6 +137,16 @@ fn pick_images(app: &tauri::AppHandle) -> Option<Vec<PathBuf>> {
     Some(picked.into_iter().filter_map(|p| p.into_path().ok()).collect())
 }
 
+/// Imports `paths`, leaving the catalog free while the files are read and copied.
+async fn import_paths(state: &CatalogState, paths: Vec<PathBuf>, target: Target, copy: bool) -> Result<Imported, String> {
+    let plan = with_catalog(state, |c| c.plan_import(target, copy))?;
+    let prepared = tauri::async_runtime::spawn_blocking(move || prepare_import(plan, &paths))
+        .await
+        .map_err(|e| e.to_string())??;
+    let (roll, import) = with_catalog(state, |c| c.record_import(prepared))?;
+    Ok(Imported { roll, images: import.images, skipped: import.skipped })
+}
+
 /// Picks files and adds them to a library or roll. Nothing is imported when
 /// the picker is dismissed, and files that cannot be read are skipped.
 #[tauri::command]
@@ -148,21 +159,20 @@ pub(crate) async fn catalog_import_files(
     let Some(paths) = pick_images(&app) else {
         return Ok(Imported::nothing());
     };
-    let import = with_catalog(&state, |c| c.import(&paths, place, copy))?;
-    Ok(Imported { roll: None, images: import.images, skipped: import.skipped })
+    import_paths(&state, paths, Target::Place(place), copy).await
 }
 
 /// Picks a folder and makes a roll of the images directly inside it, named
-/// after it and numbered in file name order.
+/// after it and numbered in file name order. None when the picker is dismissed.
 #[tauri::command]
 pub(crate) async fn catalog_import_folder(
     app: tauri::AppHandle,
     state: tauri::State<'_, CatalogState>,
     library_id: i64,
     copy: bool,
-) -> Result<Imported, String> {
+) -> Result<Option<Imported>, String> {
     let Some(folder) = app.dialog().file().blocking_pick_folder() else {
-        return Ok(Imported::nothing());
+        return Ok(None);
     };
     let folder = folder.into_path().map_err(|e| e.to_string())?;
     let paths = folder_images(&folder, &image_extensions())?;
@@ -170,8 +180,7 @@ pub(crate) async fn catalog_import_folder(
         return Err(format!("There are no images in {}", folder.display()));
     }
     let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Roll".into());
-    let (roll, import) = with_catalog(&state, |c| c.import_roll(library_id, &name, &paths, copy))?;
-    Ok(Imported { roll, images: import.images, skipped: import.skipped })
+    import_paths(&state, paths, Target::NewRoll { library_id, name }, copy).await.map(Some)
 }
 
 /// Picks one file to open. It is added to `place` unless the catalog already
@@ -189,16 +198,15 @@ pub(crate) async fn catalog_open_file(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    with_catalog(&state, |c| {
-        if let Some(id) = c.find_by_file(&path)? {
-            return c.image(id).map(Some);
-        }
-        let mut import = c.import(&[path], place, copy)?;
-        match import.skipped.pop() {
-            Some(skipped) => Err(skipped.reason),
-            None => Ok(import.images.pop()),
-        }
-    })
+    let (_, print) = fingerprint(&path)?;
+    if let Some(id) = with_catalog(&state, |c| c.find_by_fingerprint(&print))? {
+        return with_catalog(&state, |c| c.image(id)).map(Some);
+    }
+    let mut imported = import_paths(&state, vec![path], Target::Place(place), copy).await?;
+    match imported.skipped.pop() {
+        Some(skipped) => Err(skipped.reason),
+        None => Ok(imported.images.pop()),
+    }
 }
 
 #[tauri::command]
@@ -206,7 +214,7 @@ pub(crate) fn catalog_move_images(
     state: tauri::State<'_, CatalogState>,
     ids: Vec<i64>,
     place: Place,
-) -> Result<(), String> {
+) -> Result<Vec<ImageRecord>, String> {
     with_catalog(&state, |c| c.move_images(&ids, place))
 }
 
@@ -243,16 +251,29 @@ pub struct MovedFiles {
     pub missing: Vec<i64>,
 }
 
+/// Images an automatic search has already looked for and not found. They are
+/// looked for again on the next launch, or when a file is located by hand.
+static NOT_FOUND: Mutex<Option<HashSet<i64>>> = Mutex::new(None);
+
 /// Looks for the files that are not where they were, around where they were
 /// and around `near`, a file just located. The catalog is free while it looks.
 #[tauri::command]
 pub(crate) async fn catalog_find_moved(state: tauri::State<'_, CatalogState>, near: Option<String>) -> Result<MovedFiles, String> {
     let (missing, photo_folder) = with_catalog(&state, |c| Ok((c.missing_files()?, c.photo_folder()?)))?;
-    if missing.is_empty() {
-        return Ok(MovedFiles { found: vec![], missing: vec![] });
+    let looking: Vec<_> = {
+        let mut not_found = NOT_FOUND.lock().unwrap_or_else(|e| e.into_inner());
+        let not_found = not_found.get_or_insert_with(HashSet::new);
+        not_found.retain(|id| missing.iter().any(|m| m.id == *id));
+        match near {
+            Some(_) => missing.clone(),
+            None => missing.iter().filter(|m| !not_found.contains(&m.id)).cloned().collect(),
+        }
+    };
+    if looking.is_empty() {
+        return Ok(MovedFiles { found: vec![], missing: missing.iter().map(|m| m.id).collect() });
     }
     let near = near.map(PathBuf::from).and_then(|p| p.parent().map(PathBuf::from));
-    let looking = missing.clone();
+    let searched: Vec<i64> = looking.iter().map(|m| m.id).collect();
     let moved = tauri::async_runtime::spawn_blocking(move || {
         let roots = search_roots(&looking, near.as_deref(), photo_folder.as_deref());
         find_moved(&looking, &roots)
@@ -261,6 +282,8 @@ pub(crate) async fn catalog_find_moved(state: tauri::State<'_, CatalogState>, ne
     .map_err(|e| e.to_string())?;
     with_catalog(&state, |c| {
         let found: Vec<ImageRecord> = moved.iter().filter_map(|(id, path)| c.relink(*id, path).ok()).collect();
+        let unfound = searched.into_iter().filter(|id| !found.iter().any(|f| f.id == *id));
+        NOT_FOUND.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).extend(unfound);
         let missing = missing.iter().map(|m| m.id).filter(|id| !found.iter().any(|f| f.id == *id)).collect();
         Ok(MovedFiles { found, missing })
     })
@@ -308,8 +331,7 @@ pub(crate) fn catalog_thumbnail(state: tauri::State<'_, CatalogState>, id: i64) 
 }
 
 /// Renders an image's thumbnail with the edit given, stores it and returns it.
-///
-/// An image open in the editor is shrunk from the pixels already held. Any
+/// An image open in the editor is shrunk from the pixels already held; any
 /// other is decoded, and only its shrunk copy is kept.
 #[tauri::command]
 pub(crate) async fn catalog_render_thumbnail(
@@ -348,6 +370,10 @@ pub(crate) async fn catalog_render_thumbnail(
     };
 
     let jpeg = render_thumbnail(&source, &sliders, &crop, &retouch).await?;
-    std::fs::write(&target, &jpeg).map_err(|e| e.to_string())?;
+    // Stored only while the id still names the same file, since a removed image's id can be reused.
+    with_catalog(&catalog, |c| match c.image(id) {
+        Ok(now) if now.path == record.path => std::fs::write(&target, &jpeg).map_err(|e| e.to_string()),
+        _ => Err(format!("Image {id} changed while its thumbnail rendered")),
+    })?;
     Ok(Response::new(jpeg))
 }

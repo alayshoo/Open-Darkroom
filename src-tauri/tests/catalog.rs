@@ -147,6 +147,22 @@ fn a_folder_of_files_that_cannot_be_read_makes_no_roll() {
 }
 
 #[test]
+fn a_folder_already_in_the_catalog_makes_no_roll_or_folder() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let photos = scratch.path("Photos");
+    c.set_photo_folder(&photos).unwrap();
+    let a = scratch.image("a.png", 1);
+    c.import(&[a.clone()], loose(library.id), false).unwrap();
+
+    let (roll, import) = c.import_roll(library.id, "Again", &[a], true).unwrap();
+    assert!(roll.is_none() && import.images.is_empty() && import.skipped.is_empty());
+    assert!(c.snapshot().unwrap().rolls.is_empty());
+    assert!(!photos.join("Personal").join("Again").exists());
+}
+
+#[test]
 fn an_import_that_fails_adds_nothing() {
     let scratch = Scratch::new();
     let c = catalog(&scratch);

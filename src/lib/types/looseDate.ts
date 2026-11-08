@@ -33,11 +33,8 @@ const monthNamed = (word: string) => {
     return i >= 0 ? i : null;
 };
 
-/**
- * Reads "2024", "2024-03", "2024-03-12", "March 2024", "12 March 2024" and
- * "March 12, 2024". Null for anything else, including 12/03/2024, which could
- * be either day or month first.
- */
+/** Reads "2024", "2024-03", "2024-03-12", "March 2024", "12 March 2024" and "March 12, 2024".
+ *  Null for anything else, including 12/03/2024, which could be either day or month first. */
 export function readLooseDate(text: string | undefined): DaySpan | null {
     const t = (text ?? "").trim().toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, "$1");
     if (!t) return null;

@@ -40,10 +40,8 @@ export function nextFrame(): Promise<void> {
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-/**
- * Flies `src` from one rect to another and resolves once it has landed. The
- * flyer is left in place for the caller to hand over from, then remove.
- */
+/** Flies `src` from one rect to another and resolves once it has landed. The
+ *  flyer is left in place for the caller to hand over from, then remove. */
 export async function fly(src: string, from: Rect, to: Rect): Promise<HTMLImageElement> {
     const el = document.createElement("img");
     el.src = src;
