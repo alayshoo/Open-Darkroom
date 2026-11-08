@@ -126,7 +126,7 @@ Settled by the prototype, not ahead of it:
   roll and one thumbnail per file with no ambiguity. Libraries are not tied to
   folders on disk, since scanner software often puts a whole session in one
   folder and folders get renamed. The alternative, an image in several places at
-  once, is better served later by collections.
+  once, is better served later by albums.
 - **How rolls are made.** Importing a folder as a roll, making an empty roll and
   dragging frames in, or both.
 - **Importing.** Reference files in place (proposed), or offer to copy them into
@@ -138,7 +138,7 @@ Settled by the prototype, not ahead of it:
 Out of scope for the first version, and possible without changing the model
 above:
 
-- **Collections**: albums or smart groupings that cut across libraries.
+- **Albums**: groupings that cut across libraries, picked by hand or kept up to date by a rule.
 - **Virtual copies**: one file with more than one edit.
 - **Contact sheets**: a roll laid out as one, on screen and as an export.
 - **Roll information in exports**: film stock, camera and lens written into the
