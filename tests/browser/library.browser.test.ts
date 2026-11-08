@@ -238,7 +238,9 @@ describe("the library", () => {
         expect(offered).toEqual(["Nikon Nikkor 50mm f/1.8", "Set up a new lens in Settings…"]);
         lens.blur();
         await pick("Add a lens", "nikkor", "Nikon Nikkor 50mm f/1.8");
-        await pick("Add a lens", "Helios 44-2", "Add “Helios 44-2” as a new lens");
+        await pick("Add a lens", "Helios 44-2", "Set up “Helios 44-2” in Settings…");
+        await vi.waitFor(() => expect(settings.open).toBe(true));
+        settings.close();
         await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.lenses).toEqual([3, 10]));
         expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "lens", name: "Helios 44-2", mount: "F" });
         expect([...document.querySelectorAll(".lenses .chip .name")].map((c) => c.textContent)).toEqual([
@@ -257,31 +259,44 @@ describe("the library", () => {
     it("sets up new gear in Settings from the roll, already on the roll", async () => {
         const SettingsModal = (await import("$lib/components/settings/SettingsModal.svelte")).default;
         const modal = mount(SettingsModal, { target: document.body });
-        const scanner = $<HTMLInputElement>('[role=combobox][aria-label="Scanner"]')!;
-        scanner.focus();
-        await userEvent.keyboard("Coolscan");
-        const setUp = await vi.waitFor(() => {
-            const found = [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")].find((o) =>
-                o.textContent?.includes("Set up a new scanner in Settings…"),
-            );
-            expect(found).toBeDefined();
-            return found!;
+        const developer = $<HTMLInputElement>('[role=combobox][aria-label="Developer"]')!;
+        developer.focus();
+        await userEvent.keyboard("HC-110");
+        const labels = await vi.waitFor(() => {
+            const found = [...document.querySelectorAll(".picker [role=option]")].map((o) => o.textContent?.replace(/\s+/g, " ").trim());
+            expect(found.length).toBeGreaterThan(0);
+            return found;
         });
-        setUp.click();
+        expect(labels).toEqual(["Set up “HC-110” in Settings…", "No chemistry setup"]);
+        [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")][0].click();
         await vi.waitFor(() => expect(settings.open).toBe(true));
-        expect(settings.section).toBe("gear");
-        const created = called("catalog_create_gear").at(-1)?.args.gear;
-        expect(created).toMatchObject({ kind: "scanner", name: "Coolscan" });
+        expect(settings.section).toBe("home-lab");
+        expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "chemistry", name: "HC-110" });
         const row = await vi.waitFor(() => {
             const open = $(".record.open");
             expect(open).not.toBeNull();
             return open!;
         });
-        expect(row.querySelector<HTMLInputElement>("input[placeholder='Flextight X1']")?.value).toBe("Coolscan");
-        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.scanner).toBe(nextGear - 1));
+        expect(row.querySelector<HTMLInputElement>("input[placeholder='Rodinal']")?.value).toBe("HC-110");
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.chemistry).toBe(nextGear - 1));
         settings.close();
         await vi.waitFor(() => expect($(".record")).toBeNull());
         unmount(modal);
+    });
+
+    it("adds a scanner by its name alone", async () => {
+        const scanner = $<HTMLInputElement>('[role=combobox][aria-label="Scanner"]')!;
+        scanner.focus();
+        await userEvent.keyboard("Nikon Coolscan V");
+        const labels = await vi.waitFor(() => {
+            const found = [...document.querySelectorAll(".picker [role=option]")].map((o) => o.textContent?.replace(/\s+/g, " ").trim());
+            expect(found.length).toBeGreaterThan(0);
+            return found;
+        });
+        expect(labels).toEqual(["+ Add “Nikon Coolscan V” as a new scanner"]);
+        [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")][0].click();
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.scanner).toBe(nextGear - 1));
+        expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "scanner", name: "Nikon Coolscan V" });
     });
 
     it("keeps the dates a roll was shot over as a range", async () => {

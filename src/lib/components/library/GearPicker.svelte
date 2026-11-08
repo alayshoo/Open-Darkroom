@@ -1,6 +1,7 @@
 <!-- lib/components/library/GearPicker.svelte -->
 <script lang="ts">
     // Picks the camera, scanner or chemistry a roll was shot, scanned or developed with.
+    // A scanner is only a name, so it is added from what is typed; the others are set up in Settings.
     import { library } from "$lib/library/library.svelte";
     import type { RollRecord } from "$lib/library/catalogApi";
     import { type Gear, gearLabel, matchesGear, newGear } from "$lib/types/gear";
@@ -42,7 +43,7 @@
     placeholder={`Choose a ${NOUNS[slot]}`}
     noun={NOUNS[slot]}
     onpick={(g) => library.setRollGear(roll.id, slot, g)}
-    onadd={add}
-    onsetup={setUp}
+    onadd={slot === "scanner" ? add : undefined}
+    onsetup={slot === "scanner" ? undefined : setUp}
     onclear={picked || value ? () => library.setRollGear(roll.id, slot, null) : undefined}
 />

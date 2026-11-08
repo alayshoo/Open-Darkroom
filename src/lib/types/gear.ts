@@ -13,7 +13,7 @@ export interface GearFields {
     name: string;
     /** Cameras and lenses: a roll on a camera is offered only the lenses that fit it. */
     mount: string;
-    /** Cameras and scanners. */
+    /** Cameras. */
     formats: string[];
     /** Chemistry. */
     process: StockProcess | "";

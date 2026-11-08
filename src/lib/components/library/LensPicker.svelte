@@ -19,15 +19,10 @@
         return library.gearOfKind("lens").filter((l) => !roll.gear.lenses.includes(l.id) && fits(l));
     });
 
-    async function add(text: string) {
-        const created = await library.createGear({ ...newGear("lens", text), mount });
-        if (created) library.addRollLens(roll.id, created);
-        return created;
-    }
-
     async function setUp(text: string) {
-        const created = await add(text);
+        const created = await library.createGear({ ...newGear("lens", text), mount });
         if (!created) return;
+        library.addRollLens(roll.id, created);
         library.editingGearId = created.id;
         settings.show("gear");
     }
@@ -68,7 +63,6 @@
         placeholder="Add a lens"
         noun="lens"
         onpick={(l) => library.addRollLens(roll.id, l)}
-        onadd={add}
         onsetup={setUp}
     />
 </div>

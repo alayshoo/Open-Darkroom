@@ -18,7 +18,7 @@
 
     let hints = $derived(PLACEHOLDERS[gear.kind]);
     let hasMount = $derived(gear.kind === "camera" || gear.kind === "lens");
-    let hasFormats = $derived(gear.kind === "camera" || gear.kind === "scanner");
+    let hasFormats = $derived(gear.kind === "camera");
 
     const update = (patch: Partial<Gear>) => library.updateGear(gear.id, patch);
 

@@ -150,7 +150,8 @@
         min-height: 0;
         overflow-y: auto;
         scrollbar-width: none;
-        padding: 14px 16px 20px;
+        /* Room below the last field for a picker's list to open into. */
+        padding: 14px 16px 290px;
         gap: 22px;
     }
 

@@ -30,7 +30,7 @@ pub struct GearFields {
 }
 
 /// What only some kinds of gear have: a mount for cameras and lenses, formats
-/// for cameras and scanners, and a process for chemistry.
+/// for cameras, and a process for chemistry.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GearDetails {

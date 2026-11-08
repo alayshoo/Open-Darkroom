@@ -32,7 +32,8 @@
         /** What a new one is called in the list, as in “Add “x” as a new stock”. */
         noun: string;
         onpick: (item: T) => void;
-        onadd: (text: string) => void;
+        /** Offered once something is typed: add it as a new one, by name alone. */
+        onadd?: (text: string) => void;
         /** Offered as the last option when the field can be emptied. */
         onclear?: () => void;
         /** Offered before clearing: make a new one and fill it in elsewhere, from what was typed. */
@@ -52,7 +53,7 @@
     // The rows the arrow keys walk: each match, then adding, setting up and clearing.
     let options = $derived<Option[]>([
         ...found,
-        ...(query.trim() !== "" && !exact ? (["add"] as const) : []),
+        ...(onadd && query.trim() !== "" && !exact ? (["add"] as const) : []),
         ...(onsetup ? (["setup"] as const) : []),
         ...(onclear ? (["clear"] as const) : []),
     ]);
@@ -68,7 +69,7 @@
         input?.blur();
         if (option === "clear") onclear?.();
         else if (option === "setup") onsetup?.(text);
-        else if (option === "add") onadd(text);
+        else if (option === "add") onadd?.(text);
         else onpick(option);
     }
 
@@ -136,7 +137,9 @@
                             <circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
                             <circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
                         </svg>
-                        <span class="label">Set up a new {noun} in Settings…</span>
+                        <span class="label">
+                            {query.trim() ? `Set up “${query.trim()}” in Settings…` : `Set up a new ${noun} in Settings…`}
+                        </span>
                     {:else if option === "clear"}
                         <span class="label muted">No {noun}</span>
                     {:else}

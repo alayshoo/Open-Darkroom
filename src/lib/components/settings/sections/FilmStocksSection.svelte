@@ -35,8 +35,7 @@
 </script>
 
 <div class="section flex flex-col gap-4">
-    <div class="intro flex items-center">
-        <p class="m-0 flex-1">The stocks a roll can be shot on. They are kept in the catalog and go with it.</p>
+    <div class="intro flex justify-end">
         <button class="add" onclick={add}>Add film stock</button>
     </div>
 
@@ -51,10 +50,7 @@
 
 <style>
     .intro {
-        gap: 16px;
         padding: 0 12px;
-        font-size: 12.5px;
-        color: var(--color3);
     }
 
     .add {

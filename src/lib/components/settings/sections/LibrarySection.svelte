@@ -19,17 +19,11 @@
 </script>
 
 <div class="section flex flex-col gap-4">
-    <SettingsGroup note="Images outside the photo folder stay where they are and the catalog points at them.">
-        <SettingsRow
-            label="Photo folder"
-            description={library.photoFolder ?? "Not chosen yet. Copied images go into a folder per library, and one per roll inside it."}
-        >
+    <SettingsGroup>
+        <SettingsRow label="Photo folder" description={library.photoFolder ?? "Not chosen yet"}>
             <button class="choose" onclick={choose}>{library.photoFolder ? "Change…" : "Choose…"}</button>
         </SettingsRow>
-        <SettingsRow
-            label="Copy imports into the photo folder"
-            description="Off, imports are referenced where they are, such as on an archive drive."
-        >
+        <SettingsRow label="Copy imports into the photo folder">
             <SettingsToggle
                 checked={settings.importCopies}
                 label="Copy imports into the photo folder"
@@ -39,10 +33,7 @@
     </SettingsGroup>
 
     <SettingsGroup title="Layout">
-        <SettingsRow
-            label="Group rolls in a library"
-            description="On, a library shows its rolls as cards above its loose images. Off, every image in the library is in one grid."
-        >
+        <SettingsRow label="Group rolls in a library">
             <SettingsToggle
                 checked={settings.groupRolls}
                 label="Group rolls in a library"
