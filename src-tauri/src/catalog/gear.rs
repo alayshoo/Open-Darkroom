@@ -30,15 +30,13 @@ pub struct GearFields {
 }
 
 /// What only some kinds of gear have: a mount for cameras and lenses, formats
-/// for cameras and scanners, and a recipe for chemistry.
+/// for cameras and scanners, and a process for chemistry.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GearDetails {
     pub mount: String,
     pub formats: Vec<String>,
     pub process: String,
-    pub dilution: String,
-    pub temperature: String,
 }
 
 impl GearFields {

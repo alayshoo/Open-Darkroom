@@ -1,27 +1,35 @@
 <!-- lib/components/library/LensPicker.svelte -->
 <script lang="ts">
-    // The lenses a roll was shot with: any number of them, those that fit its
-    // camera offered first.
+    // The lenses a roll was shot with: any number of them. Once its camera has a
+    // mount, only lenses on that mount, or with none given, are offered.
     import { library } from "$lib/library/library.svelte";
     import type { RollRecord } from "$lib/library/catalogApi";
     import { type Gear, gearLabel, matchesGear, newGear } from "$lib/types/gear";
     import Combobox from "./Combobox.svelte";
+    import { settings } from "$lib/settings/settings.svelte";
 
     let { roll }: { roll: RollRecord } = $props();
 
     let lenses = $derived(roll.gear.lenses.map((id) => library.gearOf(id)).filter((g): g is Gear => g !== null));
     // Lenses typed before they were in the catalog, or that were deleted from it.
     let unlisted = $derived(roll.info.lenses?.trim() ?? "");
-    let mount = $derived(library.gearOf(roll.gear.camera)?.mount.trim().toLowerCase() ?? "");
+    let mount = $derived(library.gearOf(roll.gear.camera)?.mount.trim() ?? "");
     let offered = $derived.by(() => {
-        const left = library.gearOfKind("lens").filter((l) => !roll.gear.lenses.includes(l.id));
-        const fits = (l: Gear) => mount !== "" && l.mount.trim().toLowerCase() === mount;
-        return [...left.filter(fits), ...left.filter((l) => !fits(l))];
+        const fits = (l: Gear) => !mount || !l.mount.trim() || l.mount.trim().toLowerCase() === mount.toLowerCase();
+        return library.gearOfKind("lens").filter((l) => !roll.gear.lenses.includes(l.id) && fits(l));
     });
 
     async function add(text: string) {
-        const created = await library.createGear(newGear("lens", text));
+        const created = await library.createGear({ ...newGear("lens", text), mount });
         if (created) library.addRollLens(roll.id, created);
+        return created;
+    }
+
+    async function setUp(text: string) {
+        const created = await add(text);
+        if (!created) return;
+        library.editingGearId = created.id;
+        settings.show("gear");
     }
 </script>
 
@@ -61,6 +69,7 @@
         noun="lens"
         onpick={(l) => library.addRollLens(roll.id, l)}
         onadd={add}
+        onsetup={setUp}
     />
 </div>
 

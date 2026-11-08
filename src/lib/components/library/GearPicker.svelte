@@ -5,6 +5,7 @@
     import type { RollRecord } from "$lib/library/catalogApi";
     import { type Gear, gearLabel, matchesGear, newGear } from "$lib/types/gear";
     import type { RollField } from "$lib/types/rollInfo";
+    import { settings } from "$lib/settings/settings.svelte";
     import Combobox from "./Combobox.svelte";
 
     let { roll, slot, label }: { roll: RollRecord; slot: "camera" | "scanner" | "chemistry"; label: string } = $props();
@@ -18,6 +19,14 @@
     async function add(text: string) {
         const created = await library.createGear(newGear(slot, text));
         if (created) library.setRollGear(roll.id, slot, created);
+    }
+
+    async function setUp(text: string) {
+        const created = await library.createGear(newGear(slot, text));
+        if (!created) return;
+        library.setRollGear(roll.id, slot, created);
+        library.editingGearId = created.id;
+        settings.show(slot === "chemistry" ? "home-lab" : "gear");
     }
 
     const meta = (g: Gear) => (slot === "chemistry" ? g.process : g.mount);
@@ -34,5 +43,6 @@
     noun={NOUNS[slot]}
     onpick={(g) => library.setRollGear(roll.id, slot, g)}
     onadd={add}
+    onsetup={setUp}
     onclear={picked || value ? () => library.setRollGear(roll.id, slot, null) : undefined}
 />

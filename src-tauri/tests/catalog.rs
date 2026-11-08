@@ -355,8 +355,6 @@ fn gear_is_kept_with_its_details_and_rolls_point_at_it() {
     let wide = c.create_gear(&gear("lens", "Nikon", "Nikkor 28mm f/2.8 AI-s", "F")).unwrap();
     let mut rodinal = gear("chemistry", "Adox", "Rodinal", "");
     rodinal.details.process = "B&W".into();
-    rodinal.details.dilution = "1+50".into();
-    rodinal.details.temperature = "20 °C".into();
     let rodinal = c.create_gear(&rodinal).unwrap();
 
     let mut renamed = camera.fields.clone();
@@ -365,7 +363,7 @@ fn gear_is_kept_with_its_details_and_rolls_point_at_it() {
     let stored = c.gear().unwrap();
     assert_eq!(stored.len(), 4);
     assert_eq!(stored.iter().find(|g| g.id == camera.id).unwrap().fields, renamed);
-    assert_eq!(stored.iter().find(|g| g.id == rodinal.id).unwrap().fields.details.dilution, "1+50");
+    assert_eq!(stored.iter().find(|g| g.id == rodinal.id).unwrap().fields.details.process, "B&W");
 
     let library = c.create_library("Personal").unwrap();
     let roll = c.create_roll(library.id, "Lisbon").unwrap();

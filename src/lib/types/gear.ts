@@ -11,14 +11,12 @@ export interface GearFields {
     kind: GearKind;
     maker: string;
     name: string;
-    /** Cameras and lenses: what a lens fits, so a camera's lenses can be offered first. */
+    /** Cameras and lenses: a roll on a camera is offered only the lenses that fit it. */
     mount: string;
     /** Cameras and scanners. */
     formats: string[];
-    /** Chemistry: its recipe. */
+    /** Chemistry. */
     process: StockProcess | "";
-    dilution: string;
-    temperature: string;
 }
 
 export interface Gear extends GearFields {
@@ -55,14 +53,14 @@ export function matchesGear(gear: GearFields, query: string): boolean {
 }
 
 export function newGear(kind: GearKind, name = ""): GearFields {
-    return { kind, maker: "", name: name.trim(), mount: "", formats: [], process: "", dilution: "", temperature: "" };
+    return { kind, maker: "", name: name.trim(), mount: "", formats: [], process: "" };
 }
 
 /** One line under its name: what sets it apart from the others of its kind. */
 export function gearSummary(gear: GearFields): string {
     const parts =
         gear.kind === "chemistry"
-            ? [gear.process, gear.dilution, gear.temperature]
+            ? [gear.process]
             : [gear.mount && `${gear.mount} mount`, gear.formats.join(", ")];
     return parts.filter(Boolean).join(" · ");
 }

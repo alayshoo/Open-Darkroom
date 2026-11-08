@@ -17,6 +17,7 @@
         onpick,
         onadd,
         onclear,
+        onsetup,
     }: {
         items: T[];
         label: (item: T) => string;
@@ -34,7 +35,11 @@
         onadd: (text: string) => void;
         /** Offered as the last option when the field can be emptied. */
         onclear?: () => void;
+        /** Offered before clearing: make a new one and fill it in elsewhere, from what was typed. */
+        onsetup?: (text: string) => void;
     } = $props();
+
+    type Option = "add" | "setup" | "clear" | T;
 
     const listId = $props.id();
     let open = $state(false);
@@ -44,10 +49,11 @@
 
     let found = $derived(items.filter((item) => matches(item, query)));
     let exact = $derived(found.some((item) => label(item).toLowerCase() === query.trim().toLowerCase()));
-    // The rows the arrow keys walk: each match, then adding, then clearing.
-    let options = $derived<("add" | "clear" | T)[]>([
+    // The rows the arrow keys walk: each match, then adding, setting up and clearing.
+    let options = $derived<Option[]>([
         ...found,
         ...(query.trim() !== "" && !exact ? (["add"] as const) : []),
+        ...(onsetup ? (["setup"] as const) : []),
         ...(onclear ? (["clear"] as const) : []),
     ]);
 
@@ -56,11 +62,12 @@
         query = "";
     }
 
-    function choose(option: "add" | "clear" | T) {
+    function choose(option: Option) {
         const text = query.trim();
         close();
         input?.blur();
         if (option === "clear") onclear?.();
+        else if (option === "setup") onsetup?.(text);
         else if (option === "add") onadd(text);
         else onpick(option);
     }
@@ -123,6 +130,13 @@
                     {#if option === "add"}
                         <span class="plus">+</span>
                         <span class="label">Add “{query.trim()}” as a new {noun}</span>
+                    {:else if option === "setup"}
+                        <svg class="glyph" width="18" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                            <circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+                            <circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+                        </svg>
+                        <span class="label">Set up a new {noun} in Settings…</span>
                     {:else if option === "clear"}
                         <span class="label muted">No {noun}</span>
                     {:else}
@@ -221,6 +235,11 @@
     .meta {
         flex-shrink: 0;
         font-size: 11.5px;
+        color: var(--color3);
+    }
+
+    .glyph {
+        flex-shrink: 0;
         color: var(--color3);
     }
 

@@ -6,7 +6,7 @@
 <div class="section flex flex-col gap-4">
     <p class="intro m-0">
         The cameras, lenses and scanners a roll can be shot and scanned with. They are kept in the catalog and go with it.
-        Lenses that share a camera's mount are offered first for its rolls.
+        A roll on a camera with a mount is offered only the lenses on that mount.
     </p>
     <GearList kind="camera" />
     <GearList kind="lens" />

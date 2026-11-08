@@ -16,6 +16,7 @@ import "$lib/styles/glass.css";
 import { initializeGPU } from "$lib/gpu/gpuInit";
 import { editor } from "$lib/editor/editor.svelte";
 import { library } from "$lib/library/library.svelte";
+import { settings } from "$lib/settings/settings.svelte";
 import { newImageEdit, parseImageEdit, serializeImageEdit } from "$lib/types/imageEdit";
 import type { GPUSession } from "$lib/types/gpuTypes";
 
@@ -63,7 +64,7 @@ const STORED = (() => {
 })();
 
 const gearRecord = (id: number, kind: string, maker: string, name: string, details: Record<string, string>) => ({
-    id, kind, maker, name, mount: "", formats: [], process: "", dilution: "", temperature: "", ...details,
+    id, kind, maker, name, mount: "", formats: [], process: "", ...details,
 });
 
 let nextGear = 10;
@@ -85,7 +86,7 @@ function stubTauri() {
             gearRecord(1, "camera", "Nikon", "FM2", { mount: "F" }),
             gearRecord(2, "lens", "Mamiya", "80mm f/4", { mount: "Mamiya 7" }),
             gearRecord(3, "lens", "Nikon", "Nikkor 50mm f/1.8", { mount: "F" }),
-            gearRecord(4, "chemistry", "Adox", "Rodinal", { process: "B&W", dilution: "1+50", temperature: "20 °C" }),
+            gearRecord(4, "chemistry", "Adox", "Rodinal", { process: "B&W" }),
         ],
         photoFolder: null,
     };
@@ -231,15 +232,15 @@ describe("the library", () => {
         lens.focus();
         const offered = await vi.waitFor(() => {
             const names = [...document.querySelectorAll(".picker [role=option] .label")].map((o) => o.textContent);
-            expect(names.length).toBe(2);
+            expect(names.length).toBeGreaterThan(0);
             return names;
         });
-        expect(offered).toEqual(["Nikon Nikkor 50mm f/1.8", "Mamiya 80mm f/4"]);
+        expect(offered).toEqual(["Nikon Nikkor 50mm f/1.8", "Set up a new lens in Settings…"]);
         lens.blur();
         await pick("Add a lens", "nikkor", "Nikon Nikkor 50mm f/1.8");
         await pick("Add a lens", "Helios 44-2", "Add “Helios 44-2” as a new lens");
         await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.lenses).toEqual([3, 10]));
-        expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "lens", name: "Helios 44-2" });
+        expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "lens", name: "Helios 44-2", mount: "F" });
         expect([...document.querySelectorAll(".lenses .chip .name")].map((c) => c.textContent)).toEqual([
             "Nikon Nikkor 50mm f/1.8",
             "Helios 44-2",
@@ -249,8 +250,38 @@ describe("the library", () => {
         await vi.waitFor(() => {
             const last = called("catalog_update_roll").at(-1)?.args;
             expect(last.gear.chemistry).toBe(4);
-            expect(last.info).toMatchObject({ developer: "Adox Rodinal", dilution: "1+50", devTemp: "20 °C" });
+            expect(last.info).toMatchObject({ developer: "Adox Rodinal" });
         });
+    });
+
+    it("sets up new gear in Settings from the roll, already on the roll", async () => {
+        const SettingsModal = (await import("$lib/components/settings/SettingsModal.svelte")).default;
+        const modal = mount(SettingsModal, { target: document.body });
+        const scanner = $<HTMLInputElement>('[role=combobox][aria-label="Scanner"]')!;
+        scanner.focus();
+        await userEvent.keyboard("Coolscan");
+        const setUp = await vi.waitFor(() => {
+            const found = [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")].find((o) =>
+                o.textContent?.includes("Set up a new scanner in Settings…"),
+            );
+            expect(found).toBeDefined();
+            return found!;
+        });
+        setUp.click();
+        await vi.waitFor(() => expect(settings.open).toBe(true));
+        expect(settings.section).toBe("gear");
+        const created = called("catalog_create_gear").at(-1)?.args.gear;
+        expect(created).toMatchObject({ kind: "scanner", name: "Coolscan" });
+        const row = await vi.waitFor(() => {
+            const open = $(".record.open");
+            expect(open).not.toBeNull();
+            return open!;
+        });
+        expect(row.querySelector<HTMLInputElement>("input[placeholder='Flextight X1']")?.value).toBe("Coolscan");
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.scanner).toBe(nextGear - 1));
+        settings.close();
+        await vi.waitFor(() => expect($(".record")).toBeNull());
+        unmount(modal);
     });
 
     it("keeps the dates a roll was shot over as a range", async () => {

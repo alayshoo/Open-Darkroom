@@ -5,8 +5,8 @@
 
 <div class="section flex flex-col gap-4">
     <p class="intro m-0">
-        The chemistry you develop with at home. Picking a setup for a roll fills in its dilution and temperature; the
-        time is kept with each roll, since it depends on the film.
+        The chemistry you develop with at home. They are kept in the catalog and go with it. The dilution, time and
+        temperature are kept with each roll.
     </p>
     <GearList kind="chemistry" title="Chemistry setups" />
 </div>

@@ -80,13 +80,5 @@
                 {/each}
             </div>
         </div>
-        <label class="field">
-            <span>Dilution</span>
-            <input value={gear.dilution} placeholder="1+50" oninput={(e) => update({ dilution: e.currentTarget.value })} />
-        </label>
-        <label class="field">
-            <span>Temperature</span>
-            <input value={gear.temperature} placeholder="20 °C" oninput={(e) => update({ temperature: e.currentTarget.value })} />
-        </label>
     {/if}
 </EditRow>

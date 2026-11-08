@@ -44,6 +44,8 @@ class Library {
     images = $state.raw<ImageRecord[]>([]);
     filmStocks = $state.raw<FilmStock[]>([]);
     gear = $state.raw<Gear[]>([]);
+    /** Gear just made from a roll, for Settings to open on. */
+    editingGearId = $state<number | null>(null);
     photoFolder = $state<string | null>(null);
     loaded = $state(false);
 
@@ -344,10 +346,6 @@ class Library {
     /** Puts a roll on a camera, scanner or chemistry, or takes it off one. */
     setRollGear = (rollId: number, slot: "camera" | "scanner" | "chemistry", gear: Gear | null) => {
         const info: RollInfo = { [slot === "chemistry" ? "developer" : slot]: gear ? gearLabel(gear) : "" };
-        if (slot === "chemistry" && gear) {
-            if (gear.dilution) info.dilution = gear.dilution;
-            if (gear.temperature) info.devTemp = gear.temperature;
-        }
         this.updateRoll(rollId, { gear: { [slot]: gear?.id ?? null }, info });
     };
 
