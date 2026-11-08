@@ -1,10 +1,10 @@
 // src-tauri/src/catalog/film_stocks.rs
 //
 // The film stocks a roll can be shot on: kept in the catalog so they travel
-// with it, and seeded once with common Kodak, Fujifilm and CineStill stocks.
+// with it, and seeded with common stocks from the main makers.
 // The colours are for telling rolls apart at a glance.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -44,7 +44,8 @@ impl StockFields {
     }
 }
 
-/// Maker, name, box ISO, kind, process, formats, then the box's colours, main first.
+/// Maker, name, box ISO (0 when the box gives a range), kind, process, formats,
+/// then the box's colours, main first.
 type Seed = (&'static str, &'static str, u32, &'static str, &'static str, &'static [&'static str], &'static [&'static str]);
 
 const NEG: &str = "colourNegative";
@@ -58,6 +59,7 @@ const BLACK: &str = "#1c1c1c";
 const BLUE: &str = "#2f6db5";
 const RED: &str = "#d7262f";
 const MAGENTA: &str = "#c2187a";
+const WHITE: &str = "#ffffff";
 const PORTRA: &[&str] = &[KODAK, "#7174b5", "#793a8e"];
 const TRI_X: &[&str] = &[KODAK, "#22875a"];
 const T_MAX: &[&str] = &[KODAK, "#9ca2b3"];
@@ -68,7 +70,7 @@ const SMALL: &[&str] = &["35mm"];
 const CINE: &[&str] = &["35mm", "16mm"];
 
 #[rustfmt::skip]
-const SEEDS: &[Seed] = &[
+const FIRST_SEEDS: &[Seed] = &[
     ("Kodak", "Portra 160", 160, NEG, "C-41", ALL, PORTRA),
     ("Kodak", "Portra 400", 400, NEG, "C-41", ALL, PORTRA),
     ("Kodak", "Portra 800", 800, NEG, "C-41", ROLL, PORTRA),
@@ -103,13 +105,47 @@ const SEEDS: &[Seed] = &[
     ("CineStill", "BwXX", 250, BW, "B&W", SMALL, &["#8a8a8a"]),
 ];
 
+#[rustfmt::skip]
+const SECOND_SEEDS: &[Seed] = &[
+    ("Ilford", "Ortho Plus 80", 80, BW, "B&W", ALL, &[WHITE, "#792b34"]),
+    ("Ilford", "Delta 100", 100, BW, "B&W", ALL, &[WHITE, "#679dc7"]),
+    ("Ilford", "Delta 400", 400, BW, "B&W", ROLL, &[WHITE, "#5ca66a"]),
+    ("Ilford", "Delta 3200", 3200, BW, "B&W", ROLL, &[WHITE, "#9181b4"]),
+    ("Ilford", "FP4 Plus 125", 125, BW, "B&W", ALL, &[WHITE, "#295ca1"]),
+    ("Ilford", "HP5 Plus 400", 400, BW, "B&W", ALL, &[WHITE, "#49a057"]),
+    ("Ilford", "Pan F Plus 50", 50, BW, "B&W", ROLL, &[WHITE, "#f3af3e"]),
+    ("Ilford", "SFX 200", 200, BW, "B&W", ROLL, &[WHITE, "#af51c5"]),
+    ("Ilford", "XP2 Super 400", 400, BW, "C-41", ROLL, &[WHITE, "#ce554f"]),
+    ("Kentmere", "Pan 100", 100, BW, "B&W", ROLL, &["#2252ae", "#61d0cf"]),
+    ("Kentmere", "Pan 200", 200, BW, "B&W", SMALL, &["#3b518e", "#f7e04b"]),
+    ("Kentmere", "Pan 400", 400, BW, "B&W", ROLL, &["#040687", "#d52e6c"]),
+    ("Harman", "Red", 125, NEG, "C-41", SMALL, &["#be3b34"]),
+    ("Harman", "Phoenix", 200, NEG, "C-41", ROLL, &["#d23833", "#e37e3a"]),
+    ("Harman", "Phoenix II", 200, NEG, "C-41", SMALL, &["#59a9d2", "#1f204b"]),
+    ("Harman", "Switch Azure", 0, NEG, "C-41", SMALL, &["#4d9f96"]),
+    ("Lomography", "LomoChrome Color '92", 400, NEG, "C-41", ROLL, &["#baa079"]),
+    ("Lomography", "LomoChrome Classicolor 200", 200, NEG, "C-41", SMALL, &["#da4d3b"]),
+    ("Lomography", "LomoChrome Metropolis 100-400", 0, NEG, "C-41", ROLL, &["#d8e168"]),
+    ("Lomography", "LomoChrome Purple 100-400", 0, NEG, "C-41", ROLL, &["#8b66c6"]),
+    ("Lomography", "LomoChrome Turquoise 100-400", 0, NEG, "C-41", ROLL, &["#4599b2"]),
+];
+
+/// The seeded stocks in the order they were added to the app. A catalog gets
+/// each batch once, so a later batch reaches catalogs made before it.
+const SEED_BATCHES: &[&[Seed]] = &[FIRST_SEEDS, SECOND_SEEDS];
+
+/// Every seeded stock, of every batch.
 pub fn seeds() -> Vec<StockFields> {
-    SEEDS
+    SEED_BATCHES.iter().flat_map(|batch| stocks(batch)).collect()
+}
+
+fn stocks(batch: &[Seed]) -> Vec<StockFields> {
+    batch
         .iter()
         .map(|&(maker, name, iso, kind, process, formats, colours)| StockFields {
             maker: maker.into(),
             name: name.into(),
-            box_iso: Some(iso),
+            box_iso: (iso > 0).then_some(iso),
             kind: kind.into(),
             process: process.into(),
             formats: formats.iter().map(|f| f.to_string()).collect(),
@@ -121,21 +157,30 @@ pub fn seeds() -> Vec<StockFields> {
 }
 
 impl Catalog {
-    /// Adds the seeded stocks the first time a catalog is opened, and never
-    /// again, so a stock deleted from the list stays deleted.
+    /// Adds each batch of seeded stocks the first time a catalog is opened
+    /// after it, and never again, so a stock deleted from the list stays deleted.
     pub(super) fn seed_film_stocks(&self) -> Result<(), String> {
-        let seeded: bool = self
+        let seeded: usize = self
             .conn
-            .query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key = 'stocks_seeded')", [], |r| r.get(0))
-            .map_err(err)?;
-        if seeded {
+            .query_row("SELECT value FROM meta WHERE key = 'stocks_seeded'", [], |r| r.get::<_, String>(0))
+            .optional()
+            .map_err(err)?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        if seeded >= SEED_BATCHES.len() {
             return Ok(());
         }
-        for stock in seeds() {
-            self.create_film_stock(&stock)?;
+        for batch in &SEED_BATCHES[seeded..] {
+            for stock in stocks(batch) {
+                self.create_film_stock(&stock)?;
+            }
         }
         self.conn
-            .execute("INSERT INTO meta (key, value) VALUES ('stocks_seeded', '1')", [])
+            .execute(
+                "INSERT INTO meta (key, value) VALUES ('stocks_seeded', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![SEED_BATCHES.len().to_string()],
+            )
             .map(|_| ())
             .map_err(err)
     }

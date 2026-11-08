@@ -277,6 +277,34 @@ fn a_new_catalog_is_seeded_with_stocks_once() {
 }
 
 #[test]
+fn a_catalog_seeded_before_a_new_batch_gets_it_once() {
+    let scratch = Scratch::new();
+    let seeded = open_darkroom_lib::catalog::film_stocks_seeds_len();
+    let dir = scratch.path("data");
+    {
+        // As a catalog from before the second batch: only the first, with one of it deleted.
+        let c = Catalog::open(&dir).unwrap();
+        drop(c);
+        let conn = rusqlite::Connection::open(dir.join("catalog.sqlite")).unwrap();
+        conn.execute_batch(
+            "DELETE FROM film_stocks WHERE maker IN ('Ilford', 'Kentmere', 'Harman', 'Lomography');
+             DELETE FROM film_stocks WHERE name = 'Gold 200';
+             UPDATE meta SET value = '1' WHERE key = 'stocks_seeded';",
+        )
+        .unwrap();
+    }
+    let stocks = Catalog::open(&dir).unwrap().film_stocks().unwrap();
+    assert_eq!(stocks.len(), seeded - 1);
+    assert!(!stocks.iter().any(|s| s.fields.name == "Gold 200"));
+    let hp5 = stocks.iter().find(|s| s.fields.label() == "Ilford HP5 Plus 400").unwrap();
+    assert_eq!((hp5.fields.box_iso, hp5.fields.colour.as_deref(), hp5.fields.colour2.as_deref()), (Some(400), Some("#ffffff"), Some("#49a057")));
+    let metropolis = stocks.iter().find(|s| s.fields.name == "LomoChrome Metropolis 100-400").unwrap();
+    assert_eq!(metropolis.fields.box_iso, None);
+
+    assert_eq!(Catalog::open(&dir).unwrap().film_stocks().unwrap().len(), seeded - 1);
+}
+
+#[test]
 fn stocks_are_added_and_edited_and_a_roll_keeps_its_stock_name_when_it_goes() {
     use open_darkroom_lib::catalog::StockFields;
 

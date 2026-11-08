@@ -14,6 +14,32 @@
     let newMakers = $state<string[]>([]);
     let naming = $state(false);
     let section = $state<HTMLElement | null>(null);
+    // The makers whose stocks are showing, by their lower-cased name; every maker starts folded.
+    let expanded = $state<string[]>([]);
+    let pendingToggle: ReturnType<typeof setTimeout> | undefined;
+
+    const isOpen = (maker: string) => expanded.includes(maker.toLowerCase());
+
+    function setOpen(maker: string, open: boolean) {
+        const key = maker.toLowerCase();
+        expanded = open ? [...expanded.filter((k) => k !== key), key] : expanded.filter((k) => k !== key);
+    }
+
+    // A click on the name waits a moment, so a double-click can rename it instead.
+    function onHeadingClick(e: MouseEvent, maker: string) {
+        const target = e.target as HTMLElement;
+        if (target.closest("input") || e.detail > 1) return;
+        clearTimeout(pendingToggle);
+        const toggle = () => setOpen(maker, !isOpen(maker));
+        if (target.closest(".name-text")) pendingToggle = setTimeout(toggle, 250);
+        else toggle();
+    }
+
+    function onHeadingKey(e: KeyboardEvent, maker: string) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        setOpen(maker, !isOpen(maker));
+    }
 
     // One group per maker, matched regardless of case and spelled as its first stock spells it,
     // in alphabetical order; stocks with no maker last.
@@ -42,6 +68,7 @@
         naming = false;
         if (!maker) return;
         if (!groups.some((g) => g.maker.toLowerCase() === maker.toLowerCase())) newMakers = [...newMakers, maker];
+        setOpen(maker, true);
         // Its group sits in alphabetical order, usually far from this row, so bring it into view.
         tick().then(() =>
             section
@@ -57,6 +84,7 @@
             if (stock.maker.trim().toLowerCase() === key) library.updateStock(stock.id, { maker: to });
         }
         newMakers = newMakers.map((m) => (m.toLowerCase() === key ? to : m));
+        if (isOpen(from)) setOpen(to, true);
     }
 
     function focus(node: HTMLInputElement) {
@@ -83,13 +111,30 @@
     {#each groups as { maker, stocks } (maker.toLowerCase())}
         <div data-maker={maker.toLowerCase()}>
             {#snippet heading()}
-                <EditableName value={maker || "Other"} label="Film maker" onrename={(name) => renameMaker(maker, name)} />
+                <div
+                    class="maker flex items-center"
+                    role="button"
+                    tabindex="0"
+                    aria-expanded={isOpen(maker)}
+                    onclick={(e) => onHeadingClick(e, maker)}
+                    ondblclick={() => clearTimeout(pendingToggle)}
+                    onkeydown={(e) => onHeadingKey(e, maker)}
+                >
+                    <svg class="chevron" class:open={isOpen(maker)} width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <span class="maker-name">
+                        <EditableName value={maker || "Other"} label="Film maker" onrename={(name) => renameMaker(maker, name)} />
+                    </span>
+                </div>
             {/snippet}
             <SettingsGroup {heading}>
-                {#each stocks as stock (stock.id)}
-                    <StockRow {stock} open={openId === stock.id} ontoggle={() => (openId = openId === stock.id ? null : stock.id)} />
-                {/each}
-                <AddRow label="Add a stock" onclick={() => add(maker)} />
+                {#if isOpen(maker)}
+                    {#each stocks as stock (stock.id)}
+                        <StockRow {stock} open={openId === stock.id} ontoggle={() => (openId = openId === stock.id ? null : stock.id)} />
+                    {/each}
+                    <AddRow label="Add a stock" onclick={() => add(maker)} />
+                {/if}
             </SettingsGroup>
         </div>
     {/each}
@@ -112,6 +157,31 @@
 </div>
 
 <style>
+    .maker {
+        gap: 6px;
+        margin-left: -18px;
+        cursor: default;
+        outline: none;
+    }
+
+    .maker:focus-visible {
+        text-decoration: underline;
+    }
+
+    .maker-name {
+        min-width: 0;
+    }
+
+    .chevron {
+        flex-shrink: 0;
+        color: var(--color3);
+        transition: transform 0.15s ease;
+    }
+
+    .chevron.open {
+        transform: rotate(90deg);
+    }
+
     .naming {
         gap: 12px;
         height: 40px;
