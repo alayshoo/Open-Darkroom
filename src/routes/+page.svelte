@@ -1,6 +1,7 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
     import { onMount } from "svelte";
+    import { getCurrentWindow } from "@tauri-apps/api/window";
     import TitleBar from "$lib/components/window/TitleBar.svelte";
     import Editor from "$lib/components/editor/Editor.svelte";
     import Library from "$lib/components/library/Library.svelte";
@@ -13,8 +14,15 @@
         if (editing) action();
     };
 
+    // How long closing the window waits for changes still to be saved.
+    const CLOSE_SAVE_WAIT_MS = 2000;
+
     onMount(() => {
         void library.load();
+        const closing = getCurrentWindow().onCloseRequested(async () => {
+            await Promise.race([library.flushAll(), new Promise((resolve) => setTimeout(resolve, CLOSE_SAVE_WAIT_MS))]);
+        });
+        return () => void closing.then((unlisten) => unlisten());
     });
 </script>
 

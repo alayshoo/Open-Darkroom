@@ -76,12 +76,16 @@ let nextGear = 10;
 // What looking for moved files and locating one give back.
 let moved: { found: unknown[]; missing: number[] } = { found: [], missing: [] };
 let located: unknown = null;
+let imported: unknown = { roll: null, images: [], skipped: [] };
+// Event listeners the app registered, by event name.
+const listeners = new Map<string, (event: unknown) => unknown>();
 
 const calls: { cmd: string; args: any }[] = [];
 const called = (cmd: string) => calls.filter((c) => c.cmd === cmd);
 
 function stubTauri() {
     let callback = 0;
+    const callbacks = new Map<number, (event: unknown) => unknown>();
     const catalog = {
         libraries: [{ id: 1, name: "Personal", created: 1 }, { id: 2, name: "Client work", created: 2 }],
         rolls: [{ id: 10, libraryId: 1, name: "Portra in Lisbon", created: 3, stockId: 1, info: { filmStock: "Kodak Portra 400" } }],
@@ -101,11 +105,12 @@ function stubTauri() {
     };
     (window as any).__TAURI_INTERNALS__ = {
         invoke: async (cmd: string, args: any) => {
-            if (cmd.startsWith("catalog_") || cmd === "open_image_path") calls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? {})) });
+            if (cmd.startsWith("catalog_") || cmd === "open_image_path" || cmd === "plugin:window|destroy") calls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? {})) });
             if (cmd === "catalog_load") return structuredClone(catalog);
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
             if (cmd === "catalog_find_moved") return structuredClone(moved);
             if (cmd === "catalog_locate") return structuredClone(located);
+            if (cmd === "catalog_import_files") return structuredClone(imported);
             if (cmd === "catalog_edit_history") return args.id === 2 ? STORED_HISTORY : null;
             if (cmd === "catalog_save_edit") return 1234;
             if (cmd === "catalog_create_gear") return { id: nextGear++, ...args.gear };
@@ -115,10 +120,16 @@ function stubTauri() {
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
             if (/^plugin:store\|(entries|keys|values)$/.test(cmd)) return [];
-            if (cmd === "plugin:event|listen") return ++callback;
+            if (cmd === "plugin:event|listen") {
+                listeners.set(args.event, callbacks.get(args.handler)!);
+                return args.handler;
+            }
             return null;
         },
-        transformCallback: () => ++callback,
+        transformCallback: (fn: (event: unknown) => unknown) => {
+            callbacks.set(++callback, fn);
+            return callback;
+        },
         unregisterCallback: () => {},
         convertFileSrc: (path: string) => path,
         metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
@@ -527,8 +538,15 @@ describe("files that have moved", () => {
         expect(notice()).toBeUndefined();
 
         moved = { found: [moveTo(2, 1, "frame01.tif", "/scans/Lisbon")], missing: [3] };
+        // Coming back to the window a while after it last looked.
+        const later = performance.now() + 60_000;
+        const clock = vi.spyOn(performance, "now").mockReturnValue(later);
         window.dispatchEvent(new FocusEvent("focus"));
         await vi.waitFor(() => expect(badges()).toEqual(["Missing"]));
+        const searches = called("catalog_find_moved").length;
+        window.dispatchEvent(new FocusEvent("focus"));
+        expect(called("catalog_find_moved")).toHaveLength(searches);
+        clock.mockRestore();
         expect(notice()).toBe("Found 1 file that had moved.");
         expect(library.images.find((i) => i.id === 2)!.path).toBe("/scans/Lisbon/frame01.tif");
         library.notice = null;
@@ -545,5 +563,31 @@ describe("files that have moved", () => {
         await vi.waitFor(() => expect(called("catalog_find_moved").at(-1)?.args.near).toBe("/archive/Lisbon/frame02.tif"));
         await vi.waitFor(() => expect(badges()).toEqual([]));
         expect(library.images.find((i) => i.id === 3)!.missing).toBe(false);
+    });
+});
+
+describe("saving and importing", () => {
+    it("writes changes still waiting to be saved before the window closes", async () => {
+        const before = called("catalog_set_frame_info").length;
+        library.setFrameInfo(2, { notes: "Last light" });
+        await listeners.get("tauri://close-requested")!({ event: "tauri://close-requested", id: 0, payload: null });
+        expect(called("catalog_set_frame_info").slice(before).map((c) => c.args)).toEqual([
+            { id: 2, info: expect.objectContaining({ notes: "Last light" }) },
+        ]);
+        expect(called("plugin:window|destroy")).toHaveLength(1);
+    });
+
+    it("says which files could not be imported", async () => {
+        imported = {
+            roll: null,
+            images: [],
+            skipped: [
+                { path: "/card/DSC_0001.NEF", reason: "Permission denied (os error 13)" },
+                { path: "C:\\card\\DSC_0002.NEF", reason: "Permission denied (os error 13)" },
+            ],
+        };
+        await library.importFiles();
+        expect($(".notice span")?.textContent).toBe("Could not import DSC_0001.NEF, DSC_0002.NEF: Permission denied (os error 13)");
+        library.notice = null;
     });
 });

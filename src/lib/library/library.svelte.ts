@@ -29,6 +29,8 @@ const SAVE_DELAY_MS = 400;
 const THUMBNAIL_DELAY_MS = 1200;
 // How long leaving the editor waits for a fresh thumbnail before flying the last one.
 const FRESH_THUMBNAIL_WAIT_MS = 350;
+// The least time between two looks for moved files on coming back to the window.
+const FOCUS_SEARCH_GAP_MS = 30_000;
 
 /** The open image's edit and undo history, as they are stored. */
 type Saved = { edit: string; history: string };
@@ -48,6 +50,28 @@ function freeName(base: string, taken: string[]): string {
     let n = 2;
     while (taken.includes(`${base} ${n}`)) n++;
     return `${base} ${n}`;
+}
+
+/** Writes that wait for changes to settle, and can all be made at once. */
+class SaveQueue {
+    #waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; write: () => Promise<void> }>();
+
+    schedule(key: string, write: () => Promise<void>) {
+        clearTimeout(this.#waiting.get(key)?.timer);
+        this.#waiting.set(key, { timer: setTimeout(() => void this.#write(key), SAVE_DELAY_MS), write });
+    }
+
+    #write(key: string): Promise<void> {
+        const waiting = this.#waiting.get(key);
+        if (!waiting) return Promise.resolve();
+        this.#waiting.delete(key);
+        clearTimeout(waiting.timer);
+        return waiting.write();
+    }
+
+    flush() {
+        return Promise.all([...this.#waiting.keys()].map((key) => this.#write(key)));
+    }
 }
 
 class Library {
@@ -240,7 +264,7 @@ class Library {
         }
     };
 
-    #rollSaves = new Map<number, ReturnType<typeof setTimeout>>();
+    #saves = new SaveQueue();
 
     updateRoll = (
         id: number,
@@ -257,17 +281,12 @@ class Library {
                   }
                 : r,
         );
-        clearTimeout(this.#rollSaves.get(id));
-        this.#rollSaves.set(
-            id,
-            setTimeout(() => {
-                this.#rollSaves.delete(id);
-                const roll = this.rolls.find((r) => r.id === id);
-                if (!roll) return;
-                const name = roll.name.trim() || "Untitled roll";
-                api.updateRoll(id, name, roll.info, roll.stockId, roll.gear).catch((e) => this.#fail("The roll could not be saved", e));
-            }, SAVE_DELAY_MS),
-        );
+        this.#saves.schedule(`roll ${id}`, async () => {
+            const roll = this.rolls.find((r) => r.id === id);
+            if (!roll) return;
+            const name = roll.name.trim() || "Untitled roll";
+            await api.updateRoll(id, name, roll.info, roll.stockId, roll.gear).catch((e) => this.#fail("The roll could not be saved", e));
+        });
     };
 
     // ===== Film stocks =====
@@ -314,21 +333,14 @@ class Library {
         }
     };
 
-    #stockSaves = new Map<number, ReturnType<typeof setTimeout>>();
-
     updateStock = (id: number, patch: Partial<StockFields>) => {
         this.filmStocks = this.filmStocks.map((s) => (s.id === id ? { ...s, ...patch } : s));
-        clearTimeout(this.#stockSaves.get(id));
-        this.#stockSaves.set(
-            id,
-            setTimeout(() => {
-                this.#stockSaves.delete(id);
-                const stock = this.filmStocks.find((s) => s.id === id);
-                if (!stock) return;
-                const { id: _, ...fields } = stock;
-                api.updateStock(id, fields).catch((e) => this.#fail("The film stock could not be saved", e));
-            }, SAVE_DELAY_MS),
-        );
+        this.#saves.schedule(`stock ${id}`, async () => {
+            const stock = this.filmStocks.find((s) => s.id === id);
+            if (!stock) return;
+            const { id: _, ...fields } = stock;
+            await api.updateStock(id, fields).catch((e) => this.#fail("The film stock could not be saved", e));
+        });
     };
 
     deleteStock = async (id: number) => {
@@ -384,21 +396,14 @@ class Library {
         }
     };
 
-    #gearSaves = new Map<number, ReturnType<typeof setTimeout>>();
-
     updateGear = (id: number, patch: Partial<GearFields>) => {
         this.gear = this.gear.map((g) => (g.id === id ? { ...g, ...patch } : g));
-        clearTimeout(this.#gearSaves.get(id));
-        this.#gearSaves.set(
-            id,
-            setTimeout(() => {
-                this.#gearSaves.delete(id);
-                const gear = this.gear.find((g) => g.id === id);
-                if (!gear) return;
-                const { id: _, ...fields } = gear;
-                api.updateGear(id, fields).catch((e) => this.#fail("The gear could not be saved", e));
-            }, SAVE_DELAY_MS),
-        );
+        this.#saves.schedule(`gear ${id}`, async () => {
+            const gear = this.gear.find((g) => g.id === id);
+            if (!gear) return;
+            const { id: _, ...fields } = gear;
+            await api.updateGear(id, fields).catch((e) => this.#fail("The gear could not be saved", e));
+        });
     };
 
     /** Removes a piece of gear. The rolls that used it keep its name, as the catalog does. */
@@ -466,6 +471,16 @@ class Library {
         if (imported.roll) this.rolls = [...this.rolls, imported.roll];
         const known = new Set(this.images.map((i) => i.id));
         this.images = [...this.images, ...imported.images.filter((i) => !known.has(i.id))];
+        if (imported.skipped.length > 0) this.#reportSkipped(imported.skipped);
+    }
+
+    #reportSkipped(skipped: api.Imported["skipped"]) {
+        const names = skipped.map((s) => s.path.split(/[\\/]/).pop() ?? s.path);
+        const listed = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+        const reasons = new Set(skipped.map((s) => s.reason));
+        const reason = reasons.size === 1 ? `: ${skipped[0].reason}` : "";
+        console.error("Files not imported:", skipped);
+        this.notice = { text: `Could not import ${listed}${reason}` };
     }
 
     importFiles = async () => {
@@ -499,7 +514,7 @@ class Library {
         try {
             const record = await api.openFile(place, settings.importCopies);
             if (!record) return;
-            this.#added({ roll: null, images: [record] });
+            this.#added({ roll: null, images: [record], skipped: [] });
             this.show(record.rollId ? { kind: "roll", id: record.rollId } : { kind: "library", id: record.libraryId });
             this.selection = [record.id];
             await this.openImage(record.id);
@@ -600,6 +615,15 @@ class Library {
         }
     };
 
+    #lastFocusSearch = -Infinity;
+
+    /** On coming back to the window, where files may have been moved meanwhile. */
+    findMovedOnFocus = () => {
+        if (performance.now() - this.#lastFocusSearch < FOCUS_SEARCH_GAP_MS) return;
+        this.#lastFocusSearch = performance.now();
+        void this.findMoved();
+    };
+
     #putBack(records: ImageRecord[]) {
         const byId = new Map(records.map((r) => [r.id, r]));
         this.images = this.images.map((i) => byId.get(i.id) ?? i);
@@ -609,19 +633,12 @@ class Library {
         }
     }
 
-    #frameSaves = new Map<number, ReturnType<typeof setTimeout>>();
-
     setFrameInfo = (id: number, patch: FrameInfo) => {
         this.images = this.images.map((i) => (i.id === id ? { ...i, frameInfo: { ...i.frameInfo, ...patch } } : i));
-        clearTimeout(this.#frameSaves.get(id));
-        this.#frameSaves.set(
-            id,
-            setTimeout(() => {
-                this.#frameSaves.delete(id);
-                const image = this.images.find((i) => i.id === id);
-                if (image) api.setFrameInfo(id, image.frameInfo).catch((e) => this.#fail("The frame could not be saved", e));
-            }, SAVE_DELAY_MS),
-        );
+        this.#saves.schedule(`frame ${id}`, async () => {
+            const image = this.images.find((i) => i.id === id);
+            if (image) await api.setFrameInfo(id, image.frameInfo).catch((e) => this.#fail("The frame could not be saved", e));
+        });
     };
 
     #forget(ids: number[]) {
@@ -732,6 +749,11 @@ class Library {
         } catch (e) {
             this.#fail("The edit could not be saved", e);
         }
+    };
+
+    /** Writes every change still waiting to be saved. */
+    flushAll = async () => {
+        await Promise.all([this.#saves.flush(), this.flushSave()]);
     };
 
     /** Renders the open image's thumbnail with its edit as it stands. */

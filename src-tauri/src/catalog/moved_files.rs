@@ -84,8 +84,11 @@ pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathB
     let mut visited = HashSet::new();
     let mut entries = 0;
 
-    let mut queue: VecDeque<(PathBuf, usize)> = roots.iter().map(|r| (r.clone(), 0)).collect();
-    while let Some((dir, depth)) = queue.pop_front() {
+    // Each search keeps to the drive it starts on, so one that starts above
+    // where drives are mounted does not wander through the others.
+    let mut queue: VecDeque<(PathBuf, usize, Option<u64>)> =
+        roots.iter().map(|r| (r.clone(), 0, fs::metadata(r).ok().and_then(|m| device(&m)))).collect();
+    while let Some((dir, depth, drive)) = queue.pop_front() {
         if found.len() == missing.len() || entries >= SEARCH_ENTRIES || !visited.insert(dir.clone()) {
             continue;
         }
@@ -100,8 +103,9 @@ pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathB
             }
             let Ok(kind) = entry.file_type() else { continue };
             if kind.is_dir() {
-                if depth < SEARCH_DEPTH {
-                    queue.push_back((entry.path(), depth + 1));
+                let same_drive = drive.is_none() || entry.metadata().ok().and_then(|m| device(&m)) == drive;
+                if depth < SEARCH_DEPTH && same_drive {
+                    queue.push_back((entry.path(), depth + 1, drive));
                 }
                 continue;
             }
@@ -120,3 +124,14 @@ pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathB
     found
 }
 
+/// The drive a file is on, where the platform says.
+#[cfg(unix)]
+fn device(metadata: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Some(metadata.dev())
+}
+
+#[cfg(not(unix))]
+fn device(_: &fs::Metadata) -> Option<u64> {
+    None
+}

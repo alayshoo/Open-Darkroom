@@ -12,7 +12,10 @@ use tauri::ipc::Response;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::catalog::{find_moved, folder_images, search_roots, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Snapshot, StockFields};
+use crate::catalog::{
+    find_moved, folder_images, search_roots, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Skipped,
+    Snapshot, StockFields,
+};
 use crate::crop::CropPayload;
 use crate::export_rendering::SlidersPayload;
 use crate::image_opening::{image_extensions, ImageState};
@@ -117,6 +120,13 @@ pub struct Imported {
     /// The roll made for a folder imported as one.
     roll: Option<Roll>,
     images: Vec<ImageRecord>,
+    skipped: Vec<Skipped>,
+}
+
+impl Imported {
+    fn nothing() -> Self {
+        Self { roll: None, images: Vec::new(), skipped: Vec::new() }
+    }
 }
 
 fn pick_images(app: &tauri::AppHandle) -> Option<Vec<PathBuf>> {
@@ -127,7 +137,7 @@ fn pick_images(app: &tauri::AppHandle) -> Option<Vec<PathBuf>> {
 }
 
 /// Picks files and adds them to a library or roll. Nothing is imported when
-/// the picker is dismissed.
+/// the picker is dismissed, and files that cannot be read are skipped.
 #[tauri::command]
 pub(crate) async fn catalog_import_files(
     app: tauri::AppHandle,
@@ -136,10 +146,10 @@ pub(crate) async fn catalog_import_files(
     copy: bool,
 ) -> Result<Imported, String> {
     let Some(paths) = pick_images(&app) else {
-        return Ok(Imported { roll: None, images: Vec::new() });
+        return Ok(Imported::nothing());
     };
-    let images = with_catalog(&state, |c| c.import(&paths, place, copy))?;
-    Ok(Imported { roll: None, images })
+    let import = with_catalog(&state, |c| c.import(&paths, place, copy))?;
+    Ok(Imported { roll: None, images: import.images, skipped: import.skipped })
 }
 
 /// Picks a folder and makes a roll of the images directly inside it, named
@@ -152,7 +162,7 @@ pub(crate) async fn catalog_import_folder(
     copy: bool,
 ) -> Result<Imported, String> {
     let Some(folder) = app.dialog().file().blocking_pick_folder() else {
-        return Ok(Imported { roll: None, images: Vec::new() });
+        return Ok(Imported::nothing());
     };
     let folder = folder.into_path().map_err(|e| e.to_string())?;
     let paths = folder_images(&folder, &image_extensions())?;
@@ -160,11 +170,8 @@ pub(crate) async fn catalog_import_folder(
         return Err(format!("There are no images in {}", folder.display()));
     }
     let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Roll".into());
-    with_catalog(&state, |c| {
-        let roll = c.create_roll(library_id, &name)?;
-        let images = c.import(&paths, Place { library_id, roll_id: Some(roll.id) }, copy)?;
-        Ok(Imported { roll: Some(roll), images })
-    })
+    let (roll, import) = with_catalog(&state, |c| c.import_roll(library_id, &name, &paths, copy))?;
+    Ok(Imported { roll, images: import.images, skipped: import.skipped })
 }
 
 /// Picks one file to open. It is added to `place` unless the catalog already
@@ -186,7 +193,11 @@ pub(crate) async fn catalog_open_file(
         if let Some(id) = c.find_by_file(&path)? {
             return c.image(id).map(Some);
         }
-        Ok(c.import(&[path], place, copy)?.pop())
+        let mut import = c.import(&[path], place, copy)?;
+        match import.skipped.pop() {
+            Some(skipped) => Err(skipped.reason),
+            None => Ok(import.images.pop()),
+        }
     })
 }
 

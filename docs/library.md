@@ -86,6 +86,11 @@ Importing offers both:
 - **Reference in place.** The files stay where they are, such as on an archive
   drive, and the catalog only points at them.
 
+A file already in the catalog, or picked twice, is added once. A file that
+cannot be read or copied is skipped and named afterwards; the rest go in. Any
+other failure adds nothing, and a folder none of whose files could be read
+makes no roll.
+
 Files in the photo folder are recorded relative to it, so they survive the
 folder moving. Files outside it are recorded by path and by a fingerprint (their
 size plus a hash of their first bytes). Nothing is lost because a file went
@@ -94,8 +99,10 @@ missing:
 - When the catalog opens, when the window comes back into focus, and after a
   file is located, the app looks for missing files on its own. It searches the
   closest folders still there above where each file was, one level further up,
-  and the photo folder, a few levels deep. Only files of a missing file's size
-  are read, and a match is by fingerprint, so a renamed file is found too.
+  and the photo folder, a few levels deep, keeping to the drive each search
+  starts on. Coming back to the window looks again at most every 30 seconds.
+  Only files of a missing file's size are read, and a match is by fingerprint,
+  so a renamed file is found too.
 - What it finds, its images point at again, and it says how many it found.
 - What it does not find stays marked missing. Opening one, or "Locate file…"
   from its menu, asks where it went; the file picked must be the same file.
@@ -110,7 +117,7 @@ edit written by one build still opens in another.
 
 - Opening an image from the library restores its edit.
 - Changes are saved as they are made, so there is no save step and nothing is
-  lost on a crash.
+  lost on a crash. Closing the window writes whatever is still waiting.
 - `editFitsSource` guards against a file that changed size underneath its edit.
   Heal and clone strokes are placed in full-resolution pixels.
 - Undo history is stored with the edit, so it is still there when the image is

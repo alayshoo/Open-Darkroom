@@ -150,6 +150,28 @@ pub struct Snapshot {
     pub photo_folder: Option<String>,
 }
 
+/// What an import added, and the files it skipped.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Import {
+    pub images: Vec<ImageRecord>,
+    pub skipped: Vec<Skipped>,
+}
+
+/// A file an import could not read or copy, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct Skipped {
+    pub path: String,
+    pub reason: String,
+}
+
+/// Why a file was not added: a problem with the file skips it, one with the
+/// catalog stops the import.
+enum Failure {
+    File(String),
+    Catalog(String),
+}
+
 /// Where an import or a move puts images.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -476,53 +498,106 @@ impl Catalog {
 
     /// Adds files to a library or roll, in the order given. With `copy` they
     /// are copied into the photo folder first; otherwise they are referenced
-    /// where they are. A file already in the catalog is left where it is.
-    pub fn import(&self, paths: &[PathBuf], place: Place, copy: bool) -> Result<Vec<ImageRecord>, String> {
-        let place = self.check_place(place)?;
-        let destination = if copy { Some(self.copy_destination(place)?) } else { None };
-        let known = self.known_fingerprints()?;
-        let mut added = Vec::new();
-        for path in paths {
-            let (size, print) = fingerprint(path)?;
-            if known.contains(&print) {
-                continue;
+    /// where they are. A file already in the catalog is left where it is, and
+    /// one that cannot be read or copied is skipped. Nothing is added on any
+    /// other failure.
+    pub fn import(&self, paths: &[PathBuf], place: Place, copy: bool) -> Result<Import, String> {
+        self.atomically(|| self.add_files(paths, place, copy))
+    }
+
+    /// Makes a roll of `paths`, numbered in the order given. There is no roll
+    /// when none of them could be read.
+    pub fn import_roll(&self, library_id: i64, name: &str, paths: &[PathBuf], copy: bool) -> Result<(Option<Roll>, Import), String> {
+        self.atomically(|| {
+            let roll = self.create_roll(library_id, name)?;
+            let import = self.add_files(paths, Place { library_id, roll_id: Some(roll.id) }, copy)?;
+            if import.images.is_empty() && !import.skipped.is_empty() {
+                self.delete_roll(roll.id)?;
+                return Ok((None, import));
             }
-            let (stored, in_photo_folder) = match &destination {
-                Some((root, sub)) => {
-                    let dir = root.join(sub);
-                    fs::create_dir_all(&dir).map_err(err)?;
-                    let name = path.file_name().ok_or("A file to import has no name")?.to_string_lossy();
-                    let target = free_path(&dir, &name);
-                    fs::copy(path, &target).map_err(|e| format!("Could not copy {}: {e}", path.display()))?;
-                    (target.strip_prefix(root).map_err(err)?.to_string_lossy().into_owned(), true)
+            Ok((Some(roll), import))
+        })
+    }
+
+    /// Runs `f` as one transaction, undone if it fails.
+    fn atomically<T>(&self, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let transaction = self.conn.unchecked_transaction().map_err(err)?;
+        let out = f()?;
+        transaction.commit().map_err(err)?;
+        Ok(out)
+    }
+
+    fn add_files(&self, paths: &[PathBuf], place: Place, copy: bool) -> Result<Import, String> {
+        let place = self.check_place(place)?;
+        let destination = match copy {
+            true => {
+                let (root, sub) = self.copy_destination(place)?;
+                fs::create_dir_all(root.join(&sub)).map_err(|e| format!("Could not make {}: {e}", root.join(&sub).display()))?;
+                Some((root, sub))
+            }
+            false => None,
+        };
+        let mut known = self.known_fingerprints()?;
+        let mut import = Import::default();
+        let mut copies = Vec::new();
+        for path in paths {
+            let added = self.add_file(path, place, destination.as_ref(), &mut known, &mut copies);
+            match added {
+                Ok(Some(image)) => import.images.push(image),
+                Ok(None) => {}
+                Err(Failure::File(reason)) => {
+                    import.skipped.push(Skipped { path: path.to_string_lossy().into_owned(), reason })
                 }
-                None => (absolute(path).to_string_lossy().into_owned(), false),
-            };
-            let metadata = metadata::read(path);
-            let frame = match place.roll_id {
-                Some(roll_id) => Some(self.next_frame(roll_id)?),
-                None => None,
-            };
-            self.conn
-                .execute(
-                    "INSERT INTO images (library_id, roll_id, frame, path, in_photo_folder, file_size, fingerprint, metadata, added)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![
-                        place.library_id,
-                        place.roll_id,
-                        frame,
-                        stored,
-                        in_photo_folder,
-                        size as i64,
-                        print,
-                        serde_json::to_string(&metadata).map_err(err)?,
-                        now(),
-                    ],
-                )
-                .map_err(err)?;
-            added.push(self.image(self.conn.last_insert_rowid())?);
+                Err(Failure::Catalog(e)) => {
+                    for copy in &copies {
+                        let _ = fs::remove_file(copy);
+                    }
+                    return Err(e);
+                }
+            }
         }
-        Ok(added)
+        Ok(import)
+    }
+
+    /// Adds one file, or None when the catalog already has it.
+    fn add_file(
+        &self,
+        path: &Path,
+        place: Place,
+        destination: Option<&(PathBuf, PathBuf)>,
+        known: &mut HashSet<String>,
+        copies: &mut Vec<PathBuf>,
+    ) -> Result<Option<ImageRecord>, Failure> {
+        let (size, print) = fingerprint(path).map_err(Failure::File)?;
+        if !known.insert(print.clone()) {
+            return Ok(None);
+        }
+        let (stored, in_photo_folder) = match destination {
+            Some((root, sub)) => {
+                let name = path.file_name().ok_or_else(|| Failure::File("It has no name".into()))?.to_string_lossy();
+                let target = free_path(&root.join(sub), &name);
+                fs::copy(path, &target).map_err(|e| {
+                    let _ = fs::remove_file(&target);
+                    Failure::File(format!("Could not copy it: {e}"))
+                })?;
+                copies.push(target.clone());
+                (target.strip_prefix(root).map_err(|e| Failure::Catalog(err(e)))?.to_string_lossy().into_owned(), true)
+            }
+            None => (absolute(path).to_string_lossy().into_owned(), false),
+        };
+        let metadata = serde_json::to_string(&metadata::read(path)).map_err(|e| Failure::Catalog(err(e)))?;
+        let frame = match place.roll_id {
+            Some(roll_id) => Some(self.next_frame(roll_id).map_err(Failure::Catalog)?),
+            None => None,
+        };
+        self.conn
+            .execute(
+                "INSERT INTO images (library_id, roll_id, frame, path, in_photo_folder, file_size, fingerprint, metadata, added)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![place.library_id, place.roll_id, frame, stored, in_photo_folder, size as i64, print, metadata, now()],
+            )
+            .map_err(|e| Failure::Catalog(err(e)))?;
+        self.image(self.conn.last_insert_rowid()).map(Some).map_err(Failure::Catalog)
     }
 
     /// The image already in the catalog for a file, if there is one.

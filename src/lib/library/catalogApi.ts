@@ -67,6 +67,8 @@ export interface Place {
 export interface Imported {
     roll: RollRecord | null;
     images: ImageRecord[];
+    /** Files that could not be read or copied, with why. */
+    skipped: { path: string; reason: string }[];
 }
 
 export const loadCatalog = () => invoke<CatalogSnapshot>("catalog_load");

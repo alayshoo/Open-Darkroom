@@ -82,7 +82,7 @@ fn imports_in_place_and_numbers_frames_on_a_roll() {
     let b = scratch.image("scans/b.png", 2);
     let c3 = scratch.image("scans/c.png", 3);
 
-    let loose_images = c.import(&[a.clone()], loose(library.id), false).unwrap();
+    let loose_images = c.import(&[a.clone()], loose(library.id), false).unwrap().images;
     assert_eq!(loose_images.len(), 1);
     assert_eq!(loose_images[0].frame, None);
     assert_eq!(Path::new(&loose_images[0].path), std::fs::canonicalize(&a).unwrap());
@@ -90,7 +90,7 @@ fn imports_in_place_and_numbers_frames_on_a_roll() {
 
     let frames = c
         .import(&[b, c3], Place { library_id: library.id, roll_id: Some(roll.id) }, false)
-        .unwrap();
+        .unwrap().images;
     assert_eq!(frames.iter().map(|i| i.frame).collect::<Vec<_>>(), [Some(1), Some(2)]);
     assert!(frames.iter().all(|i| i.roll_id == Some(roll.id) && i.library_id == library.id));
 }
@@ -101,9 +101,62 @@ fn a_file_already_in_the_catalog_is_not_imported_twice() {
     let c = catalog(&scratch);
     let library = c.create_library("Personal").unwrap();
     let a = scratch.image("a.png", 1);
-    assert_eq!(c.import(&[a.clone()], loose(library.id), false).unwrap().len(), 1);
-    assert!(c.import(&[a.clone()], loose(library.id), false).unwrap().is_empty());
+    assert_eq!(c.import(&[a.clone()], loose(library.id), false).unwrap().images.len(), 1);
+    assert!(c.import(&[a.clone()], loose(library.id), false).unwrap().images.is_empty());
     assert!(c.find_by_file(&a).unwrap().is_some());
+}
+
+#[test]
+fn the_same_file_twice_in_one_import_is_added_once() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let a = scratch.image("a.png", 1);
+    let twin = scratch.path("a copy.png");
+    std::fs::copy(&a, &twin).unwrap();
+    let import = c.import(&[a, twin], loose(library.id), false).unwrap();
+    assert_eq!(import.images.len(), 1);
+    assert!(import.skipped.is_empty());
+}
+
+#[test]
+fn a_file_that_cannot_be_read_is_skipped_and_the_rest_are_added() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "HP5").unwrap();
+    let gone = scratch.path("gone.png");
+    let paths = [scratch.image("a.png", 1), gone.clone(), scratch.image("b.png", 2)];
+    let import = c.import(&paths, Place { library_id: library.id, roll_id: Some(roll.id) }, false).unwrap();
+    assert_eq!(import.images.iter().map(|i| i.frame).collect::<Vec<_>>(), [Some(1), Some(2)]);
+    assert_eq!(import.skipped.iter().map(|s| PathBuf::from(&s.path)).collect::<Vec<_>>(), [gone]);
+    assert_eq!(c.snapshot().unwrap().images.len(), 2);
+}
+
+#[test]
+fn a_folder_of_files_that_cannot_be_read_makes_no_roll() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let (roll, import) = c.import_roll(library.id, "Scans", &[scratch.path("gone.png")], false).unwrap();
+    assert!(roll.is_none() && import.skipped.len() == 1);
+    assert!(c.snapshot().unwrap().rolls.is_empty());
+
+    let (roll, import) = c.import_roll(library.id, "Scans", &[scratch.image("a.png", 1)], false).unwrap();
+    assert_eq!(import.images[0].roll_id, roll.map(|r| r.id));
+}
+
+#[test]
+fn an_import_that_fails_adds_nothing() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    // A photo folder that cannot be made: its parent is a file.
+    let blocker = scratch.image("blocker.png", 3);
+    c.set_photo_folder(&blocker.join("Photos")).unwrap();
+    assert!(c.import_roll(library.id, "Scans", &[scratch.image("a.png", 1)], true).is_err());
+    let snapshot = c.snapshot().unwrap();
+    assert!(snapshot.rolls.is_empty() && snapshot.images.is_empty());
 }
 
 #[test]
@@ -119,7 +172,7 @@ fn copies_into_the_photo_folder_by_library_and_roll() {
     let photos = scratch.path("Photos");
     c.set_photo_folder(&photos).unwrap();
     let place = Place { library_id: library.id, roll_id: Some(roll.id) };
-    let copied = c.import(&[src.clone()], place, true).unwrap();
+    let copied = c.import(&[src.clone()], place, true).unwrap().images;
     let expected = photos.join("Client_ work").join("Roll 1").join("DSC_0001.png");
     assert_eq!(PathBuf::from(&copied[0].path), expected);
     assert!(copied[0].in_photo_folder);
@@ -139,7 +192,7 @@ fn edits_are_stored_and_read_back() {
     let scratch = Scratch::new();
     let c = catalog(&scratch);
     let library = c.create_library("Personal").unwrap();
-    let image = c.import(&[scratch.image("a.png", 1)], loose(library.id), false).unwrap().remove(0);
+    let image = c.import(&[scratch.image("a.png", 1)], loose(library.id), false).unwrap().images.remove(0);
     assert_eq!(c.edit(image.id).unwrap(), None);
     assert_eq!(image.edited, None);
 
@@ -162,7 +215,7 @@ fn moving_onto_a_roll_numbers_on_and_a_roll_keeps_its_library() {
     let roll = c.create_roll(second.id, "Tri-X").unwrap();
     let images = c
         .import(&[scratch.image("a.png", 1), scratch.image("b.png", 2)], loose(first.id), false)
-        .unwrap();
+        .unwrap().images;
     let ids: Vec<i64> = images.iter().map(|i| i.id).collect();
 
     // The library given is overruled by the roll's own.
@@ -184,7 +237,7 @@ fn deleting_a_roll_leaves_its_frames_loose_and_deleting_a_library_takes_everythi
     let library = c.create_library("Personal").unwrap();
     let roll = c.create_roll(library.id, "Ektar").unwrap();
     let file = scratch.image("a.png", 1);
-    let image = c.import(&[file.clone()], Place { library_id: library.id, roll_id: Some(roll.id) }, false).unwrap();
+    let image = c.import(&[file.clone()], Place { library_id: library.id, roll_id: Some(roll.id) }, false).unwrap().images;
 
     c.update_roll(roll.id, "Ektar 100", &json!({ "filmStock": "Kodak Ektar 100", "boxIso": "100" }), None, &RollGear::default()).unwrap();
     let rolls = c.rolls().unwrap();
@@ -209,7 +262,7 @@ fn a_missing_file_is_found_again_only_if_it_is_the_same_file() {
     let library = c.create_library("Personal").unwrap();
     let file = scratch.image("old/a.png", 1);
     let other = scratch.image("other.png", 2);
-    let image = c.import(&[file.clone()], loose(library.id), false).unwrap().remove(0);
+    let image = c.import(&[file.clone()], loose(library.id), false).unwrap().images.remove(0);
 
     let moved = scratch.path("new/a.png");
     std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
@@ -447,7 +500,7 @@ fn files_in_a_renamed_folder_are_found_by_themselves() {
     let c = catalog(&scratch);
     let library = c.create_library("Personal").unwrap();
     let paths = [scratch.image("scans/roll-12/01.png", 1), scratch.image("scans/roll-12/02.png", 2)];
-    let images = c.import(&paths, loose(library.id), false).unwrap();
+    let images = c.import(&paths, loose(library.id), false).unwrap().images;
     scratch.image("scans/other/unrelated.png", 9);
 
     std::fs::rename(scratch.path("scans/roll-12"), scratch.path("scans/Roll 12, Lisbon")).unwrap();
@@ -467,7 +520,7 @@ fn a_renamed_file_in_a_moved_folder_is_found_by_its_fingerprint() {
     let scratch = Scratch::new();
     let c = catalog(&scratch);
     let library = c.create_library("Personal").unwrap();
-    let image = c.import(&[scratch.image("scans/2024/march/01.png", 1)], loose(library.id), false).unwrap().remove(0);
+    let image = c.import(&[scratch.image("scans/2024/march/01.png", 1)], loose(library.id), false).unwrap().images.remove(0);
     let lookalike = scratch.image("scans/2024/sorted/01.png", 2);
 
     std::fs::create_dir_all(scratch.path("scans/2024/sorted/march")).unwrap();
@@ -486,7 +539,7 @@ fn files_far_away_are_found_next_to_one_that_was_located() {
     let c = catalog(&scratch);
     let library = c.create_library("Personal").unwrap();
     let paths = ["a", "b", "c"].map(|n| scratch.image(&format!("disks/one/old/drive/{n}.png"), n.as_bytes()[0]));
-    let images = c.import(&paths, loose(library.id), false).unwrap();
+    let images = c.import(&paths, loose(library.id), false).unwrap().images;
     std::fs::create_dir_all(scratch.path("new/archive")).unwrap();
     std::fs::rename(scratch.path("disks/one/old/drive"), scratch.path("new/archive/drive")).unwrap();
 
