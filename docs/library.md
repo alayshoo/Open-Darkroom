@@ -18,13 +18,13 @@ image from the grid plays the same motion in reverse.
 
 | Thing | What it holds |
 |---|---|
-| **Catalog** | Everything below, in one database. There is one catalog per user. |
-| **Library** | A named space of images and rolls, such as "Personal" or "Client work". |
+| **Library** | A folder you keep wherever you like, such as "Personal" or "Client work". It holds its images' records, edits, rolls and thumbnails. |
 | **Roll** | A film roll: how it was shot and developed, and the frames on it, in order. |
 | **Image** | One file on disk: where it is, its edit, how it was shot, and its thumbnail. |
 
 A library holds images directly, rolls, or both. An image is either loose in a
-library or a frame on a roll.
+library or a frame on a roll. You can have as many libraries as you like, and the
+app remembers the ones you opened recently.
 
 ### Roll information
 
@@ -43,14 +43,37 @@ white and gamma points, like any other edit.
 
 ## Storage
 
-**A central catalog** in the app's data directory, next to `settings.json` and
-`presets.json`. SQLite is the likely choice. It holds libraries, rolls, image
-records and edits. Thumbnails are cached as files beside it.
+**Each library is self-contained**, so it is never tied to one computer. A
+library is a folder, such as `Personal.odlibrary/`, holding:
 
-Image files stay where they are. The catalog records each file's path and a
-fingerprint (its size plus a hash of its first bytes). A file that has moved can
-be found again from the fingerprint, or the user is asked to point to it.
-Nothing in the library is lost because a file went missing.
+- its database, likely SQLite: rolls, image records, edits
+- its thumbnails
+- the image files imported into it, when they are copied in
+
+Moving to another computer, working from an external drive or keeping a library
+in a synced folder is a matter of copying the folder or opening it where it is.
+There is no export step for that.
+
+### Where the image files are
+
+Importing offers both:
+
+- **Copy into the library.** The library owns its files and moves as one piece.
+- **Reference in place.** The files stay where they are, such as on an archive
+  drive, and the library only points at them.
+
+Files inside the library folder are recorded relative to it, so they survive the
+folder moving. Files outside it are recorded by path and by a fingerprint (their
+size plus a hash of their first bytes). A file that has moved, or a library
+opened on another computer, finds it again from the fingerprint, or the user is
+asked to point to it. Nothing in the library is lost because a file went missing.
+**Open**: which of the two is the default.
+
+### One computer at a time
+
+A library is locked while it is open. Opening it from a second computer, for
+example through a synced folder, says where it is already open instead of
+letting two copies write to the same database.
 
 ## Edits
 
@@ -93,6 +116,18 @@ the canvas's place. The thumbnail then animates from the editor's frame to its
 grid cell while the side bars slide away. Entering runs the same steps backwards
 and hands over to the live canvas once it has drawn.
 
+## Exporting
+
+Moving a library needs no export. These are for sharing, delivering and
+archiving:
+
+| Export | What it is for | What it contains |
+|---|---|---|
+| **Images**: one, a selection, a roll or a library | Delivering finished photos | Rendered files from the existing export, in a batch |
+| **A roll or library as a bundle** | Sharing, archiving, merging into another library | Originals, edits, roll and frame information and thumbnails in one file (such as `.odroll`) that another library imports |
+| **A roll or library, edits only** | The other person already has the scans | Edits and roll information, matched to their files by fingerprint on import, so names and folders need not agree |
+| **One image's edit** | Passing a single look around | A small file next to the image, the way presets export as `.odpreset` |
+
 ## Backend
 
 These land together with the library:
@@ -101,8 +136,8 @@ These land together with the library:
   library needs to open a known path, with the picker kept for importing.
 - **Thumbnails.** Rendered by the backend through the same WGSL as export
   (`export_rendering.rs`), with each image's edit applied. The grid then shows
-  edited images without opening them. Cached on disk and redone when an edit
-  changes.
+  edited images without opening them. Kept in the library and redone when an
+  edit changes.
 - **One image in memory.** The backend holds exactly one full-resolution image
   (`ImageState`). Making thumbnails must not push out the open image, or hold
   two full-resolution buffers at once.
@@ -121,16 +156,13 @@ These land together with the library:
 
 Settled by the prototype, not ahead of it:
 
-- **What a library is.** The proposal: libraries are virtual and each image has
-  one home, either loose in one library or on one roll. That keeps one edit, one
-  roll and one thumbnail per file with no ambiguity. Libraries are not tied to
-  folders on disk, since scanner software often puts a whole session in one
-  folder and folders get renamed. The alternative, an image in several places at
-  once, is better served later by albums.
+- **Where an image lives.** The proposal: each image has one home, either loose
+  in a library or on one roll. That keeps one edit, one roll and one thumbnail
+  per file with no ambiguity. Rolls are not tied to the folders the files sit in,
+  since scanner software often puts a whole session in one folder and folders get
+  renamed. An image in several places at once is better served later by albums.
 - **How rolls are made.** Importing a folder as a roll, making an empty roll and
   dragging frames in, or both.
-- **Importing.** Reference files in place (proposed), or offer to copy them into
-  a managed folder as well.
 - **Undo history.** Kept per session only, or stored with the edit.
 
 ## Later
@@ -138,9 +170,11 @@ Settled by the prototype, not ahead of it:
 Out of scope for the first version, and possible without changing the model
 above:
 
-- **Albums**: groupings that cut across libraries, picked by hand or kept up to date by a rule.
+- **Albums**: groupings within a library that cut across rolls, picked by hand
+  or kept up to date by a rule.
 - **Virtual copies**: one file with more than one edit.
 - **Contact sheets**: a roll laid out as one, on screen and as an export.
 - **Roll information in exports**: film stock, camera and lens written into the
   exported file's metadata.
+- **Shooting log**: a roll's information as a spreadsheet.
 - **Sidecar files**: an optional copy of each edit next to its image.
