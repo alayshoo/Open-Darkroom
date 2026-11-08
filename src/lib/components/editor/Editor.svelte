@@ -22,9 +22,20 @@
     import { editor } from "$lib/editor/editor.svelte";
     import EditorToolbar from "./EditorToolbar.svelte";
     import EditorSideBar from "./EditorSideBar.svelte";
+    import { library } from "$lib/library/library.svelte";
+
+    let {
+        active = true,
+        canvasHidden = false,
+    }: {
+        /** On screen and taking the keyboard. Off, the side bars slide away to the window edges. */
+        active?: boolean;
+        /** Holds the canvas back while the image flies to or from it. */
+        canvasHidden?: boolean;
+    } = $props();
 
     $effect(() => {
-        document.documentElement.dataset.theme = editor.isDarkroom ? "darkroom" : "";
+        document.documentElement.dataset.theme = active && editor.isDarkroom ? "darkroom" : "";
     });
 
     $effect(() => holdPageZoom());
@@ -48,7 +59,8 @@
             undo: editor.undo,
             redo: editor.redo,
             changeMode: editor.toggleMode,
-            openImage: editor.open,
+            openImage: library.openFile,
+            showLibrary: library.toggleView,
             toggleInfo: editor.toggleInfo,
             copyAdjustments: editor.copyAdjustments,
             pasteAdjustments: editor.pasteAdjustments,
@@ -89,6 +101,7 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // or the export menu has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        if (!active) return;
         // Nothing but the window itself answers while an export runs.
         if (editor.isExportPending) {
             e.preventDefault();
@@ -137,8 +150,8 @@
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and
      side bar sit on a higher layer and simply paint over the overflow. -->
-<div class="canvas-backdrop"></div>
-<div class="app-shell flex absolute flex-row gap-3">
+<div class="canvas-backdrop" class:away={!active}></div>
+<div class="app-shell flex absolute flex-row gap-3" class:away={!active} class:canvas-hidden={canvasHidden} inert={!active}>
     <div class="chrome-scrim" class:shifted={panelOpen}>
         <div class="scrim-fill"></div>
     </div>
@@ -227,6 +240,37 @@
         background: var(--canvasBackdrop);
         transition: background-color 0.12s ease;
         z-index: 0;
+    }
+
+    .canvas-backdrop.away {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.35s ease;
+    }
+
+    /* Away, the chrome slides off to the window edges, and back in on return. */
+    .app-shell :global(.toolbar) {
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .app-shell.away :global(.toolbar),
+    .app-shell.away .panel-column {
+        transform: translateX(calc(-100% - var(--panel-width) - 48px));
+        transition: transform 0.35s cubic-bezier(0.4, 0, 1, 1);
+    }
+
+    .app-shell.away :global(.side-bar) {
+        transform: translateX(calc(100% + 52px));
+        transition: transform 0.35s cubic-bezier(0.4, 0, 1, 1);
+    }
+
+    .app-shell.away .chrome-scrim {
+        opacity: 0;
+        transition: opacity 0.25s ease;
+    }
+
+    .app-shell.canvas-hidden :global(canvas) {
+        visibility: hidden;
     }
 
     .app-shell {
@@ -351,7 +395,8 @@
         pointer-events: auto;
         transition:
             width 0.35s cubic-bezier(0.2, 0, 0, 1),
-            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
+            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1),
+            transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
     .panel-column.open {

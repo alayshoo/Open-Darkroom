@@ -10,8 +10,8 @@ import type { ShortcutId } from "./shortcutRegistry";
 import { shortcuts } from "$lib/settings/shortcuts.svelte";
 
 interface ShortcutDeps {
-    /** One entry per action in the registry. */
-    handlers: Record<ShortcutId, () => void>;
+    /** What each action does here. An action with no handler is left to the browser. */
+    handlers: Partial<Record<ShortcutId, () => void>>;
     closeSettings: () => void;
     isSettingsOpen: () => boolean;
     /** Whether an action's shortcut may run now; those it refuses do nothing. */
@@ -55,8 +55,10 @@ export function createKeydownHandler({ handlers, closeSettings, isSettingsOpen, 
 
         if (!id || standsAsideFor(id, e)) return;
         if (allows && !allows(id)) return;
+        const handler = handlers[id];
+        if (!handler) return;
 
-        handlers[id]();
+        handler();
         e.preventDefault();
         (document.activeElement as HTMLElement)?.blur();
     };

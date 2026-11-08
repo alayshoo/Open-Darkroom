@@ -94,3 +94,10 @@ export function fetchFullResolutionRows(
 export function fetchImageMetadata(imageId: number): Promise<ImageMetadata | null> {
     return invoke<ImageMetadata | null>("image_metadata", { imageId });
 }
+
+// Open a file the caller already knows the path of, such as one in the library.
+// A rejection means the backend has released the image it held.
+export async function openImagePath(path: string): Promise<ImagePayload> {
+    const imageId = ++lastImageId;
+    return parseImagePayload(await invoke<ArrayBuffer>("open_image_path", { path, imageId }), imageId);
+}

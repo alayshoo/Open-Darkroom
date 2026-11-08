@@ -43,7 +43,7 @@ import {
 } from "$lib/types/curves";
 import { type ImagePayload } from "$lib/types/imagePayload";
 import { type ImageMetadata } from "$lib/types/imageMetadata";
-import { type ImageEdit, newImageEdit } from "$lib/types/imageEdit";
+import { type ImageEdit, editFitsSource, newImageEdit } from "$lib/types/imageEdit";
 import { type Crop, FULL_FRAME, cropsEqual, isFullFrame, turnCrop, flipCrop } from "$lib/types/crop";
 import {
     type AspectLock,
@@ -56,7 +56,7 @@ import {
 import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
-import { fetchImageMetadata, openImage } from "$lib/utils/openImage";
+import { fetchImageMetadata, openImage, openImagePath } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { exportImage } from "$lib/utils/exportImage";
 import { animateObject } from "$lib/utils/animateObject";
@@ -84,6 +84,9 @@ class Editor {
 
     /** Whether the info panel is open. It shares its column with the presets. */
     infoOpen = $state(false);
+
+    /** The library's id for the open image, or null when it was opened from outside it. */
+    libraryImageId = $state<number | null>(null);
 
     // ===== Control modes and pages =====
 
@@ -307,16 +310,41 @@ class Editor {
             const payload = await openImage();
             if (payload) {
                 this.imagePayload = payload;
+                this.libraryImageId = null;
                 this.zoom = null;
                 this.#resetEdit(payload.fullWidth, payload.fullHeight);
                 this.#loadMetadata(payload.imageId);
             }
         } catch (e) {
-            this.imagePayload = null;
-            this.metadata = null;
+            this.#clearImage();
             console.error("Failed to open image:", e);
         }
     };
+
+    // Opens an image from the library with the edit stored for it, unless that
+    // edit was made on a file of another size. Resolves false on failure.
+    openLibraryImage = async (path: string, libraryImageId: number, stored: ImageEdit | null): Promise<boolean> => {
+        try {
+            const payload = await openImagePath(path);
+            this.imagePayload = payload;
+            this.zoom = null;
+            this.#resetEdit(payload.fullWidth, payload.fullHeight);
+            if (stored && editFitsSource(stored, payload.fullWidth, payload.fullHeight)) this.edit = stored;
+            this.libraryImageId = libraryImageId;
+            this.#loadMetadata(payload.imageId);
+            return true;
+        } catch (e) {
+            this.#clearImage();
+            console.error("Failed to open image:", e);
+            return false;
+        }
+    };
+
+    #clearImage() {
+        this.imagePayload = null;
+        this.metadata = null;
+        this.libraryImageId = null;
+    }
 
     #loadMetadata(imageId: number) {
         this.metadata = null;

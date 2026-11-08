@@ -37,6 +37,18 @@ class Settings {
         void saveSetting("debugTools", value);
     }
 
+    #importCopies = $state(DEFAULTS.importCopies);
+
+    /** Whether an import copies files into the photo folder rather than referencing them in place. */
+    get importCopies() {
+        return this.#importCopies;
+    }
+
+    set importCopies(value: boolean) {
+        this.#importCopies = value;
+        void saveSetting("importCopies", value);
+    }
+
     /**
      * Settles once the stored file has been applied. Reading is a round trip
      * through the backend, so the defaults are what show until it lands — and
@@ -45,6 +57,7 @@ class Settings {
      */
     readonly hydrated: Promise<void> = loadSettings().then((stored) => {
         if (stored.debugTools !== undefined) this.#debugTools = stored.debugTools;
+        if (stored.importCopies !== undefined) this.#importCopies = stored.importCopies;
     });
 
     show(section?: string) {

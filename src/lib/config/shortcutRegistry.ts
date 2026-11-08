@@ -187,7 +187,15 @@ export const shortcutActions = [
         id: "openImage",
         group: "file",
         label: "Open image",
+        description: "Adds the file to the library being looked at, and opens it.",
         defaults: ["ctrl+o"],
+    },
+    {
+        id: "showLibrary",
+        group: "navigation",
+        label: "Library",
+        description: "Back to the library from the open image, and into it again.",
+        defaults: ["g"],
     },
     {
         id: "toggleInfo",

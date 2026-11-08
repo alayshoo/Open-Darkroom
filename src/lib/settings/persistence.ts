@@ -24,6 +24,8 @@ export const SETTINGS_FILE = "settings.json";
  */
 export const DEFAULTS = {
     debugTools: import.meta.env.DEV,
+    /** Imports copy files into the photo folder rather than referencing them where they are. */
+    importCopies: false,
     /**
      * Rebound keyboard shortcuts, keyed by action id — only the actions the
      * user has actually changed. The reader below can vouch for the type and
