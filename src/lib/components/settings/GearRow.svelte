@@ -1,6 +1,6 @@
 <!-- lib/components/settings/GearRow.svelte -->
 <script lang="ts">
-    // One camera, lens, scanner or chemistry setup in the settings list.
+    // One camera, lens, scanner, chemistry setup or lab in the settings list.
     import EditRow from "./EditRow.svelte";
     import { library } from "$lib/library/library.svelte";
     import { STOCK_FORMATS, STOCK_PROCESSES } from "$lib/types/filmStock";
@@ -8,13 +8,14 @@
 
     let { gear, open = false, ontoggle }: { gear: Gear; open?: boolean; ontoggle: () => void } = $props();
 
-    const PLACEHOLDERS: Record<GearKind, { maker: string; name: string; mount?: string }> = {
+    const PLACEHOLDERS: Record<GearKind, { maker?: string; name: string; mount?: string }> = {
         camera: { maker: "Nikon", name: "FM2", mount: "F" },
         lens: { maker: "Nikon", name: "Nikkor 50mm f/1.8 AI-s", mount: "F" },
         scanner: { maker: "Hasselblad", name: "Flextight X1" },
         chemistry: { maker: "Adox", name: "Rodinal" },
+        lab: { name: "Carmencita Film Lab" },
     };
-    const NOUNS: Record<GearKind, string> = { camera: "camera", lens: "lens", scanner: "scanner", chemistry: "setup" };
+    const NOUNS: Record<GearKind, string> = { camera: "camera", lens: "lens", scanner: "scanner", chemistry: "setup", lab: "lab" };
 
     let hints = $derived(PLACEHOLDERS[gear.kind]);
     let hasMount = $derived(gear.kind === "camera" || gear.kind === "lens");
@@ -38,14 +39,22 @@
     deleteLabel={`Delete ${NOUNS[gear.kind]}`}
     ondelete={() => void library.deleteGear(gear.id)}
 >
-    <label class="field">
-        <span>Maker</span>
-        <input value={gear.maker} placeholder={hints.maker} oninput={(e) => update({ maker: e.currentTarget.value })} />
-    </label>
+    {#if gear.kind !== "lab"}
+        <label class="field">
+            <span>Maker</span>
+            <input value={gear.maker} placeholder={hints.maker} oninput={(e) => update({ maker: e.currentTarget.value })} />
+        </label>
+    {/if}
     <label class="field">
         <span>{gear.kind === "camera" || gear.kind === "scanner" ? "Model" : "Name"}</span>
         <input value={gear.name} placeholder={hints.name} oninput={(e) => update({ name: e.currentTarget.value })} />
     </label>
+    {#if gear.kind === "lab"}
+        <label class="field">
+            <span>Location</span>
+            <input value={gear.location} placeholder="Valencia" oninput={(e) => update({ location: e.currentTarget.value })} />
+        </label>
+    {/if}
     {#if hasMount}
         <label class="field">
             <span>Mount</span>

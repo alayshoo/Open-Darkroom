@@ -5,6 +5,7 @@
     import EditableName from "./EditableName.svelte";
     import GearPicker from "./GearPicker.svelte";
     import LensPicker from "./LensPicker.svelte";
+    import { type GearSlot, GEAR_SLOTS } from "$lib/types/gear";
     import { metadataRows } from "$lib/types/imageMetadata";
     import {
         FRAME_FIELDS,
@@ -19,8 +20,8 @@
     let single = $derived(library.selectedImages.length === 1 ? library.selectedImages[0] : null);
     // Dimensions are not known until an image is opened, so the info panel's row for them is left out.
     // Roll fields that pick from the catalog's gear instead of taking free text.
-    const GEAR_SLOTS = { camera: "camera", scanner: "scanner", developer: "chemistry" } as const;
-    const gearSlot = (key: RollField) => (key in GEAR_SLOTS ? GEAR_SLOTS[key as keyof typeof GEAR_SLOTS] : null);
+    const gearSlot = (key: RollField) =>
+        (Object.keys(GEAR_SLOTS) as GearSlot[]).find((slot) => GEAR_SLOTS[slot] === key) ?? null;
 
     let shootingRows = $derived(single ? metadataRows(single.metadata, 0, 0).filter((r) => r.label !== "Dimensions") : []);
 </script>

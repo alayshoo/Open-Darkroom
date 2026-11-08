@@ -14,7 +14,7 @@ import { settings } from "$lib/settings/settings.svelte";
 import { type ImageEdit, cloneImageEdit, newImageEdit, parseImageEdit, serializeImageEdit } from "$lib/types/imageEdit";
 import type { FrameInfo, RollInfo } from "$lib/types/rollInfo";
 import { type FilmStock, type StockFields, stockLabel } from "$lib/types/filmStock";
-import { type Gear, type GearFields, type GearKind, type RollGear, NO_ROLL_GEAR, gearLabel } from "$lib/types/gear";
+import { type Gear, type GearFields, type GearKind, type GearSlot, type RollGear, GEAR_SLOTS, NO_ROLL_GEAR, gearLabel } from "$lib/types/gear";
 import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
 import { history } from "$lib/history/history.svelte";
 import * as api from "./catalogApi";
@@ -355,9 +355,9 @@ class Library {
         return this.gear.filter((g) => g.kind === kind);
     }
 
-    /** Puts a roll on a camera, scanner or chemistry, or takes it off one. */
-    setRollGear = (rollId: number, slot: "camera" | "scanner" | "chemistry", gear: Gear | null) => {
-        const info: RollInfo = { [slot === "chemistry" ? "developer" : slot]: gear ? gearLabel(gear) : "" };
+    /** Puts a roll on a camera, scanner, chemistry or lab, or takes it off one. */
+    setRollGear = (rollId: number, slot: GearSlot, gear: Gear | null) => {
+        const info: RollInfo = { [GEAR_SLOTS[slot]]: gear ? gearLabel(gear) : "" };
         this.updateRoll(rollId, { gear: { [slot]: gear?.id ?? null }, info });
     };
 
@@ -414,7 +414,7 @@ class Library {
                 if (links.lenses.length !== r.gear.lenses.length) {
                     info.lenses = info.lenses?.trim() ? `${info.lenses.trim()}, ${label}` : label;
                 }
-                for (const [slot, key] of [["camera", "camera"], ["scanner", "scanner"], ["chemistry", "developer"]] as const) {
+                for (const [slot, key] of Object.entries(GEAR_SLOTS) as [GearSlot, (typeof GEAR_SLOTS)[GearSlot]][]) {
                     if (links[slot] === id) {
                         links[slot] = null;
                         info[key] = label;

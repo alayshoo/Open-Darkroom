@@ -36,7 +36,7 @@
                 <GearRow {gear} open={openId === gear.id} ontoggle={() => (openId = openId === gear.id ? null : gear.id)} />
             </div>
         {/each}
-        <AddRow label={kind === "chemistry" ? "Add a chemistry setup" : `Add a ${spec.one}`} onclick={add} />
+        <AddRow label={`Add a ${spec.one}`} onclick={add} />
     </SettingsGroup>
 </div>
 

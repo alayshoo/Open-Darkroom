@@ -399,7 +399,7 @@ fn gear_is_kept_with_its_details_and_rolls_point_at_it() {
 
     let library = c.create_library("Personal").unwrap();
     let roll = c.create_roll(library.id, "Lisbon").unwrap();
-    let links = RollGear { camera: Some(camera.id), lenses: vec![fifty.id, wide.id], scanner: None, chemistry: Some(rodinal.id) };
+    let links = RollGear { camera: Some(camera.id), lenses: vec![fifty.id, wide.id], scanner: None, chemistry: Some(rodinal.id), lab: None };
     c.update_roll(roll.id, "Lisbon", &json!({ "lenses": "Old zoom" }), None, &links).unwrap();
     assert_eq!(c.rolls().unwrap()[0].gear, links);
     assert_eq!(c.snapshot().unwrap().gear.len(), 4);
@@ -412,16 +412,19 @@ fn deleting_gear_leaves_its_name_on_the_rolls_that_used_it() {
     let camera = c.create_gear(&gear("camera", "Mamiya", "7", "")).unwrap();
     let lens = c.create_gear(&gear("lens", "Mamiya", "80mm f/4", "Mamiya 7")).unwrap();
     let other = c.create_gear(&gear("lens", "Mamiya", "43mm f/4.5", "Mamiya 7")).unwrap();
+    let lab = c.create_gear(&gear("lab", "", "Carmencita", "")).unwrap();
     let library = c.create_library("Personal").unwrap();
     let roll = c.create_roll(library.id, "Night walks").unwrap();
-    let links = RollGear { camera: Some(camera.id), lenses: vec![lens.id, other.id], ..Default::default() };
+    let links = RollGear { camera: Some(camera.id), lenses: vec![lens.id, other.id], lab: Some(lab.id), ..Default::default() };
     c.update_roll(roll.id, "Night walks", &json!({ "lenses": "Old zoom" }), None, &links).unwrap();
 
     c.delete_gear(camera.id).unwrap();
     c.delete_gear(lens.id).unwrap();
+    c.delete_gear(lab.id).unwrap();
     let roll = &c.rolls().unwrap()[0];
     assert_eq!(roll.gear, RollGear { lenses: vec![other.id], ..Default::default() });
     assert_eq!(roll.info["camera"], "Mamiya 7");
     assert_eq!(roll.info["lenses"], "Old zoom, Mamiya 80mm f/4");
+    assert_eq!(roll.info["lab"], "Carmencita");
     assert_eq!(c.gear().unwrap().len(), 1);
 }

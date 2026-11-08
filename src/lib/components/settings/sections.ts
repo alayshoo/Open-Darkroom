@@ -13,7 +13,7 @@ import ShortcutsSection from "./sections/ShortcutsSection.svelte";
 import LibrarySection from "./sections/LibrarySection.svelte";
 import FilmStocksSection from "./sections/FilmStocksSection.svelte";
 import GearSection from "./sections/GearSection.svelte";
-import HomeLabSection from "./sections/HomeLabSection.svelte";
+import DevelopmentSection from "./sections/DevelopmentSection.svelte";
 
 export interface SettingsSection {
     /** Stable id; what `settings.section` holds. */
@@ -50,10 +50,10 @@ export const settingsSections: SettingsSection[] = [
         component: GearSection,
     },
     {
-        id: "home-lab",
-        label: "Home lab",
+        id: "development",
+        label: "Development",
         icon: "M9.5 3.5h5M10.5 3.5v6L5 19a1 1 0 0 0 .9 1.5h12.2a1 1 0 0 0 .9-1.5l-5.5-9.5v-6M7.5 15h9",
-        component: HomeLabSection,
+        component: DevelopmentSection,
     },
     {
         id: "debug",

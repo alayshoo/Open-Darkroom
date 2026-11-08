@@ -1,6 +1,6 @@
 // src-tauri/src/catalog/gear.rs
 //
-// The cameras, lenses, scanners and home lab chemistry a roll can be shot,
+// The cameras, lenses, scanners, chemistry and labs a roll can be shot,
 // scanned and developed with. Kept in the catalog so they travel with it.
 
 use rusqlite::params;
@@ -21,7 +21,7 @@ pub struct Gear {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GearFields {
-    /// `camera`, `lens`, `scanner` or `chemistry`.
+    /// `camera`, `lens`, `scanner`, `chemistry` or `lab`.
     pub kind: String,
     pub maker: String,
     pub name: String,
@@ -30,13 +30,14 @@ pub struct GearFields {
 }
 
 /// What only some kinds of gear have: a mount for cameras and lenses, formats
-/// for cameras, and a process for chemistry.
+/// for cameras, a process for chemistry and a location for labs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GearDetails {
     pub mount: String,
     pub formats: Vec<String>,
     pub process: String,
+    pub location: String,
 }
 
 impl GearFields {
@@ -54,11 +55,12 @@ pub struct RollGear {
     pub lenses: Vec<i64>,
     pub scanner: Option<i64>,
     pub chemistry: Option<i64>,
+    pub lab: Option<i64>,
 }
 
 impl RollGear {
     fn uses(&self, id: i64) -> bool {
-        self.camera == Some(id) || self.scanner == Some(id) || self.chemistry == Some(id) || self.lenses.contains(&id)
+        self.camera == Some(id) || self.scanner == Some(id) || self.chemistry == Some(id) || self.lab == Some(id) || self.lenses.contains(&id)
     }
 }
 
@@ -129,7 +131,7 @@ impl Catalog {
                 let joined = if others.is_empty() { label.clone() } else { format!("{others}, {label}") };
                 fields.insert("lenses".into(), Value::String(joined));
             }
-            for (slot, key) in [(&mut links.camera, "camera"), (&mut links.scanner, "scanner"), (&mut links.chemistry, "developer")] {
+            for (slot, key) in [(&mut links.camera, "camera"), (&mut links.scanner, "scanner"), (&mut links.chemistry, "developer"), (&mut links.lab, "lab")] {
                 if *slot == Some(id) {
                     *slot = None;
                     fields.insert(key.into(), Value::String(label.clone()));

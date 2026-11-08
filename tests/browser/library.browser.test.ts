@@ -69,7 +69,7 @@ const STORED = (() => {
 const STORED_HISTORY = serializeEditHistory({ steps: [{ type: "slider", key: "exposure", oldValue: 0, newValue: 1 }], pointer: 0 });
 
 const gearRecord = (id: number, kind: string, maker: string, name: string, details: Record<string, string>) => ({
-    id, kind, maker, name, mount: "", formats: [], process: "", ...details,
+    id, kind, maker, name, mount: "", formats: [], process: "", location: "", ...details,
 });
 
 let nextGear = 10;
@@ -92,6 +92,7 @@ function stubTauri() {
             gearRecord(2, "lens", "Mamiya", "80mm f/4", { mount: "Mamiya 7" }),
             gearRecord(3, "lens", "Nikon", "Nikkor 50mm f/1.8", { mount: "F" }),
             gearRecord(4, "chemistry", "Adox", "Rodinal", { process: "B&W" }),
+            gearRecord(5, "lab", "", "Carmencita Film Lab", { location: "Valencia" }),
         ],
         photoFolder: null,
     };
@@ -177,7 +178,7 @@ describe("the library", () => {
                 name: "Portra in Lisbon",
                 info: { filmStock: "Kodak Portra 400", format: "120" },
                 stockId: 1,
-                gear: { camera: null, lenses: [], scanner: null, chemistry: null },
+                gear: { camera: null, lenses: [], scanner: null, chemistry: null, lab: null },
             });
         });
         input.blur();
@@ -277,7 +278,7 @@ describe("the library", () => {
         expect(labels).toEqual(["Set up “HC-110” in Settings…", "No chemistry setup"]);
         [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")][0].click();
         await vi.waitFor(() => expect(settings.open).toBe(true));
-        expect(settings.section).toBe("home-lab");
+        expect(settings.section).toBe("development");
         expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "chemistry", name: "HC-110" });
         const row = await vi.waitFor(() => {
             const open = $(".record.open");
@@ -304,6 +305,31 @@ describe("the library", () => {
         [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")][0].click();
         await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.scanner).toBe(nextGear - 1));
         expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "scanner", name: "Nikon Coolscan V" });
+    });
+
+    it("picks the lab a roll was developed at, from those in Settings", async () => {
+        const radio = (name: string) =>
+            [...document.querySelectorAll<HTMLButtonElement>(".details [role=radio]")].find((b) => b.textContent === name)!;
+        radio("Lab").click();
+        const lab = await vi.waitFor(() => {
+            const field = $<HTMLInputElement>('[role=combobox][aria-label="Lab"]');
+            expect(field).not.toBeNull();
+            return field!;
+        });
+        lab.focus();
+        const options = await vi.waitFor(() => {
+            const found = [...document.querySelectorAll(".picker [role=option]")].map((o) => o.textContent?.replace(/\s+/g, " ").trim());
+            expect(found.length).toBeGreaterThan(0);
+            return found;
+        });
+        expect(options).toEqual(["Carmencita Film Lab Valencia", "Set up a new lab in Settings…"]);
+        [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")][0].click();
+        await vi.waitFor(() => {
+            const last = called("catalog_update_roll").at(-1)?.args;
+            expect(last.gear.lab).toBe(5);
+            expect(last.info).toMatchObject({ lab: "Carmencita Film Lab", developedAt: "Lab" });
+        });
+        radio("Home").click();
     });
 
     it("keeps the dates a roll was shot over as a range", async () => {
