@@ -22,6 +22,8 @@ export type RollField =
     | "devTime"
     | "devTemp"
     | "developedAt"
+    | "lab"
+    | "chemistry"
     | "dateShot"
     | "dateDeveloped"
     | "scanner"
@@ -33,22 +35,34 @@ export interface FieldSpec<K extends string> {
     key: K;
     label: string;
     placeholder?: string;
-    /** Half the row wide, so short values sit two to a line. */
+    /** Half or a third of the row wide, so short values share a line. */
     half?: boolean;
+    third?: boolean;
     multiline?: boolean;
     /** A fixed set of answers instead of free text. */
     options?: readonly string[];
+    /** Shown only while this holds, so fields that do not apply stay out of the way. */
+    when?: (info: RollInfo) => boolean;
 }
+
+const atLab = (info: RollInfo) => info.developedAt === "Lab";
+const atHome = (info: RollInfo) => !atLab(info);
 
 export const ROLL_SECTIONS: { title: string; fields: FieldSpec<RollField>[] }[] = [
     {
         title: "Film",
         fields: [
             { key: "filmStock", label: "Film stock", placeholder: "Kodak Portra 400" },
-            { key: "format", label: "Format", placeholder: "35mm", half: true },
-            { key: "pushPull", label: "Push / pull", placeholder: "+1", half: true },
-            { key: "boxIso", label: "Box ISO", placeholder: "400", half: true },
-            { key: "ratedIso", label: "Rated at", placeholder: "800", half: true },
+            { key: "format", label: "Format", placeholder: "35mm", third: true },
+            { key: "boxIso", label: "Box ISO", placeholder: "400", third: true },
+            { key: "ratedIso", label: "Rated at", placeholder: "800", third: true },
+        ],
+    },
+    {
+        title: "Dates",
+        fields: [
+            { key: "dateShot", label: "Shot", placeholder: "March 2024", half: true },
+            { key: "dateDeveloped", label: "Developed", placeholder: "April 2024", half: true },
         ],
     },
     {
@@ -62,17 +76,13 @@ export const ROLL_SECTIONS: { title: string; fields: FieldSpec<RollField>[] }[] 
         title: "Development",
         fields: [
             { key: "developedAt", label: "Developed", options: ["Home", "Lab"] },
-            { key: "developer", label: "Developer", placeholder: "HC-110" },
-            { key: "dilution", label: "Dilution", placeholder: "1+31", half: true },
-            { key: "devTime", label: "Time", placeholder: "6:30", half: true },
-            { key: "devTemp", label: "Temperature", placeholder: "20 °C", half: true },
-        ],
-    },
-    {
-        title: "Dates",
-        fields: [
-            { key: "dateShot", label: "Shot", placeholder: "March 2024", half: true },
-            { key: "dateDeveloped", label: "Developed", placeholder: "April 2024", half: true },
+            { key: "lab", label: "Lab", when: atLab },
+            { key: "chemistry", label: "Chemistry", placeholder: "Kodak Flexicolor", half: true, when: atLab },
+            { key: "developer", label: "Developer", placeholder: "HC-110", when: atHome },
+            { key: "dilution", label: "Dilution", placeholder: "1+31", half: true, when: atHome },
+            { key: "devTime", label: "Time", placeholder: "6:30", half: true, when: atHome },
+            { key: "devTemp", label: "Temperature", placeholder: "20 °C", half: true, when: atHome },
+            { key: "pushPull", label: "Push / pull", placeholder: "+1", half: true },
         ],
     },
     {

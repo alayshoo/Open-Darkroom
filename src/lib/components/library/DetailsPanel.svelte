@@ -2,6 +2,7 @@
 <script lang="ts">
     import { library } from "$lib/library/library.svelte";
     import StockPicker from "./StockPicker.svelte";
+    import EditableName from "./EditableName.svelte";
     import { metadataRows } from "$lib/types/imageMetadata";
     import {
         FRAME_FIELDS,
@@ -19,7 +20,7 @@
 </script>
 
 {#snippet field(spec: FieldSpec<string>, value: string | undefined, placeholder: string | undefined, onchange: (v: string) => void)}
-    <label class="field flex flex-col" class:half={spec.half}>
+    <label class="field flex flex-col" class:half={spec.half} class:third={spec.third}>
         <span class="label">{spec.label}</span>
         {#if spec.options}
             <div class="choice flex" role="radiogroup" aria-label={spec.label}>
@@ -79,16 +80,13 @@
         {/if}
         {#if roll}
             <section class="flex flex-col">
-                <input
-                    class="roll-name"
-                    aria-label="Roll name"
-                    value={roll.name}
-                    oninput={(e) => library.updateRoll(roll.id, { name: e.currentTarget.value })}
-                />
+                <h2 class="roll-name">
+                    <EditableName value={roll.name} label="Roll name" onrename={(name) => library.updateRoll(roll.id, { name })} />
+                </h2>
                 {#each ROLL_SECTIONS as section (section.title)}
                     <h3>{section.title}</h3>
                     <div class="fields flex flex-wrap">
-                        {#each section.fields as spec (spec.key)}
+                        {#each section.fields.filter((f) => !f.when || f.when(roll.info)) as spec (spec.key)}
                             {#if spec.key === "filmStock"}
                                 <div class="field flex flex-col">
                                     <span class="label">{spec.label}</span>
@@ -133,22 +131,8 @@
     }
 
     .roll-name {
-        margin: 0 -6px 4px;
-        padding: 2px 6px;
-        border: 1px solid transparent;
-        border-radius: 7px;
-        background: transparent;
-        color: var(--color1);
-        font-family: var(--font-ui);
+        margin: 0 0 4px;
         font-size: 20px;
-        font-weight: 600;
-        outline: none;
-    }
-
-    .roll-name:hover,
-    .roll-name:focus {
-        border-color: var(--color5);
-        background: rgba(0, 0, 0, 0.25);
     }
 
     h2 {
@@ -182,12 +166,16 @@
         flex-basis: calc(50% - 4px);
     }
 
+    .field.third {
+        flex-basis: calc((100% - 16px) / 3);
+    }
+
     .label {
         font-size: 12px;
         color: var(--color2);
     }
 
-    input:not(.roll-name),
+    input,
     textarea {
         width: 100%;
         margin: 0;
@@ -203,7 +191,7 @@
         transition: border-color 0.12s ease;
     }
 
-    input:not(.roll-name):focus,
+    input:focus,
     textarea:focus {
         border-color: rgba(255, 255, 255, 0.28);
     }

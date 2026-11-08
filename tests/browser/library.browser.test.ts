@@ -178,6 +178,31 @@ describe("the library", () => {
         });
         expect($(".roll-row .name")).not.toBeNull();
     });
+
+    it("asks a lab-developed roll for the lab and its chemistry instead of a recipe", async () => {
+        const labels = () => [...document.querySelectorAll(".details .field .label")].map((l) => l.textContent);
+        expect(labels()).toContain("Dilution");
+        [...document.querySelectorAll<HTMLButtonElement>(".details [role=radio]")].find((b) => b.textContent === "Lab")!.click();
+        await vi.waitFor(() => expect(labels()).toContain("Chemistry"));
+        expect(labels()).toContain("Lab");
+        expect(labels()).toContain("Push / pull");
+        expect(labels()).not.toContain("Dilution");
+        expect(labels()).not.toContain("Developer");
+    });
+
+    it("renames the roll in place when its name is double-clicked", async () => {
+        $(".head h1 .name-text")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        const field = await vi.waitFor(() => {
+            const input = $<HTMLInputElement>('.head h1 input[aria-label="Roll name"]');
+            expect(input).not.toBeNull();
+            return input!;
+        });
+        await userEvent.fill(field, "Lisbon, spring");
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.name).toBe("Lisbon, spring"));
+        expect($("h1")!.textContent).toBe("Lisbon, spring");
+        expect($(".details .roll-name")!.textContent?.trim()).toBe("Lisbon, spring");
+    });
 });
 
 describe("opening an image", () => {

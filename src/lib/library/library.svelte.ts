@@ -68,6 +68,7 @@ class Library {
 
     /** A library being named in place. */
     renamingId = $state<number | null>(null);
+    renamingRollId = $state<number | null>(null);
     /** A message for the user, with an action to confirm when there is one. */
     notice = $state<{ text: string; confirm?: { label: string; run: () => void } } | null>(null);
 

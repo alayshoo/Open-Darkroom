@@ -25,7 +25,11 @@
         menu = {
             x: e.clientX,
             y: e.clientY,
-            items: [{ label: "Delete roll…", danger: true, action: () => library.deleteRoll(id) }],
+            items: [
+                { label: "Rename", action: () => (library.renamingRollId = id) },
+                { separator: true },
+                { label: "Delete roll…", danger: true, action: () => library.deleteRoll(id) },
+            ],
         };
     }
 
@@ -37,6 +41,18 @@
     function renameKey(e: KeyboardEvent, id: number) {
         if (e.key === "Enter") library.renameLibrary(id, (e.currentTarget as HTMLInputElement).value);
         else if (e.key === "Escape") library.renamingId = null;
+        e.stopPropagation();
+    }
+
+    function renameRoll(id: number, name: string) {
+        if (library.renamingRollId !== id) return;
+        library.renamingRollId = null;
+        if (name.trim()) library.updateRoll(id, { name: name.trim() });
+    }
+
+    function renameRollKey(e: KeyboardEvent, id: number) {
+        if (e.key === "Enter") renameRoll(id, (e.currentTarget as HTMLInputElement).value);
+        else if (e.key === "Escape") library.renamingRollId = null;
         e.stopPropagation();
     }
 </script>
@@ -85,18 +101,30 @@
                 {#each library.rollsOf(lib.id) as roll (roll.id)}
                     {@const currentRoll = library.view?.kind === "roll" && library.view.id === roll.id}
                     {@const stock = library.stockOf(roll)}
-                    <button
-                        class="row roll-row flex items-center"
-                        class:current={currentRoll}
-                        aria-current={currentRoll ? "page" : undefined}
-                        onclick={() => library.show({ kind: "roll", id: roll.id })}
-                        oncontextmenu={(e) => rollMenu(e, roll.id)}
-                    >
-                        <div class="face glass absolute"></div>
-                        <span class="glyph roll-glyph flex"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} /></span>
-                        <span class="name flex-1">{roll.name}</span>
-                        <span class="count">{library.framesOf(roll.id).length}</span>
-                    </button>
+                    {#if library.renamingRollId === roll.id}
+                        <input
+                            class="rename roll-rename"
+                            value={roll.name}
+                            aria-label="Roll name"
+                            use:focusAndSelect
+                            onkeydown={(e) => renameRollKey(e, roll.id)}
+                            onblur={(e) => renameRoll(roll.id, e.currentTarget.value)}
+                        />
+                    {:else}
+                        <button
+                            class="row roll-row flex items-center"
+                            class:current={currentRoll}
+                            aria-current={currentRoll ? "page" : undefined}
+                            onclick={() => library.show({ kind: "roll", id: roll.id })}
+                            ondblclick={() => (library.renamingRollId = roll.id)}
+                            oncontextmenu={(e) => rollMenu(e, roll.id)}
+                        >
+                            <div class="face glass absolute"></div>
+                            <span class="glyph roll-glyph flex"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} /></span>
+                            <span class="name flex-1">{roll.name}</span>
+                            <span class="count">{library.framesOf(roll.id).length}</span>
+                        </button>
+                    {/if}
                 {/each}
             </div>
         {/each}
@@ -256,6 +284,14 @@
         font-size: 14px;
         font-weight: 600;
         outline: none;
+    }
+
+    /* Lines its text up with the roll names around it. */
+    .roll-rename {
+        height: 28px;
+        margin-left: 45px;
+        font-size: 13px;
+        font-weight: 400;
     }
 
     .note {

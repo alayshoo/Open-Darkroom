@@ -9,6 +9,7 @@
     import ImageCell from "./ImageCell.svelte";
     import RollCard from "./RollCard.svelte";
     import DetailsPanel from "./DetailsPanel.svelte";
+    import EditableName from "./EditableName.svelte";
     import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
 
     let { active = true }: { active?: boolean } = $props();
@@ -35,6 +36,11 @@
             .filter(Boolean)
             .join(" · ");
     });
+
+    function rename(name: string) {
+        if (library.currentRoll) library.updateRoll(library.currentRoll.id, { name });
+        else if (library.currentLibrary) void library.renameLibrary(library.currentLibrary.id, name);
+    }
 
     function select(image: ImageRecord, e: MouseEvent) {
         library.select(image.id, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey });
@@ -153,7 +159,7 @@
             {#if library.view}
                 <header class="head flex items-end">
                     <div class="flex flex-col flex-1 min-w-0">
-                        <h1>{title}</h1>
+                        <h1><EditableName value={title} label={library.currentRoll ? "Roll name" : "Library name"} onrename={rename} /></h1>
                         <p class="subtitle">{subtitle}</p>
                     </div>
                     <div class="actions flex">
@@ -391,9 +397,6 @@
         font-size: 26px;
         font-weight: 600;
         color: var(--color1);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
 
     .subtitle {
