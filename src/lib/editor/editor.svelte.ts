@@ -24,6 +24,7 @@ import { history } from "$lib/history/history.svelte";
 import { applyAction, undoAction, type StateAccessors } from "$lib/history/historyDispatch";
 import { actionMode, actionPage } from "$lib/history/actionControls";
 import type { Action } from "$lib/types/historyActions";
+import type { EditHistory } from "$lib/types/editHistory";
 import { type Retouch, type RetouchMode, retouchEqual } from "$lib/types/retouch";
 import {
     type Sliders,
@@ -323,13 +324,21 @@ class Editor {
 
     // Opens an image from the library with the edit stored for it, unless that
     // edit was made on a file of another size. Resolves false on failure.
-    openLibraryImage = async (path: string, libraryImageId: number, stored: ImageEdit | null): Promise<boolean> => {
+    openLibraryImage = async (
+        path: string,
+        libraryImageId: number,
+        stored: ImageEdit | null,
+        storedHistory: EditHistory | null = null,
+    ): Promise<boolean> => {
         try {
             const payload = await openImagePath(path);
             this.imagePayload = payload;
             this.zoom = null;
             this.#resetEdit(payload.fullWidth, payload.fullHeight);
-            if (stored && editFitsSource(stored, payload.fullWidth, payload.fullHeight)) this.edit = stored;
+            if (stored && editFitsSource(stored, payload.fullWidth, payload.fullHeight)) {
+                this.edit = stored;
+                if (storedHistory) history.restore(storedHistory.steps, storedHistory.pointer);
+            }
             this.libraryImageId = libraryImageId;
             this.#loadMetadata(payload.imageId);
             return true;

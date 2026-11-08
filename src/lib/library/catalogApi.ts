@@ -99,7 +99,9 @@ export const setFrameInfo = (id: number, info: FrameInfo) => invoke<void>("catal
 export const locateImage = (id: number) => invoke<ImageRecord | null>("catalog_locate", { id });
 
 export const fetchEdit = (id: number) => invoke<string | null>("catalog_edit", { id });
-export const saveEdit = (id: number, edit: string) => invoke<number>("catalog_save_edit", { id, edit });
+export const fetchEditHistory = (id: number) => invoke<string | null>("catalog_edit_history", { id });
+export const saveEdit = (id: number, edit: string, history: string | null) =>
+    invoke<number>("catalog_save_edit", { id, edit, history });
 
 export const choosePhotoFolder = () => invoke<string | null>("catalog_choose_photo_folder");
 

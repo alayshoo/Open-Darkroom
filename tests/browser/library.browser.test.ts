@@ -18,6 +18,8 @@ import { editor } from "$lib/editor/editor.svelte";
 import { library } from "$lib/library/library.svelte";
 import { settings } from "$lib/settings/settings.svelte";
 import { newImageEdit, parseImageEdit, serializeImageEdit } from "$lib/types/imageEdit";
+import { parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
+import { history } from "$lib/history/history.svelte";
 import type { GPUSession } from "$lib/types/gpuTypes";
 
 const SIZE = 8;
@@ -63,6 +65,9 @@ const STORED = (() => {
     return serializeImageEdit(edit);
 })();
 
+// The history that led to it: one step.
+const STORED_HISTORY = serializeEditHistory({ steps: [{ type: "slider", key: "exposure", oldValue: 0, newValue: 1 }], pointer: 0 });
+
 const gearRecord = (id: number, kind: string, maker: string, name: string, details: Record<string, string>) => ({
     id, kind, maker, name, mount: "", formats: [], process: "", ...details,
 });
@@ -95,6 +100,7 @@ function stubTauri() {
             if (cmd.startsWith("catalog_") || cmd === "open_image_path") calls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? {})) });
             if (cmd === "catalog_load") return structuredClone(catalog);
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
+            if (cmd === "catalog_edit_history") return args.id === 2 ? STORED_HISTORY : null;
             if (cmd === "catalog_save_edit") return 1234;
             if (cmd === "catalog_create_gear") return { id: nextGear++, ...args.gear };
             if (cmd === "catalog_create_stock") return { id: 100 + calls.length, ...args.stock };
@@ -333,6 +339,8 @@ describe("opening an image", () => {
         await vi.waitFor(() => expect(editor.libraryImageId).toBe(2));
         expect(called("open_image_path").at(-1)!.args.path).toBe("/scans/frame01.tif");
         expect(editor.edit.sliders.exposure).toBe(1);
+        expect(history.stack).toHaveLength(1);
+        expect(history.canUndo).toBe(true);
         await vi.waitFor(() => expect(library.flyingId).toBeNull(), { timeout: 5000 });
         expect(document.querySelector(".library-flyer")).toBeNull();
     });
@@ -345,6 +353,7 @@ describe("opening an image", () => {
         const saved = called("catalog_save_edit").at(-1)!.args;
         expect(saved.id).toBe(2);
         expect(parseImageEdit(saved.edit)!.sliders).toMatchObject({ exposure: 1, contrast: 25 });
+        expect(parseEditHistory(saved.history)).toMatchObject({ pointer: 0, steps: [{ key: "exposure" }] });
         await vi.waitFor(() => expect(library.images.find((i) => i.id === 2)!.edited).toBe(1234));
     });
 

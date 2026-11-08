@@ -143,10 +143,14 @@ fn edits_are_stored_and_read_back() {
     assert_eq!(c.edit(image.id).unwrap(), None);
     assert_eq!(image.edited, None);
 
-    let saved = c.save_edit(image.id, r#"{"version":1}"#).unwrap();
+    let saved = c.save_edit(image.id, r#"{"version":1}"#, Some(r#"{"pointer":0}"#)).unwrap();
     assert_eq!(c.edit(image.id).unwrap().as_deref(), Some(r#"{"version":1}"#));
+    assert_eq!(c.edit_history(image.id).unwrap().as_deref(), Some(r#"{"pointer":0}"#));
     assert_eq!(c.image(image.id).unwrap().edited, Some(saved));
-    assert!(c.save_edit(9999, "{}").is_err());
+    assert!(c.save_edit(9999, "{}", None).is_err());
+
+    c.save_edit(image.id, r#"{"version":1}"#, None).unwrap();
+    assert_eq!(c.edit_history(image.id).unwrap(), None);
 }
 
 #[test]

@@ -34,7 +34,7 @@ pub const THUMBNAIL_DIR: &str = "thumbnails";
 /// Bytes read from the start of a file for its fingerprint.
 const FINGERPRINT_BYTES: usize = 64 * 1024;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS images (
     metadata        TEXT NOT NULL DEFAULT '{}',
     frame_info      TEXT NOT NULL DEFAULT '{}',
     edit            TEXT,
+    history         TEXT,
     edited          INTEGER,
     added           INTEGER NOT NULL
 );
@@ -242,35 +243,22 @@ impl Catalog {
 
     /// Brings a catalog written by an older build up to this one's schema.
     fn migrate(&self) -> Result<(), String> {
-        let has_stock: bool = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM pragma_table_info('rolls') WHERE name = 'stock_id'", [], |r| {
-                r.get::<_, i64>(0)
-            })
-            .map(|n| n > 0)
-            .map_err(err)?;
-        let has_third: bool = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM pragma_table_info('film_stocks') WHERE name = 'colour3'", [], |r| {
-                r.get::<_, i64>(0)
-            })
-            .map(|n| n > 0)
-            .map_err(err)?;
-        if !has_third {
-            self.conn.execute_batch("ALTER TABLE film_stocks ADD COLUMN colour3 TEXT;").map_err(err)?;
-        }
-        let has_gear: bool = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM pragma_table_info('rolls') WHERE name = 'gear'", [], |r| r.get::<_, i64>(0))
-            .map(|n| n > 0)
-            .map_err(err)?;
-        if !has_gear {
-            self.conn.execute_batch("ALTER TABLE rolls ADD COLUMN gear TEXT NOT NULL DEFAULT '{}';").map_err(err)?;
-        }
-        if !has_stock {
-            self.conn
-                .execute_batch("ALTER TABLE rolls ADD COLUMN stock_id INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL;")
+        let columns = [
+            ("film_stocks", "colour3", "TEXT"),
+            ("rolls", "gear", "TEXT NOT NULL DEFAULT '{}'"),
+            ("rolls", "stock_id", "INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL"),
+            ("images", "history", "TEXT"),
+        ];
+        for (table, column, definition) in columns {
+            let has: i64 = self
+                .conn
+                .query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"), params![column], |r| {
+                    r.get(0)
+                })
                 .map_err(err)?;
+            if has == 0 {
+                self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};")).map_err(err)?;
+            }
         }
         self.conn
             .execute(
@@ -644,12 +632,22 @@ impl Catalog {
             .map_err(err)
     }
 
-    /// Stores an edit and returns when it was saved.
-    pub fn save_edit(&self, id: i64, edit: &str) -> Result<i64, String> {
+    /// The undo history stored with the edit, as the frontend wrote it.
+    pub fn edit_history(&self, id: i64) -> Result<Option<String>, String> {
+        self.conn
+            .query_row("SELECT history FROM images WHERE id = ?1", params![id], |r| r.get(0))
+            .map_err(err)
+    }
+
+    /// Stores an edit with the undo history that led to it, and returns when it was saved.
+    pub fn save_edit(&self, id: i64, edit: &str, history: Option<&str>) -> Result<i64, String> {
         let edited = now();
         let changed = self
             .conn
-            .execute("UPDATE images SET edit = ?1, edited = ?2 WHERE id = ?3", params![edit, edited, id])
+            .execute(
+                "UPDATE images SET edit = ?1, history = ?2, edited = ?3 WHERE id = ?4",
+                params![edit, history, edited, id],
+            )
             .map_err(err)?;
         if changed == 0 {
             return Err(format!("No image {id} in the catalog"));

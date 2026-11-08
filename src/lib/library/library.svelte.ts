@@ -15,6 +15,8 @@ import { type ImageEdit, cloneImageEdit, newImageEdit, parseImageEdit, serialize
 import type { FrameInfo, RollInfo } from "$lib/types/rollInfo";
 import { type FilmStock, type StockFields, stockLabel } from "$lib/types/filmStock";
 import { type Gear, type GearFields, type GearKind, type RollGear, NO_ROLL_GEAR, gearLabel } from "$lib/types/gear";
+import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
+import { history } from "$lib/history/history.svelte";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
 import { fitRect, fly, imageRect, land, nextFrame, rectOf, settle } from "./flight";
@@ -27,6 +29,16 @@ const SAVE_DELAY_MS = 400;
 const THUMBNAIL_DELAY_MS = 1200;
 // How long leaving the editor waits for a fresh thumbnail before flying the last one.
 const FRESH_THUMBNAIL_WAIT_MS = 350;
+
+/** The open image's edit and undo history, as they are stored. */
+type Saved = { edit: string; history: string };
+
+function openSaved(): Saved {
+    return {
+        edit: serializeImageEdit(editor.edit),
+        history: serializeEditHistory({ steps: history.stack, pointer: history.pointer }),
+    };
+}
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -657,16 +669,18 @@ class Library {
 
     // ===== Saving the open image's edit =====
 
-    #lastSaved = new Map<number, string>();
-    #pendingSave: { id: number; text: string } | null = null;
+    #lastSaved = new Map<number, Saved>();
+    #pendingSave: ({ id: number } & Saved) | null = null;
     #saveTimer: ReturnType<typeof setTimeout> | null = null;
     #thumbTimer: ReturnType<typeof setTimeout> | null = null;
 
-    #scheduleSave(id: number, text: string) {
-        if (this.#lastSaved.get(id) === text) return;
-        this.#pendingSave = { id, text };
+    #scheduleSave(id: number, saved: Saved) {
+        const last = this.#lastSaved.get(id);
+        if (last?.edit === saved.edit && last.history === saved.history) return;
+        this.#pendingSave = { id, ...saved };
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
         this.#saveTimer = setTimeout(() => void this.flushSave(), SAVE_DELAY_MS);
+        if (last?.edit === saved.edit) return;
         if (this.#thumbTimer) clearTimeout(this.#thumbTimer);
         this.#thumbTimer = setTimeout(() => this.#rerenderOpen(), THUMBNAIL_DELAY_MS);
     }
@@ -678,10 +692,11 @@ class Library {
         const pending = this.#pendingSave;
         this.#pendingSave = null;
         if (!pending) return;
+        const { id, ...saved } = pending;
         try {
-            const edited = await api.saveEdit(pending.id, pending.text);
-            this.#lastSaved.set(pending.id, pending.text);
-            this.images = this.images.map((i) => (i.id === pending.id ? { ...i, edited } : i));
+            const edited = await api.saveEdit(id, saved.edit, saved.history);
+            this.#lastSaved.set(id, saved);
+            this.images = this.images.map((i) => (i.id === id ? { ...i, edited } : i));
         } catch (e) {
             this.#fail("The edit could not be saved", e);
         }
@@ -705,13 +720,17 @@ class Library {
     async #openInEditor(image: ImageRecord): Promise<boolean> {
         await this.flushSave();
         let stored: ImageEdit | null = null;
+        let storedHistory: EditHistory | null = null;
         try {
-            stored = await this.#storedEdit(image.id);
+            [stored, storedHistory] = await Promise.all([
+                this.#storedEdit(image.id),
+                api.fetchEditHistory(image.id).then(parseEditHistory),
+            ]);
         } catch (e) {
             console.error("Failed to read the stored edit:", e);
         }
-        const opened = await editor.openLibraryImage(image.path, image.id, stored);
-        if (opened) this.#lastSaved.set(image.id, serializeImageEdit(editor.edit));
+        const opened = await editor.openLibraryImage(image.path, image.id, stored, storedHistory);
+        if (opened) this.#lastSaved.set(image.id, openSaved());
         return opened;
     }
 
@@ -825,8 +844,8 @@ class Library {
             $effect(() => {
                 const id = editor.libraryImageId;
                 if (id === null || !editor.imagePayload) return;
-                const text = serializeImageEdit(editor.edit);
-                untrack(() => this.#scheduleSave(id, text));
+                const saved = openSaved();
+                untrack(() => this.#scheduleSave(id, saved));
             });
         });
     }

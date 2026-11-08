@@ -229,8 +229,18 @@ pub(crate) fn catalog_edit(state: tauri::State<'_, CatalogState>, id: i64) -> Re
 }
 
 #[tauri::command]
-pub(crate) fn catalog_save_edit(state: tauri::State<'_, CatalogState>, id: i64, edit: String) -> Result<i64, String> {
-    with_catalog(&state, |c| c.save_edit(id, &edit))
+pub(crate) fn catalog_edit_history(state: tauri::State<'_, CatalogState>, id: i64) -> Result<Option<String>, String> {
+    with_catalog(&state, |c| c.edit_history(id))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_save_edit(
+    state: tauri::State<'_, CatalogState>,
+    id: i64,
+    edit: String,
+    history: Option<String>,
+) -> Result<i64, String> {
+    with_catalog(&state, |c| c.save_edit(id, &edit, history.as_deref()))
 }
 
 /// Picks the folder copied-in images go to. None when dismissed.
