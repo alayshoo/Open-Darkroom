@@ -161,6 +161,23 @@ These land together with the library:
   come back unchanged (alayshoo/Open-Darkroom#62).
 - Camera metadata is read on open and shown in the info panel
   (alayshoo/Open-Darkroom#63).
+- The first prototype: the catalog (`catalog.rs`, SQLite), opening by path,
+  thumbnails rendered through the export WGSL, edits saved as they are made,
+  the library view with roll and frame information, and the fly-back. Not yet:
+  exporting, albums, finding a moved file by fingerprint without being asked.
+
+### What the prototype settled on
+
+To be revisited once it has been used:
+
+- Imports are referenced in place by default. Copying into the photo folder is
+  a setting, and puts each library and roll in a folder of its own.
+- An image has one home, loose in a library or on one roll. There is no inbox:
+  opening a file adds it to the library or roll being looked at, making a first
+  library if there is none.
+- Rolls are made both ways: a folder imported as a roll, or a new roll that
+  frames are added or moved to.
+- Undo history stays with the session.
 
 ## Open questions
 
