@@ -22,19 +22,20 @@
             </linearGradient>
         </defs>
     {/if}
-    <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
-        {#if colour}
-            <rect x="3.5" y="6" width="10" height="14" rx="2" fill={colour} stroke="none" />
-            {#if foot}
-                <path d="M3.5 14.5h10v3.5a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2z" fill={foot} stroke="none" />
-            {/if}
-        {:else}
-            <rect x="3.5" y="6" width="10" height="14" rx="2" />
+    {#if colour}
+        <rect x="3.5" y="6" width="10" height="14" rx="2" fill={colour} />
+        {#if foot}
+            <path d="M3.5 13.5h10v4.5a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2z" fill={foot} />
         {/if}
-        <path d="M6.5 6V3.8h4V6" />
+        <rect x="3.5" y="6" width="10" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="0.5" stroke-opacity="0.6" />
+    {:else}
+        <rect x="3.5" y="6" width="10" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.1" />
+    {/if}
+    <g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="butt">
+        <path d="M6.5 6V4h4v2" />
         <path d="M13.5 9.5h5l1.5 1.5v5.5h-6.5" />
-        <path d="M15.6 12h0.01M18 12h0.01" stroke-width="1.8" />
     </g>
+    <path d="M15.6 12h0.01M18 12h0.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
 </svg>
 
 <style>

@@ -52,14 +52,14 @@ const SLIDE: &str = "slide";
 const BW: &str = "blackAndWhite";
 
 /// The makers' own colours, which most of their stocks share.
-const KODAK: &str = "#f7c600";
+const KODAK: &str = "#ecb445";
 const FUJIFILM: &str = "#2e9e4f";
 const BLACK: &str = "#1c1c1c";
 const BLUE: &str = "#2f6db5";
 const RED: &str = "#d7262f";
 const MAGENTA: &str = "#c2187a";
-const PORTRA: &[&str] = &["#ecb445", "#7174b5", "#793a8e"];
-const TRI_X: &[&str] = &[KODAK, "#3a6c57"];
+const PORTRA: &[&str] = &[KODAK, "#7174b5", "#793a8e"];
+const TRI_X: &[&str] = &[KODAK, "#22875a"];
 const T_MAX: &[&str] = &[KODAK, "#9ca2b3"];
 
 const ALL: &[&str] = &["35mm", "120", "Sheet"];
