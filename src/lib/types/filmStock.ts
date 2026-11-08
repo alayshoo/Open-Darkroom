@@ -13,9 +13,10 @@ export interface StockFields {
     kind: StockKind;
     process: StockProcess;
     formats: string[];
-    /** `#rrggbb`. */
+    /** `#rrggbb`: the box's main colour, and up to two more that mark it. */
     colour: string | null;
     colour2: string | null;
+    colour3: string | null;
 }
 
 export interface FilmStock extends StockFields {
@@ -59,6 +60,7 @@ export function stockFromText(text: string): StockFields {
         formats: [],
         colour: null,
         colour2: null,
+        colour3: null,
     };
 }
 

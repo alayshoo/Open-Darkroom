@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS film_stocks (
     process   TEXT NOT NULL,
     formats   TEXT NOT NULL DEFAULT '[]',
     colour    TEXT,
-    colour2   TEXT
+    colour2   TEXT,
+    colour3   TEXT
 );
 CREATE TABLE IF NOT EXISTS rolls (
     id         INTEGER PRIMARY KEY,
@@ -235,6 +236,16 @@ impl Catalog {
             })
             .map(|n| n > 0)
             .map_err(err)?;
+        let has_third: bool = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('film_stocks') WHERE name = 'colour3'", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map(|n| n > 0)
+            .map_err(err)?;
+        if !has_third {
+            self.conn.execute_batch("ALTER TABLE film_stocks ADD COLUMN colour3 TEXT;").map_err(err)?;
+        }
         if !has_stock {
             self.conn
                 .execute_batch("ALTER TABLE rolls ADD COLUMN stock_id INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL;")

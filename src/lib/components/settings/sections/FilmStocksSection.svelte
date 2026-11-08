@@ -28,6 +28,7 @@
             formats: ["35mm"],
             colour: "#808080",
             colour2: null,
+            colour3: null,
         });
         if (stock) openId = stock.id;
     }

@@ -31,7 +31,7 @@
         {/each}
     </div>
     <div class="meta flex flex-col">
-        <span class="name flex items-center gap-1.5"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} size={18} />{roll.name}</span>
+        <span class="name flex items-center gap-1.5"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} size={18} />{roll.name}</span>
         <span class="summary">{summary || "No film information yet"}</span>
         <span class="count">{frames.length} frame{frames.length === 1 ? "" : "s"}</span>
     </div>

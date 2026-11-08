@@ -266,7 +266,10 @@ fn a_new_catalog_is_seeded_with_stocks_once() {
     assert_eq!(stocks.len(), seeded);
     let portra = stocks.iter().find(|s| s.fields.label() == "Kodak Portra 400").unwrap();
     assert_eq!((portra.fields.box_iso, portra.fields.process.as_str()), (Some(400), "C-41"));
-    assert!(portra.fields.colour.is_some());
+    assert_eq!(
+        [&portra.fields.colour, &portra.fields.colour2, &portra.fields.colour3].map(|c| c.as_deref()),
+        [Some("#ecb445"), Some("#7174b5"), Some("#793a8e")],
+    );
 
     // A deleted stock stays deleted the next time the catalog opens.
     catalog(&scratch).delete_film_stock(portra.id).unwrap();
@@ -288,9 +291,11 @@ fn stocks_are_added_and_edited_and_a_roll_keeps_its_stock_name_when_it_goes() {
         formats: vec!["35mm".into(), "120".into()],
         colour: Some("#3a6ea5".into()),
         colour2: None,
+        colour3: None,
     };
     let stock = c.create_film_stock(&fields).unwrap();
-    fields.colour2 = Some("#e8e8e8".into());
+    fields.colour2 = Some("#1c1c1c".into());
+    fields.colour3 = Some("#642f88".into());
     c.update_film_stock(stock.id, &fields).unwrap();
     let stored = c.film_stocks().unwrap().into_iter().find(|s| s.id == stock.id).unwrap();
     assert_eq!(stored.fields, fields);

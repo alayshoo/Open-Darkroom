@@ -47,7 +47,7 @@
 
 <div class="stock flex flex-col" class:open>
     <button class="line flex items-center" aria-expanded={open} onclick={ontoggle}>
-        <FilmCanister colour={stock.colour} colour2={stock.colour2} size={22} />
+        <FilmCanister colour={stock.colour} colour2={stock.colour2} colour3={stock.colour3} size={22} />
         <span class="name">{stock.name || "Untitled stock"}</span>
         <span class="summary flex-1">{summary}</span>
         <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
@@ -93,10 +93,30 @@
                             value={stock.colour2}
                             oninput={(e) => update({ colour2: e.currentTarget.value })}
                         />
-                        <button class="text-button" onclick={() => update({ colour2: null })}>Remove second</button>
-                    {:else}
-                        <button class="text-button" onclick={() => update({ colour2: stock.colour ?? "#808080" })}>
-                            Add a second
+                    {/if}
+                    {#if stock.colour3}
+                        <input
+                            type="color"
+                            aria-label="Third colour"
+                            value={stock.colour3}
+                            oninput={(e) => update({ colour3: e.currentTarget.value })}
+                        />
+                    {/if}
+                    {#if !stock.colour3}
+                        <button
+                            class="text-button"
+                            onclick={() =>
+                                update(stock.colour2 ? { colour3: stock.colour2 } : { colour2: stock.colour ?? "#808080" })}
+                        >
+                            Add a colour
+                        </button>
+                    {/if}
+                    {#if stock.colour2}
+                        <button
+                            class="text-button"
+                            onclick={() => update(stock.colour3 ? { colour3: null } : { colour2: null })}
+                        >
+                            Remove the last
                         </button>
                     {/if}
                 </div>

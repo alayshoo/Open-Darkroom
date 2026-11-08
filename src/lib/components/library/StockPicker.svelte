@@ -69,7 +69,7 @@
 
 <div class="picker relative">
     <div class="field-box flex items-center">
-        <FilmCanister colour={stock?.colour} colour2={stock?.colour2} size={18} />
+        <FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} size={18} />
         <input
             bind:this={input}
             role="combobox"
@@ -106,7 +106,7 @@
                     {:else if option === "clear"}
                         <span class="label muted">No stock</span>
                     {:else}
-                        <FilmCanister colour={option.colour} colour2={option.colour2} size={18} />
+                        <FilmCanister colour={option.colour} colour2={option.colour2} colour3={option.colour3} size={18} />
                         <span class="label flex-1">{stockLabel(option)}</span>
                         <span class="meta">{option.process}</span>
                     {/if}
