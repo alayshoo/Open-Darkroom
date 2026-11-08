@@ -42,7 +42,6 @@
         border: 0;
         border-radius: 14px;
         background: var(--bg3);
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
         color: inherit;
         text-align: left;
         cursor: default;

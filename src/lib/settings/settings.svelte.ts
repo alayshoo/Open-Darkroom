@@ -49,6 +49,30 @@ class Settings {
         void saveSetting("importCopies", value);
     }
 
+    #libraryDetails = $state(DEFAULTS.libraryDetails);
+
+    /** Whether the library shows its details panel on the right. */
+    get libraryDetails() {
+        return this.#libraryDetails;
+    }
+
+    set libraryDetails(value: boolean) {
+        this.#libraryDetails = value;
+        void saveSetting("libraryDetails", value);
+    }
+
+    #groupRolls = $state(DEFAULTS.groupRolls);
+
+    /** A library shows its rolls as cards above its loose images, rather than every image in one grid. */
+    get groupRolls() {
+        return this.#groupRolls;
+    }
+
+    set groupRolls(value: boolean) {
+        this.#groupRolls = value;
+        void saveSetting("groupRolls", value);
+    }
+
     /**
      * Settles once the stored file has been applied. Reading is a round trip
      * through the backend, so the defaults are what show until it lands — and
@@ -58,6 +82,8 @@ class Settings {
     readonly hydrated: Promise<void> = loadSettings().then((stored) => {
         if (stored.debugTools !== undefined) this.#debugTools = stored.debugTools;
         if (stored.importCopies !== undefined) this.#importCopies = stored.importCopies;
+        if (stored.libraryDetails !== undefined) this.#libraryDetails = stored.libraryDetails;
+        if (stored.groupRolls !== undefined) this.#groupRolls = stored.groupRolls;
     });
 
     show(section?: string) {

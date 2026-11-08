@@ -22,6 +22,10 @@
             const parts = [`In ${library.currentLibrary?.name ?? ""}`, summary].filter(Boolean);
             return parts.join(" · ");
         }
+        if (!settings.groupRolls) {
+            const count = library.shownImages.length;
+            return `${count} image${count === 1 ? "" : "s"}`;
+        }
         const rolls = library.shownRolls.length;
         const loose = library.shownImages.length;
         return [
@@ -160,6 +164,22 @@
                         <button class="action primary" onclick={library.importFiles}>
                             {library.view.kind === "roll" ? "Add frames" : "Import images"}
                         </button>
+                        <button
+                            class="panel-toggle"
+                            class:on={settings.libraryDetails}
+                            aria-label={settings.libraryDetails ? "Hide details" : "Show details"}
+                            aria-pressed={settings.libraryDetails}
+                            title={settings.libraryDetails ? "Hide details" : "Show details"}
+                            onclick={() => (settings.libraryDetails = !settings.libraryDetails)}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+                                    <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+                                    <path d="M14.5 5v14" />
+                                </g>
+                                <path class="fill" d="M14.5 5h3.5a2.5 2.5 0 0 1 2.5 2.5v9a2.5 2.5 0 0 1-2.5 2.5h-3.5z" fill="currentColor" />
+                            </svg>
+                        </button>
                     </div>
                 </header>
 
@@ -219,8 +239,10 @@
             {/if}
         </main>
 
-        <div class="details-column shrink-0">
-            <DetailsPanel />
+        <div class="details-column shrink-0" class:closed={!settings.libraryDetails} inert={!settings.libraryDetails}>
+            <div class="details-slide h-full">
+                <DetailsPanel />
+            </div>
         </div>
     </div>
 
@@ -285,6 +307,56 @@
 
     .details-column {
         width: 300px;
+        transition:
+            transform 0.35s cubic-bezier(0.2, 0, 0, 1),
+            opacity 0.35s ease,
+            width 0.35s cubic-bezier(0.2, 0, 0, 1),
+            margin-left 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    /* Closed, the grid takes its room and the panel slides off the window
+       edge at its own width, so its fields never reflow on the way. */
+    .details-column.closed {
+        width: 0;
+        margin-left: -12px;
+    }
+
+    .details-slide {
+        width: 300px;
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .details-column.closed .details-slide {
+        transform: translateX(calc(100% + 24px));
+    }
+
+    .panel-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        margin-left: 4px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--color2);
+        cursor: default;
+        transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .panel-toggle:hover {
+        background: var(--bg4);
+        color: var(--color1);
+    }
+
+    .panel-toggle .fill {
+        opacity: 0;
+        transition: opacity 0.15s ease;
+    }
+
+    .panel-toggle.on .fill {
+        opacity: 0.35;
     }
 
     .library-layer:not(.active) .nav-column {
@@ -314,6 +386,7 @@
 
     h1 {
         margin: 0;
+        line-height: 1.3;
         font-family: var(--font-ui);
         font-size: 26px;
         font-weight: 600;
@@ -325,6 +398,7 @@
 
     .subtitle {
         margin: 2px 0 0;
+        line-height: 1.4;
         font-size: 13px;
         color: var(--color3);
         overflow: hidden;

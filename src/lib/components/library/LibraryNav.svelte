@@ -67,12 +67,12 @@
                     <button
                         class="row library-row flex items-center"
                         class:current
-                        class:glass={current}
                         aria-current={current ? "page" : undefined}
                         onclick={() => library.show({ kind: "library", id: lib.id })}
                         ondblclick={() => (library.renamingId = lib.id)}
                         oncontextmenu={(e) => libraryMenu(e, lib.id)}
                     >
+                        <div class="face glass absolute"></div>
                         <svg class="glyph" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
                             <rect x="3.5" y="5.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" />
                             <path d="M3.5 15l4.5-4 4 3.5 3-2.5 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
@@ -86,11 +86,11 @@
                     <button
                         class="row roll-row flex items-center"
                         class:current={currentRoll}
-                        class:glass={currentRoll}
                         aria-current={currentRoll ? "page" : undefined}
                         onclick={() => library.show({ kind: "roll", id: roll.id })}
                         oncontextmenu={(e) => rollMenu(e, roll.id)}
                     >
+                        <div class="face glass absolute"></div>
                         <svg class="glyph" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
                             <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
                                 <rect x="4" y="5" width="11" height="14" rx="1.5" />
@@ -155,6 +155,7 @@
     }
 
     .row {
+        position: relative;
         gap: 8px;
         height: 30px;
         padding: 0 10px;
@@ -169,22 +170,50 @@
         transition: background 0.12s ease, color 0.12s ease;
     }
 
-    .row:not(.current):hover {
-        background: color-mix(in srgb, var(--glassRim) 6%, transparent);
+    .row:hover,
+    .row.current {
         color: var(--color1);
     }
 
-    /* The selected row takes the glass the settings tabs do: a light tint and
-       the rim, with no blur over the flat side list. */
-    .row.current {
-        --panel-tint: color-mix(in srgb, var(--glassRim) 8%, transparent);
-        --rim-hi: 0.2;
-        --rim-mid: 0.09;
+    .row > :not(.face) {
+        position: relative;
+    }
+
+    /* The presets' glass chip, held up under the selected row and half shown on hover. */
+    .face {
+        --panel-angle: 160deg;
+        --panel-tint: color-mix(in srgb, var(--glassRim) 7%, transparent);
+        --rim-hi: 0.45;
+        --rim-mid: 0.12;
         --rim-lo: 0.05;
-        --rim-end: 0.1;
+        --rim-end: 0.12;
+        inset: 1px 0;
+        border-radius: 8px;
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
-        color: var(--color1);
+        box-shadow:
+            1.5px 1.8px 5px rgba(0, 0, 0, 0.55),
+            inset -4px -4px 6px -4px rgba(12, 26, 40, 0.25);
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        pointer-events: none;
+    }
+
+    .face::after {
+        background: linear-gradient(
+            var(--panel-angle),
+            color-mix(in srgb, var(--glassRim) 22%, transparent) 0%,
+            color-mix(in srgb, var(--glassRim) 6%, transparent) 33%,
+            color-mix(in srgb, var(--glassRim) 0%, transparent) 55%
+        );
+    }
+
+    .row:hover .face {
+        opacity: 0.5;
+    }
+
+    .row.current .face {
+        opacity: 1;
     }
 
     .library-row {

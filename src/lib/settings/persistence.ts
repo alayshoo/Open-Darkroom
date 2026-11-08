@@ -26,6 +26,10 @@ export const DEFAULTS = {
     debugTools: import.meta.env.DEV,
     /** Imports copy files into the photo folder rather than referencing them where they are. */
     importCopies: false,
+    /** Whether the library shows its details panel on the right. */
+    libraryDetails: true,
+    /** A library shows its rolls as cards above its loose images, rather than every image in one grid. */
+    groupRolls: true,
     /**
      * Rebound keyboard shortcuts, keyed by action id — only the actions the
      * user has actually changed. The reader below can vouch for the type and

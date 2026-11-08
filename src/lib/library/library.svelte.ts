@@ -78,14 +78,20 @@ class Library {
         const id = this.view?.kind === "library" ? this.view.id : this.currentRoll?.libraryId;
         return this.libraries.find((l) => l.id === id) ?? null;
     });
-    /** The images the grid shows: a roll's frames, or a library's loose images. */
+    /**
+     * The images the grid shows: a roll's frames, or a library's loose images.
+     * With rolls not grouped, a library shows every image in it, each roll's
+     * frames in turn and then the loose ones.
+     */
     shownImages = $derived.by(() => {
         const view = this.view;
         if (!view) return [];
         if (view.kind === "roll") return this.framesOf(view.id);
-        return this.images.filter((i) => i.libraryId === view.id && i.rollId === null);
+        const loose = this.images.filter((i) => i.libraryId === view.id && i.rollId === null);
+        if (settings.groupRolls) return loose;
+        return [...this.rollsOf(view.id).flatMap((r) => this.framesOf(r.id)), ...loose];
     });
-    shownRolls = $derived(this.view?.kind === "library" ? this.rollsOf(this.view.id) : []);
+    shownRolls = $derived(this.view?.kind === "library" && settings.groupRolls ? this.rollsOf(this.view.id) : []);
     selectedImages = $derived(
         this.selection.map((id) => this.images.find((i) => i.id === id)).filter((i): i is ImageRecord => !!i),
     );
@@ -599,10 +605,8 @@ class Library {
             const fresh = this.#rendered(image.id);
 
             editor.zoom = null;
-            if (image.rollId !== null) {
-                if (this.view?.kind !== "roll" || this.view.id !== image.rollId) this.show({ kind: "roll", id: image.rollId });
-            } else if (this.view?.kind !== "library" || this.view.id !== image.libraryId) {
-                this.show({ kind: "library", id: image.libraryId });
+            if (!this.shownImages.some((i) => i.id === image.id)) {
+                this.show(image.rollId !== null ? { kind: "roll", id: image.rollId } : { kind: "library", id: image.libraryId });
             }
             this.selection = [image.id];
             this.flyingId = image.id;

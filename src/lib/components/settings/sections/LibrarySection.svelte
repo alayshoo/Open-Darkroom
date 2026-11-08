@@ -37,6 +37,19 @@
             />
         </SettingsRow>
     </SettingsGroup>
+
+    <SettingsGroup title="Layout">
+        <SettingsRow
+            label="Group rolls in a library"
+            description="On, a library shows its rolls as cards above its loose images. Off, every image in the library is in one grid."
+        >
+            <SettingsToggle
+                checked={settings.groupRolls}
+                label="Group rolls in a library"
+                onclick={() => (settings.groupRolls = !settings.groupRolls)}
+            />
+        </SettingsRow>
+    </SettingsGroup>
 </div>
 
 <style>
