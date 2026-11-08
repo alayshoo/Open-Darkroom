@@ -47,7 +47,7 @@
             <div class="placeholder" class:hidden data-thumb-id={image.id}></div>
         {/if}
         {#if image.missing}
-            <span class="missing-badge">Missing</span>
+            <span class="missing-badge">{library.finding ? "Looking for it…" : "Missing"}</span>
         {/if}
     </div>
     <div class="caption flex items-baseline gap-1.5">

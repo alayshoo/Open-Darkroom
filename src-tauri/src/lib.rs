@@ -75,6 +75,7 @@ pub fn run() {
             catalog_commands::catalog_locate,
             catalog_commands::catalog_edit,
             catalog_commands::catalog_edit_history,
+            catalog_commands::catalog_find_moved,
             catalog_commands::catalog_save_edit,
             catalog_commands::catalog_choose_photo_folder,
             catalog_commands::catalog_thumbnail,

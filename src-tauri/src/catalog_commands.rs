@@ -12,7 +12,7 @@ use tauri::ipc::Response;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::catalog::{folder_images, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Snapshot, StockFields};
+use crate::catalog::{find_moved, folder_images, search_roots, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Snapshot, StockFields};
 use crate::crop::CropPayload;
 use crate::export_rendering::SlidersPayload;
 use crate::image_opening::{image_extensions, ImageState};
@@ -221,6 +221,38 @@ pub(crate) async fn catalog_locate(
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
     with_catalog(&state, |c| c.relink(id, &path)).map(Some)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovedFiles {
+    /// Images found somewhere else, now pointing there.
+    pub found: Vec<ImageRecord>,
+    /// Images whose files are still not found.
+    pub missing: Vec<i64>,
+}
+
+/// Looks for the files that are not where they were, around where they were
+/// and around `near`, a file just located. The catalog is free while it looks.
+#[tauri::command]
+pub(crate) async fn catalog_find_moved(state: tauri::State<'_, CatalogState>, near: Option<String>) -> Result<MovedFiles, String> {
+    let (missing, photo_folder) = with_catalog(&state, |c| Ok((c.missing_files()?, c.photo_folder()?)))?;
+    if missing.is_empty() {
+        return Ok(MovedFiles { found: vec![], missing: vec![] });
+    }
+    let near = near.map(PathBuf::from).and_then(|p| p.parent().map(PathBuf::from));
+    let looking = missing.clone();
+    let moved = tauri::async_runtime::spawn_blocking(move || {
+        let roots = search_roots(&looking, near.as_deref(), photo_folder.as_deref());
+        find_moved(&looking, &roots)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    with_catalog(&state, |c| {
+        let found: Vec<ImageRecord> = moved.iter().filter_map(|(id, path)| c.relink(*id, path).ok()).collect();
+        let missing = missing.iter().map(|m| m.id).filter(|id| !found.iter().any(|f| f.id == *id)).collect();
+        Ok(MovedFiles { found, missing })
+    })
 }
 
 #[tauri::command]

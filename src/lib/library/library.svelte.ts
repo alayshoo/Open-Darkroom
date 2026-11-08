@@ -155,6 +155,7 @@ class Library {
             this.gear = snapshot.gear ?? [];
             this.photoFolder = snapshot.photoFolder;
             if (!this.view && this.libraries.length > 0) this.view = { kind: "library", id: this.libraries[0].id };
+            if (this.images.some((i) => i.missing)) void this.findMoved();
         } catch (e) {
             this.#fail("The catalog could not be read", e);
         } finally {
@@ -569,13 +570,44 @@ class Library {
         try {
             const record = await api.locateImage(id);
             if (!record) return;
-            this.images = this.images.map((i) => (i.id === id ? record : i));
-            this.#thumbsAsked.delete(id);
-            this.requestThumbnail(record);
+            this.#putBack([record]);
+            await this.findMoved(record.path);
         } catch (e) {
             this.#fail("The file could not be used", e);
         }
     };
+
+    /** Whether missing files are being looked for. */
+    finding = $state(false);
+
+    /** Looks for the files that are not where they were, and points their images at them. */
+    findMoved = async (near: string | null = null) => {
+        if (this.finding || this.images.length === 0) return;
+        this.finding = true;
+        try {
+            const { found, missing } = await api.findMoved(near);
+            const still = new Set(missing);
+            this.images = this.images.map((i) => (i.missing !== still.has(i.id) ? { ...i, missing: still.has(i.id) } : i));
+            this.#putBack(found);
+            if (found.length > 0 && !this.notice?.confirm) {
+                const files = found.length === 1 ? "file" : "files";
+                this.notice = { text: `Found ${found.length} ${near ? "more " : ""}${files} that had moved.` };
+            }
+        } catch (e) {
+            console.error("Failed to look for moved files:", e);
+        } finally {
+            this.finding = false;
+        }
+    };
+
+    #putBack(records: ImageRecord[]) {
+        const byId = new Map(records.map((r) => [r.id, r]));
+        this.images = this.images.map((i) => byId.get(i.id) ?? i);
+        for (const record of records) {
+            this.#thumbsAsked.delete(record.id);
+            void this.requestThumbnail(record);
+        }
+    }
 
     #frameSaves = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -765,6 +797,7 @@ class Library {
                 flyer?.remove();
                 this.showing = "library";
                 this.#fail(`${image.fileName} could not be opened`);
+                void this.findMoved();
                 return;
             }
             // Give the canvas its first frames before taking the flyer away.

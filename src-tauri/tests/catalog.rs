@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use image::{ImageBuffer, Rgb};
 use serde_json::json;
 
-use open_darkroom_lib::catalog::{fingerprint, folder_images, Catalog, GearDetails, GearFields, Place, RollGear};
+use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
 use open_darkroom_lib::thumbnails::ThumbnailSource;
 
 struct Scratch(PathBuf);
@@ -427,4 +427,76 @@ fn deleting_gear_leaves_its_name_on_the_rolls_that_used_it() {
     assert_eq!(roll.info["lenses"], "Old zoom, Mamiya 80mm f/4");
     assert_eq!(roll.info["lab"], "Carmencita");
     assert_eq!(c.gear().unwrap().len(), 1);
+}
+
+/// Looks for the catalog's missing files as the app does, and points them at what it finds.
+fn find_and_relink(c: &Catalog, near: Option<&Path>) -> Vec<i64> {
+    let missing = c.missing_files().unwrap();
+    let photo_folder = c.photo_folder().unwrap();
+    let roots = search_roots(&missing, near, photo_folder.as_deref());
+    let found = find_moved(&missing, &roots);
+    for (id, path) in &found {
+        c.relink(*id, path).unwrap();
+    }
+    found.into_iter().map(|(id, _)| id).collect()
+}
+
+#[test]
+fn files_in_a_renamed_folder_are_found_by_themselves() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let paths = [scratch.image("scans/roll-12/01.png", 1), scratch.image("scans/roll-12/02.png", 2)];
+    let images = c.import(&paths, loose(library.id), false).unwrap();
+    scratch.image("scans/other/unrelated.png", 9);
+
+    std::fs::rename(scratch.path("scans/roll-12"), scratch.path("scans/Roll 12, Lisbon")).unwrap();
+    assert_eq!(c.missing_files().unwrap().len(), 2);
+
+    let mut found = find_and_relink(&c, None);
+    found.sort();
+    assert_eq!(found, [images[0].id, images[1].id]);
+    let again = c.image(images[1].id).unwrap();
+    assert!(!again.missing);
+    assert!(again.path.ends_with("02.png") && again.path.contains("Roll 12, Lisbon"));
+    assert!(c.missing_files().unwrap().is_empty());
+}
+
+#[test]
+fn a_renamed_file_in_a_moved_folder_is_found_by_its_fingerprint() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let image = c.import(&[scratch.image("scans/2024/march/01.png", 1)], loose(library.id), false).unwrap().remove(0);
+    let lookalike = scratch.image("scans/2024/sorted/01.png", 2);
+
+    std::fs::create_dir_all(scratch.path("scans/2024/sorted/march")).unwrap();
+    std::fs::rename(scratch.path("scans/2024/march/01.png"), scratch.path("scans/2024/sorted/march/frame 1.png")).unwrap();
+    std::fs::remove_dir(scratch.path("scans/2024/march")).unwrap();
+
+    assert_eq!(find_and_relink(&c, None), [image.id]);
+    let path = c.image(image.id).unwrap().path;
+    assert!(path.ends_with("frame 1.png"));
+    assert_ne!(PathBuf::from(path), lookalike);
+}
+
+#[test]
+fn files_far_away_are_found_next_to_one_that_was_located() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let paths = ["a", "b", "c"].map(|n| scratch.image(&format!("disks/one/old/drive/{n}.png"), n.as_bytes()[0]));
+    let images = c.import(&paths, loose(library.id), false).unwrap();
+    std::fs::create_dir_all(scratch.path("new/archive")).unwrap();
+    std::fs::rename(scratch.path("disks/one/old/drive"), scratch.path("new/archive/drive")).unwrap();
+
+    assert!(find_and_relink(&c, None).is_empty());
+    assert_eq!(c.missing_files().unwrap().len(), 3);
+
+    let located = scratch.path("new/archive/drive/a.png");
+    c.relink(images[0].id, &located).unwrap();
+    let mut found = find_and_relink(&c, Some(&located.parent().unwrap()));
+    found.sort();
+    assert_eq!(found, [images[1].id, images[2].id]);
+    assert!(c.missing_files().unwrap().is_empty());
 }

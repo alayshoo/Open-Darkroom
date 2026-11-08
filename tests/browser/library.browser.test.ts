@@ -73,6 +73,9 @@ const gearRecord = (id: number, kind: string, maker: string, name: string, detai
 });
 
 let nextGear = 10;
+// What looking for moved files and locating one give back.
+let moved: { found: unknown[]; missing: number[] } = { found: [], missing: [] };
+let located: unknown = null;
 
 const calls: { cmd: string; args: any }[] = [];
 const called = (cmd: string) => calls.filter((c) => c.cmd === cmd);
@@ -101,6 +104,8 @@ function stubTauri() {
             if (cmd.startsWith("catalog_") || cmd === "open_image_path") calls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? {})) });
             if (cmd === "catalog_load") return structuredClone(catalog);
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
+            if (cmd === "catalog_find_moved") return structuredClone(moved);
+            if (cmd === "catalog_locate") return structuredClone(located);
             if (cmd === "catalog_edit_history") return args.id === 2 ? STORED_HISTORY : null;
             if (cmd === "catalog_save_edit") return 1234;
             if (cmd === "catalog_create_gear") return { id: nextGear++, ...args.gear };
@@ -477,5 +482,42 @@ describe("film makers in Settings", () => {
         expect(library.filmStocks.filter((s) => s.maker === "Eastman Kodak").map((s) => s.name)).toEqual(["Portra 400", "Tri-X 400"]);
         settings.close();
         unmount(modal);
+    });
+});
+
+describe("files that have moved", () => {
+    const badges = () => [...document.querySelectorAll(".missing-badge")].map((b) => b.textContent);
+    const notice = () => $(".notice span")?.textContent;
+    const moveTo = (id: number, frame: number, name: string, folder: string) => ({
+        ...record(id, 10, frame, name), path: `${folder}/${name}`,
+    });
+
+    it("are found by themselves, and marked missing when they are not", async () => {
+        library.show({ kind: "roll", id: 10 });
+        await vi.waitFor(() => expect(names()).toEqual(["frame01.tif", "frame02.tif"]));
+        moved = { found: [], missing: [2, 3] };
+        await library.findMoved();
+        await vi.waitFor(() => expect(badges()).toEqual(["Missing", "Missing"]));
+        expect(notice()).toBeUndefined();
+
+        moved = { found: [moveTo(2, 1, "frame01.tif", "/scans/Lisbon")], missing: [3] };
+        window.dispatchEvent(new FocusEvent("focus"));
+        await vi.waitFor(() => expect(badges()).toEqual(["Missing"]));
+        expect(notice()).toBe("Found 1 file that had moved.");
+        expect(library.images.find((i) => i.id === 2)!.path).toBe("/scans/Lisbon/frame01.tif");
+        library.notice = null;
+    });
+
+    it("asks where one went when it is opened, and finds the rest next to it", async () => {
+        cell("frame02.tif")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        await vi.waitFor(() => expect(notice()).toBe("frame02.tif is not where it was."));
+        expect(editing()).toBe(false);
+
+        located = moveTo(3, 2, "frame02.tif", "/archive/Lisbon");
+        moved = { found: [], missing: [] };
+        [...document.querySelectorAll<HTMLButtonElement>(".notice button")].find((b) => b.textContent === "Locate…")!.click();
+        await vi.waitFor(() => expect(called("catalog_find_moved").at(-1)?.args.near).toBe("/archive/Lisbon/frame02.tif"));
+        await vi.waitFor(() => expect(badges()).toEqual([]));
+        expect(library.images.find((i) => i.id === 3)!.missing).toBe(false);
     });
 });

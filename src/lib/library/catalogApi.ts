@@ -96,6 +96,15 @@ export const openFile = (place: Place, copy: boolean) => invoke<ImageRecord | nu
 export const moveImages = (ids: number[], place: Place) => invoke<void>("catalog_move_images", { ids, place });
 export const removeImages = (ids: number[]) => invoke<void>("catalog_remove_images", { ids });
 export const setFrameInfo = (id: number, info: FrameInfo) => invoke<void>("catalog_set_frame_info", { id, info });
+export interface MovedFiles {
+    /** Images found somewhere else, now pointing there. */
+    found: ImageRecord[];
+    /** Images whose files are still not found. */
+    missing: number[];
+}
+
+/** Looks for missing files around where they were, and around `near`, a file just located. */
+export const findMoved = (near: string | null = null) => invoke<MovedFiles>("catalog_find_moved", { near });
 export const locateImage = (id: number) => invoke<ImageRecord | null>("catalog_locate", { id });
 
 export const fetchEdit = (id: number) => invoke<string | null>("catalog_edit", { id });

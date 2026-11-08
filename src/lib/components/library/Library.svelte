@@ -146,7 +146,7 @@
     }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onfocus={() => void library.findMoved()} />
 
 <div class="library-layer" class:active inert={!active}>
     <div class="backdrop"></div>

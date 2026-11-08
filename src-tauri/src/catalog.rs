@@ -20,8 +20,10 @@ use crate::metadata::{self, ImageMetadata};
 
 mod film_stocks;
 mod gear;
+mod moved_files;
 pub use film_stocks::{FilmStock, StockFields};
 pub use gear::{Gear, GearDetails, GearFields, RollGear};
+pub use moved_files::{find_moved, search_roots, MissingFile};
 
 /// How many stocks a new catalog starts with.
 pub fn film_stocks_seeds_len() -> usize {
