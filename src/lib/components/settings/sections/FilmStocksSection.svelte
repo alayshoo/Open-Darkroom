@@ -2,6 +2,7 @@
 <script lang="ts">
     import SettingsGroup from "../SettingsGroup.svelte";
     import StockRow from "../StockRow.svelte";
+    import AddRow from "../AddRow.svelte";
 
     import { library } from "$lib/library/library.svelte";
     import type { FilmStock } from "$lib/types/filmStock";
@@ -18,9 +19,9 @@
         return [...byMaker].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
     });
 
-    async function add() {
+    async function add(maker = "") {
         const stock = await library.createStock({
-            maker: "",
+            maker,
             name: "",
             boxIso: null,
             kind: "colourNegative",
@@ -35,38 +36,17 @@
 </script>
 
 <div class="section flex flex-col gap-4">
-    <div class="intro flex justify-end">
-        <button class="add" onclick={add}>Add film stock</button>
-    </div>
-
     {#each groups as [maker, stocks] (maker)}
         <SettingsGroup title={maker || "Other"}>
             {#each stocks as stock (stock.id)}
                 <StockRow {stock} open={openId === stock.id} ontoggle={() => (openId = openId === stock.id ? null : stock.id)} />
             {/each}
+            <AddRow label={maker ? `Add a ${maker} stock` : "Add a film stock"} onclick={() => add(maker)} />
         </SettingsGroup>
     {/each}
+    {#if !groups.some(([maker]) => maker === "")}
+        <SettingsGroup>
+            <AddRow label="Add a film stock" onclick={() => add()} />
+        </SettingsGroup>
+    {/if}
 </div>
-
-<style>
-    .intro {
-        padding: 0 12px;
-    }
-
-    .add {
-        height: 28px;
-        padding: 0 12px;
-        border: 0;
-        border-radius: 8px;
-        background: var(--bg5);
-        color: var(--color1);
-        font-family: var(--font-ui);
-        font-size: 13px;
-        white-space: nowrap;
-        cursor: default;
-    }
-
-    .add:hover {
-        background: var(--color5);
-    }
-</style>
