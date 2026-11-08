@@ -241,14 +241,15 @@ pub(crate) fn check_export_destination(
 const FORBIDDEN: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
 /// A name without its extension, checked as safe to write on every platform.
-/// An extension the format already uses is dropped rather than doubled.
+/// An extension the format already uses is kept rather than doubled.
 pub fn export_file_name(file_name: &str, format: ExportFormat) -> Result<String, String> {
-    let mut stem = file_name.trim();
-    if let Some((before, ext)) = stem.rsplit_once('.') {
-        if format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)) {
-            stem = before.trim_end();
+    let name = file_name.trim();
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((before, ext)) if format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)) => {
+            (before.trim_end(), ext)
         }
-    }
+        _ => (name, format.extension()),
+    };
     if stem.is_empty() || stem.chars().all(|c| c == '.') {
         return Err("The file needs a name".to_string());
     }
@@ -258,7 +259,24 @@ pub fn export_file_name(file_name: &str, format: ExportFormat) -> Result<String,
     if stem.ends_with('.') {
         return Err("A file name cannot end with a full stop".to_string());
     }
-    Ok(format!("{stem}.{}", format.extension()))
+    let device = stem.split('.').next().unwrap_or_default().trim_end();
+    if reserved_on_windows(device) {
+        return Err(format!("{device} is a name Windows keeps for itself"));
+    }
+    Ok(format!("{stem}.{ext}"))
+}
+
+/// The device names Windows will not give a file, whatever its extension.
+fn reserved_on_windows(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    if matches!(name.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    let Some(port) = name.strip_prefix("COM").or_else(|| name.strip_prefix("LPT")) else {
+        return false;
+    };
+    let mut chars = port.chars();
+    matches!((chars.next(), chars.next()), (Some('0'..='9' | '¹' | '²' | '³'), None))
 }
 
 pub fn destination_path(folder: &str, file_name: &str, format: ExportFormat) -> Result<PathBuf, String> {

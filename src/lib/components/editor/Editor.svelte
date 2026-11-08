@@ -93,8 +93,8 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
-        // Nothing but the window itself answers while an export runs.
-        if (exportDialog.running && !exportDialog.open) {
+        // Nothing but the window itself answers while the save dialog is up or an export runs.
+        if (exportDialog.busy && !exportDialog.open) {
             e.preventDefault();
             return;
         }

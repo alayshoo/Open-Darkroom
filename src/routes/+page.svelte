@@ -16,6 +16,6 @@
     pasteAdjustments={editor.pasteAdjustments}
     resetAdjustments={editor.resetAdjustments}
     openSettings={(section) => settings.show(section)}
-    busy={exportDialog.open || exportDialog.running}
+    busy={exportDialog.open || exportDialog.busy}
 ></TitleBar>
 <Editor />

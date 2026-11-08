@@ -259,6 +259,45 @@ fn fine_detail_is_averaged_in_linear_light() {
 }
 
 #[test]
+fn a_16_bit_resample_in_bands_matches_one_in_a_single_pass() {
+    use fast_image_resize as fir;
+    use open_darkroom_lib::output_space::ADOBE_GAMMA;
+
+    // Tall enough to take several bands, with detail that would show a seam.
+    let (from, to) = ((7u32, 3001u32), (3u32, 500u32));
+    let mut seed = 12345u32;
+    let samples: Vec<u16> = (0..from.0 * from.1 * 3)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (seed >> 16) as u16
+        })
+        .collect();
+    let rgb: Vec<u8> = samples.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let banded = resize_rgb(rgb, from, to, 16, Transfer::Adobe).expect("resize");
+
+    let gamma = ADOBE_GAMMA as f32;
+    let linear: Vec<f32> = samples.iter().map(|&v| (f32::from(v) / 65535.0).powf(gamma)).collect();
+    let source = fir::images::ImageRef::new(from.0, from.1, bytemuck::cast_slice(&linear), fir::PixelType::F32x3).unwrap();
+    let mut whole = fir::images::Image::new(to.0, to.1, fir::PixelType::F32x3);
+    let options = fir::ResizeOptions::new().resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3));
+    fir::Resizer::new().resize(&source, &mut whole, &options).unwrap();
+
+    let expected: Vec<u16> = whole
+        .buffer()
+        .chunks_exact(4)
+        .map(|b| {
+            let v = f32::from_ne_bytes([b[0], b[1], b[2], b[3]]).clamp(0.0, 1.0);
+            (v.powf(1.0 / gamma) * 65535.0).round() as u16
+        })
+        .collect();
+    let got: Vec<u16> = banded.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+    assert_eq!(got.len(), expected.len());
+    for (i, (g, e)) in got.iter().zip(&expected).enumerate() {
+        assert!(g.abs_diff(*e) <= 1, "sample {i}: {g} against {e}");
+    }
+}
+
+#[test]
 fn a_mismatched_buffer_is_refused() {
     assert!(resize_rgb(vec![0; 10], (4, 4), (2, 2), 8, Transfer::Srgb).is_err());
 }
@@ -269,9 +308,25 @@ fn a_mismatched_buffer_is_refused() {
 fn the_file_name_takes_the_formats_extension_once() {
     assert_eq!(export_file_name("IMG_0042", ExportFormat::Jxl).unwrap(), "IMG_0042.jxl");
     assert_eq!(export_file_name("  roll 3  ", ExportFormat::Png).unwrap(), "roll 3.png");
-    assert_eq!(export_file_name("frame.JPEG", ExportFormat::Jpeg).unwrap(), "frame.jpg");
-    assert_eq!(export_file_name("frame.tif", ExportFormat::Tiff).unwrap(), "frame.tiff");
+    assert_eq!(export_file_name("frame.jpg", ExportFormat::Jpeg).unwrap(), "frame.jpg");
+    assert_eq!(export_file_name("frame.png", ExportFormat::Jpeg).unwrap(), "frame.png.jpg");
     assert_eq!(export_file_name("v1.2", ExportFormat::Webp).unwrap(), "v1.2.webp");
+}
+
+#[test]
+fn an_extension_the_format_also_uses_is_kept_as_picked() {
+    assert_eq!(export_file_name("frame.JPEG", ExportFormat::Jpeg).unwrap(), "frame.JPEG");
+    assert_eq!(export_file_name("frame.tif", ExportFormat::Tiff).unwrap(), "frame.tif");
+}
+
+#[test]
+fn a_name_windows_keeps_for_a_device_is_refused() {
+    for bad in ["CON", "nul", "Aux.tar", "com1", "LPT9 ", "com¹"] {
+        assert!(export_file_name(bad, ExportFormat::Jpeg).is_err(), "{bad:?}");
+    }
+    for fine in ["CONSOLE", "nul_scan", "com10", "my con"] {
+        assert!(export_file_name(fine, ExportFormat::Jpeg).is_ok(), "{fine:?}");
+    }
 }
 
 #[test]

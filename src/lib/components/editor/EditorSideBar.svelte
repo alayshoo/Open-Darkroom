@@ -196,7 +196,7 @@
                 onexport={exportDialog.quickExport}
                 onoptions={exportDialog.show}
                 open={exportDialog.open}
-                busy={exportDialog.running}
+                busy={exportDialog.busy}
             />
         </div>
         <div

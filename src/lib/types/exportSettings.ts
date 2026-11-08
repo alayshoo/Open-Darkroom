@@ -130,17 +130,23 @@ export function targetSize(settings: ExportSettings, width: number, height: numb
 }
 
 const FORBIDDEN = /[/\\:*?"<>|\p{Cc}]/u;
+// The device names Windows will not give a file, whatever its extension.
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|(com|lpt)[0-9¹²³])$/i;
 
 /** The file name an export is written under, or why it cannot be. Mirrors export_file_name in export.rs. */
 export function exportFileName(name: string, format: ExportFormat): { name: string } | { error: string } {
     let stem = name.trim();
+    let ext = FORMAT_EXTENSIONS[format][0];
     const dot = stem.lastIndexOf(".");
     if (dot >= 0 && FORMAT_EXTENSIONS[format].includes(stem.slice(dot + 1).toLowerCase())) {
+        ext = stem.slice(dot + 1);
         stem = stem.slice(0, dot).trimEnd();
     }
     if (stem === "" || /^\.+$/.test(stem)) return { error: "The file needs a name" };
     const bad = stem.match(FORBIDDEN);
     if (bad) return { error: `A file name cannot contain ${JSON.stringify(bad[0])}` };
     if (stem.endsWith(".")) return { error: "A file name cannot end with a full stop" };
-    return { name: `${stem}.${FORMAT_EXTENSIONS[format][0]}` };
+    const device = stem.split(".")[0].trimEnd();
+    if (WINDOWS_DEVICE.test(device)) return { error: `${device} is a name Windows keeps for itself` };
+    return { name: `${stem}.${ext}` };
 }

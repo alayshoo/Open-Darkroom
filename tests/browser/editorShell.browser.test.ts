@@ -73,7 +73,8 @@ const SHOT: ImageMetadata = {
 const exports: any[] = [];
 // What the save dialog was opened with, and what it hands back.
 const saveDialogs: any[] = [];
-let saveDialogAnswer: { folder: string; fileName: string } | null = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+type SaveAnswer = { folder: string; fileName: string } | null;
+let saveDialogAnswer: SaveAnswer | Promise<SaveAnswer> = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
 let clipboard = "";
 
 function stubTauri() {
@@ -341,6 +342,32 @@ describe("with an image open", () => {
             await vi.waitFor(() => expect(saveDialogs.at(-1)?.format).toBeDefined());
             await new Promise((r) => setTimeout(r, 100));
             expect(exports).toHaveLength(count);
+            expect(exportDialog()).toBeNull();
+        } finally {
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+        }
+    });
+
+    it("takes nothing else while the save dialog is up", async () => {
+        const count = exports.length;
+        const dialogs = saveDialogs.length;
+        let answer!: (a: SaveAnswer) => void;
+        saveDialogAnswer = new Promise<SaveAnswer>((resolve) => (answer = resolve));
+        try {
+            const exportButton = document.querySelector<HTMLButtonElement>(".export-button")!;
+            exportButton.click();
+            await vi.waitFor(() => expect(saveDialogs).toHaveLength(dialogs + 1));
+            expect(exportButton.disabled).toBe(true);
+            expect(button("Export options").disabled).toBe(true);
+            exportButton.click();
+            await userEvent.keyboard("{Control>}{Shift>}e{/Shift}{/Control}");
+            await new Promise((r) => setTimeout(r, 100));
+            expect(saveDialogs).toHaveLength(dialogs + 1);
+            expect(exportDialog()).toBeNull();
+
+            answer({ folder: "/photos/2024", fileName: "DSCF4127.jxl" });
+            await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+            await vi.waitFor(() => expect(exportButton.disabled).toBe(false));
             expect(exportDialog()).toBeNull();
         } finally {
             saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };

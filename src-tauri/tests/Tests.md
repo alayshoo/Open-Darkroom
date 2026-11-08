@@ -578,7 +578,7 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
-## L1 — `export_options.rs` (15)
+## L1 — `export_options.rs` (18)
 
 What the export modal adds around the render.
 
@@ -593,7 +593,8 @@ What the export modal adds around the render.
 | `without_metadata_no_format_carries_any` | the toggle off writes nothing |
 | `each_mode_lands_its_edge_on_the_number_asked_for`, `an_export_is_never_enlarged`, `a_thin_strip_keeps_at_least_a_pixel` | `target_size`, mirrored by `targetSize` in TypeScript |
 | `a_flat_colour_survives_the_resample_unchanged`, `fine_detail_is_averaged_in_linear_light`, `a_mismatched_buffer_is_refused` | the resample, at 8 and 16 bits |
-| `the_file_name_takes_the_formats_extension_once`, `a_name_no_platform_can_hold_is_refused` | `export_file_name`, mirrored by `exportFileName` |
+| `a_16_bit_resample_in_bands_matches_one_in_a_single_pass` | the 16-bit resample, run a band of rows at a time, shows no seams |
+| `the_file_name_takes_the_formats_extension_once`, `an_extension_the_format_also_uses_is_kept_as_picked`, `a_name_no_platform_can_hold_is_refused`, `a_name_windows_keeps_for_a_device_is_refused` | `export_file_name`, mirrored by `exportFileName` |
 
 ## L1 — `tests/unit/` (161, TypeScript)
 
@@ -608,7 +609,7 @@ What the export modal adds around the render.
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 | `viewport` × 30 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it; when a fresh sharp region is rendered, put off or kept, and when it is drawn over the backdrop |
 | `fullResolution` × 8 | the band header, band sizing, mip level counts, and how far the blurs reach at a render scale |
-| `exportSettings` × 20 | the export size and file name agree with the Rust cases; a stored copy of the settings is restored as far as it is valid |
+| `exportSettings` × 28 | the export size and file name agree with the Rust cases; a stored copy of the settings is restored as far as it is valid |
 
 ## L3 — `tests/browser/` (50, real WebGPU)
 

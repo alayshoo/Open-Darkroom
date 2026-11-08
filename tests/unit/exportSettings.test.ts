@@ -48,9 +48,22 @@ describe("exportFileName", () => {
     it("takes the format's extension once", () => {
         expect(exportFileName("IMG_0042", "jxl")).toEqual({ name: "IMG_0042.jxl" });
         expect(exportFileName("  roll 3  ", "png")).toEqual({ name: "roll 3.png" });
-        expect(exportFileName("frame.JPEG", "jpeg")).toEqual({ name: "frame.jpg" });
-        expect(exportFileName("frame.tif", "tiff")).toEqual({ name: "frame.tiff" });
+        expect(exportFileName("frame.jpg", "jpeg")).toEqual({ name: "frame.jpg" });
+        expect(exportFileName("frame.png", "jpeg")).toEqual({ name: "frame.png.jpg" });
         expect(exportFileName("v1.2", "webp")).toEqual({ name: "v1.2.webp" });
+    });
+
+    it("keeps an extension the format also uses as it was picked", () => {
+        expect(exportFileName("frame.JPEG", "jpeg")).toEqual({ name: "frame.JPEG" });
+        expect(exportFileName("frame.tif", "tiff")).toEqual({ name: "frame.tif" });
+    });
+
+    it.each(["CON", "nul", "Aux.tar", "com1", "LPT9 ", "com¹"])("refuses the Windows device name %j", (bad) => {
+        expect(exportFileName(bad, "jpeg")).toHaveProperty("error");
+    });
+
+    it.each(["CONSOLE", "nul_scan", "com10", "my con"])("allows %j", (fine) => {
+        expect(exportFileName(fine, "jpeg")).toHaveProperty("name");
     });
 
     it.each(["", "   ", ".jxl", "..", "a/b", "a\\b", "a:b", "what?", "dot.", "tab\there"])(

@@ -10,6 +10,9 @@ use rayon::prelude::*;
 
 use crate::output_space::{Transfer, ADOBE_GAMMA, BT2020_ALPHA, BT2020_BETA};
 
+/// Source rows a 16-bit resample converts to f32 at once.
+const SOURCE_BAND_ROWS: u32 = 512;
+
 #[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ResizeMode {
@@ -93,31 +96,41 @@ pub fn resize_rgb(
         return Ok(out.into_vec());
     }
 
-    // A 16-bit file's deepest shadows need more than linear u16 can tell apart.
+    // A 16-bit file's deepest shadows need more than linear u16 can tell apart,
+    // so it is resampled as f32, a band of rows at a time to keep that copy small.
     let table: Vec<f32> = (0..=u16::MAX)
         .map(|code| to_linear(transfer, f32::from(code) / 65535.0))
         .collect();
-    let linear: Vec<f32> = rgb
-        .par_chunks_exact(2)
-        .map(|b| table[usize::from(u16::from_le_bytes([b[0], b[1]]))])
-        .collect();
-    drop(rgb);
+    let row_bytes = from.0 as usize * 3 * 2;
+    let scale = f64::from(from.1) / f64::from(to.1);
+    // How far past its band the filter reaches into the source.
+    let margin = (3.0 * scale.max(1.0)).ceil() as u32 + 1;
+    let band_rows = ((SOURCE_BAND_ROWS as f64 / scale) as u32).max(1);
 
-    let source = ImageRef::new(from.0, from.1, bytemuck::cast_slice(&linear), fir::PixelType::F32x3)
-        .map_err(|e| err(&e))?;
-    let mut resized = Image::new(to.0, to.1, fir::PixelType::F32x3);
-    resizer.resize(&source, &mut resized, &options).map_err(|e| err(&e))?;
-    drop(linear);
+    let mut out: Vec<u8> = Vec::with_capacity(to.0 as usize * to.1 as usize * 3 * 2);
+    for out_top in (0..to.1).step_by(band_rows as usize) {
+        let out_rows = band_rows.min(to.1 - out_top);
+        let in_top = f64::from(out_top) * scale;
+        let in_bottom = f64::from(out_top + out_rows) * scale;
+        let first = (in_top.floor() as u32).saturating_sub(margin);
+        let last = (in_bottom.ceil() as u32 + margin).min(from.1);
 
-    let samples = resized.buffer();
-    let out = samples
-        .par_chunks_exact(4)
-        .flat_map_iter(|b| {
+        let band: Vec<f32> = rgb[first as usize * row_bytes..last as usize * row_bytes]
+            .par_chunks_exact(2)
+            .map(|b| table[usize::from(u16::from_le_bytes([b[0], b[1]]))])
+            .collect();
+        let source = ImageRef::new(from.0, last - first, bytemuck::cast_slice(&band), fir::PixelType::F32x3)
+            .map_err(|e| err(&e))?;
+        let mut resized = Image::new(to.0, out_rows, fir::PixelType::F32x3);
+        let cropped = options.crop(0.0, in_top - f64::from(first), f64::from(from.0), in_bottom - in_top);
+        resizer.resize(&source, &mut resized, &cropped).map_err(|e| err(&e))?;
+
+        out.par_extend(resized.buffer().par_chunks_exact(4).flat_map_iter(|b| {
             let v = f32::from_ne_bytes([b[0], b[1], b[2], b[3]]);
             let code = (from_linear(transfer, v.clamp(0.0, 1.0)) * 65535.0).round() as u16;
             code.to_le_bytes()
-        })
-        .collect();
+        }));
+    }
     Ok(out)
 }
 

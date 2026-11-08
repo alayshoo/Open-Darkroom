@@ -32,6 +32,8 @@ class ExportDialog {
     /** Without its extension, which the format decides. */
     fileName = $state("");
 
+    /** The save dialog is up. */
+    picking = $state(false);
     running = $state(false);
     progress = $state<ExportProgress | null>(null);
     error = $state<string | null>(null);
@@ -40,6 +42,7 @@ class ExportDialog {
 
     // The open the name was taken from, so the next image brings its own.
     #namedFor: number | null = null;
+    #opening = false;
 
     readonly hydrated: Promise<void> = loadSettings().then((stored) => {
         if (stored.exportSettings !== undefined) this.settings = restoreExportSettings(stored.exportSettings);
@@ -55,18 +58,31 @@ class ExportDialog {
         });
     }
 
-    show = async () => {
-        const image = editor.imagePayload;
-        if (!image || this.open) return;
-        if (editor.isCropping) editor.applyCrop();
-        this.error = null;
-        this.open = true;
+    /** The save dialog is up or an export is running. */
+    get busy() {
+        return this.picking || this.running;
+    }
 
-        if (this.#namedFor !== image.imageId) {
-            this.#namedFor = image.imageId;
-            const defaults = await exportDefaults().catch(() => null);
-            this.fileName = defaults?.fileName ?? "Untitled";
-            if (!this.folder && defaults) this.folder = defaults.folder;
+    show = async () => {
+        if (this.open || this.busy || this.#opening || !editor.imagePayload) return;
+        this.#opening = true;
+        try {
+            // The stored folder and settings, and the image's own name, are in
+            // place before anything can be typed over them.
+            await this.hydrated;
+            const image = editor.imagePayload;
+            if (!image || this.busy) return;
+            if (this.#namedFor !== image.imageId) {
+                const defaults = await exportDefaults().catch(() => null);
+                this.#namedFor = image.imageId;
+                this.fileName = defaults?.fileName ?? "Untitled";
+                if (!this.folder && defaults) this.folder = defaults.folder;
+            }
+            if (editor.isCropping) editor.applyCrop();
+            this.error = null;
+            this.open = true;
+        } finally {
+            this.#opening = false;
         }
     };
 
@@ -76,11 +92,6 @@ class ExportDialog {
         void saveSetting("exportSettings", $state.snapshot(this.settings));
     };
 
-    toggle = () => {
-        if (this.open) this.close();
-        else void this.show();
-    };
-
     chooseFolder = async () => {
         const folder = await pickExportFolder(this.folder || null).catch(() => null);
         if (folder) this.folder = folder;
@@ -88,12 +99,20 @@ class ExportDialog {
 
     /** The save dialog, then an export with the settings as they stand. */
     quickExport = async () => {
-        if (this.running || this.open || !editor.imagePayload) return;
-        if (editor.isCropping) editor.applyCrop();
-        const destination = await pickExportFile(this.settings.format, this.folder || null).catch((e) => {
-            console.error("Failed to open the save dialog:", e);
-            return null;
-        });
+        if (this.open || this.busy || this.#opening || !editor.imagePayload) return;
+        this.picking = true;
+        let destination: ExportDestination | null = null;
+        try {
+            await this.hydrated;
+            if (editor.isCropping) editor.applyCrop();
+            (document.activeElement as HTMLElement)?.blur();
+            destination = await pickExportFile(this.settings.format, this.folder || null).catch((e) => {
+                console.error("Failed to open the save dialog:", e);
+                return null;
+            });
+        } finally {
+            this.picking = false;
+        }
         if (!destination) return;
         this.quick = true;
         try {

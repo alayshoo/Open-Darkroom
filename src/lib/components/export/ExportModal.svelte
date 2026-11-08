@@ -59,6 +59,8 @@
             check = { error: "Choose a folder to export to" };
             return;
         }
+        // Until the backend answers for these, nothing can be exported over them.
+        check = null;
         let stale = false;
         const timer = setTimeout(() => {
             checkExportDestination({ folder, fileName }, format)
