@@ -62,6 +62,12 @@ const STORED = (() => {
     return serializeImageEdit(edit);
 })();
 
+const gearRecord = (id: number, kind: string, maker: string, name: string, details: Record<string, string>) => ({
+    id, kind, maker, name, mount: "", formats: [], process: "", dilution: "", temperature: "", ...details,
+});
+
+let nextGear = 10;
+
 const calls: { cmd: string; args: any }[] = [];
 const called = (cmd: string) => calls.filter((c) => c.cmd === cmd);
 
@@ -75,6 +81,12 @@ function stubTauri() {
             { id: 1, maker: "Kodak", name: "Portra 400", boxIso: 400, kind: "colourNegative", process: "C-41", formats: ["35mm", "120"], colour: "#f2b33d", colour2: "#e4572e" },
             { id: 2, maker: "Kodak", name: "Tri-X 400", boxIso: 400, kind: "blackAndWhite", process: "B&W", formats: ["35mm"], colour: "#f7c600", colour2: "#2b2b2b" },
         ],
+        gear: [
+            gearRecord(1, "camera", "Nikon", "FM2", { mount: "F" }),
+            gearRecord(2, "lens", "Mamiya", "80mm f/4", { mount: "Mamiya 7" }),
+            gearRecord(3, "lens", "Nikon", "Nikkor 50mm f/1.8", { mount: "F" }),
+            gearRecord(4, "chemistry", "Adox", "Rodinal", { process: "B&W", dilution: "1+50", temperature: "20 °C" }),
+        ],
         photoFolder: null,
     };
     (window as any).__TAURI_INTERNALS__ = {
@@ -83,6 +95,7 @@ function stubTauri() {
             if (cmd === "catalog_load") return structuredClone(catalog);
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
             if (cmd === "catalog_save_edit") return 1234;
+            if (cmd === "catalog_create_gear") return { id: nextGear++, ...args.gear };
             if (cmd === "catalog_thumbnail" || cmd === "catalog_render_thumbnail") return new ArrayBuffer(0);
             if (cmd === "open_image_path") return openPayload();
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
@@ -143,15 +156,21 @@ describe("the library", () => {
     });
 
     it("saves what is typed into the roll's information", async () => {
-        const camera = [...document.querySelectorAll<HTMLLabelElement>(".details .field")].find(
-            (f) => f.querySelector(".label")?.textContent === "Camera",
+        const format = [...document.querySelectorAll<HTMLLabelElement>(".details .field")].find(
+            (f) => f.querySelector(".label")?.textContent === "Format",
         )!;
-        const input = camera.querySelector("input")!;
+        const input = format.querySelector("input")!;
         input.focus();
-        await userEvent.keyboard("Nikon FM2");
+        await userEvent.keyboard("120");
         await vi.waitFor(() => {
             const last = called("catalog_update_roll").at(-1);
-            expect(last?.args).toEqual({ id: 10, name: "Portra in Lisbon", info: { filmStock: "Kodak Portra 400", camera: "Nikon FM2" }, stockId: 1 });
+            expect(last?.args).toEqual({
+                id: 10,
+                name: "Portra in Lisbon",
+                info: { filmStock: "Kodak Portra 400", format: "120" },
+                stockId: 1,
+                gear: { camera: null, lenses: [], scanner: null, chemistry: null },
+            });
         });
         input.blur();
     });
@@ -162,7 +181,7 @@ describe("the library", () => {
         picker.focus();
         await userEvent.keyboard("tri");
         const option = await vi.waitFor(() => {
-            const found = [...document.querySelectorAll<HTMLButtonElement>("#stock-options [role=option]")];
+            const found = [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")];
             expect(found.map((o) => o.textContent?.replace(/\s+/g, " ").trim())).toEqual([
                 "Kodak Tri-X 400 B&W",
                 "+ Add “tri” as a new stock",
@@ -188,6 +207,61 @@ describe("the library", () => {
         expect(labels()).toContain("Push / pull");
         expect(labels()).not.toContain("Dilution");
         expect(labels()).not.toContain("Developer");
+    });
+
+    it("takes the camera, lenses and chemistry from the catalog's gear", async () => {
+        const pick = async (label: string, typed: string, option: string) => {
+            const field = $<HTMLInputElement>(`[role=combobox][aria-label="${label}"]`)!;
+            field.focus();
+            await userEvent.keyboard(typed);
+            const button = await vi.waitFor(() => {
+                const found = [...document.querySelectorAll<HTMLButtonElement>(".picker [role=option]")].find((o) =>
+                    o.textContent?.replace(/\s+/g, " ").includes(option),
+                );
+                expect(found).toBeDefined();
+                return found!;
+            });
+            button.click();
+        };
+        [...document.querySelectorAll<HTMLButtonElement>(".details [role=radio]")].find((b) => b.textContent === "Home")!.click();
+        await pick("Camera", "fm", "Nikon FM2");
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.camera).toBe(1));
+
+        const lens = $<HTMLInputElement>('[role=combobox][aria-label="Add a lens"]')!;
+        lens.focus();
+        const offered = await vi.waitFor(() => {
+            const names = [...document.querySelectorAll(".picker [role=option] .label")].map((o) => o.textContent);
+            expect(names.length).toBe(2);
+            return names;
+        });
+        expect(offered).toEqual(["Nikon Nikkor 50mm f/1.8", "Mamiya 80mm f/4"]);
+        lens.blur();
+        await pick("Add a lens", "nikkor", "Nikon Nikkor 50mm f/1.8");
+        await pick("Add a lens", "Helios 44-2", "Add “Helios 44-2” as a new lens");
+        await vi.waitFor(() => expect(called("catalog_update_roll").at(-1)?.args.gear.lenses).toEqual([3, 10]));
+        expect(called("catalog_create_gear").at(-1)?.args.gear).toMatchObject({ kind: "lens", name: "Helios 44-2" });
+        expect([...document.querySelectorAll(".lenses .chip .name")].map((c) => c.textContent)).toEqual([
+            "Nikon Nikkor 50mm f/1.8",
+            "Helios 44-2",
+        ]);
+
+        await pick("Developer", "rod", "Adox Rodinal");
+        await vi.waitFor(() => {
+            const last = called("catalog_update_roll").at(-1)?.args;
+            expect(last.gear.chemistry).toBe(4);
+            expect(last.info).toMatchObject({ developer: "Adox Rodinal", dilution: "1+50", devTemp: "20 °C" });
+        });
+    });
+
+    it("keeps the dates a roll was shot over as a range", async () => {
+        $<HTMLInputElement>('input[aria-label="Shot from"]')!.focus();
+        await userEvent.keyboard("March 2024");
+        $<HTMLInputElement>('input[aria-label="Shot until"]')!.focus();
+        await userEvent.keyboard("May 2024");
+        await vi.waitFor(() =>
+            expect(called("catalog_update_roll").at(-1)?.args.info).toMatchObject({ dateShot: "March 2024", dateShotEnd: "May 2024" }),
+        );
+        (document.activeElement as HTMLElement).blur();
     });
 
     it("renames the roll in place when its name is double-clicked", async () => {

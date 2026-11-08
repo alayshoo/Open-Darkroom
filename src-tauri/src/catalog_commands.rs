@@ -12,7 +12,7 @@ use tauri::ipc::Response;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::catalog::{folder_images, Catalog, FilmStock, ImageRecord, Place, Roll, Snapshot, StockFields};
+use crate::catalog::{folder_images, Catalog, FilmStock, Gear, GearFields, ImageRecord, Place, Roll, RollGear, Snapshot, StockFields};
 use crate::crop::CropPayload;
 use crate::export_rendering::SlidersPayload;
 use crate::image_opening::{image_extensions, ImageState};
@@ -71,8 +71,24 @@ pub(crate) fn catalog_update_roll(
     name: String,
     info: Value,
     stock_id: Option<i64>,
+    gear: RollGear,
 ) -> Result<(), String> {
-    with_catalog(&state, |c| c.update_roll(id, &name, &info, stock_id))
+    with_catalog(&state, |c| c.update_roll(id, &name, &info, stock_id, &gear))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_create_gear(state: tauri::State<'_, CatalogState>, gear: GearFields) -> Result<Gear, String> {
+    with_catalog(&state, |c| c.create_gear(&gear))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_update_gear(state: tauri::State<'_, CatalogState>, id: i64, gear: GearFields) -> Result<(), String> {
+    with_catalog(&state, |c| c.update_gear(id, &gear))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_delete_gear(state: tauri::State<'_, CatalogState>, id: i64) -> Result<(), String> {
+    with_catalog(&state, |c| c.delete_gear(id))
 }
 
 #[tauri::command]

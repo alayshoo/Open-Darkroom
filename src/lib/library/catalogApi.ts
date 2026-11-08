@@ -11,6 +11,7 @@ import type { ToneMap } from "$lib/types/toneMap";
 import { bakeCurveLut } from "$lib/types/curves";
 import { cloneRetouch } from "$lib/types/retouch";
 import type { FilmStock, StockFields } from "$lib/types/filmStock";
+import type { Gear, GearFields, RollGear } from "$lib/types/gear";
 
 // Returned when an image has no stored thumbnail yet. Must match NO_THUMBNAIL
 // in catalog_commands.rs.
@@ -30,6 +31,7 @@ export interface RollRecord {
     created: number;
     /** The stock it was shot on, when it is one the catalog knows. */
     stockId: number | null;
+    gear: RollGear;
 }
 
 export interface ImageRecord {
@@ -52,6 +54,7 @@ export interface CatalogSnapshot {
     rolls: RollRecord[];
     images: ImageRecord[];
     filmStocks: FilmStock[];
+    gear: Gear[];
     photoFolder: string | null;
 }
 
@@ -74,13 +77,16 @@ export const deleteLibrary = (id: number) => invoke<void>("catalog_delete_librar
 
 export const createRoll = (libraryId: number, name: string) =>
     invoke<RollRecord>("catalog_create_roll", { libraryId, name });
-export const updateRoll = (id: number, name: string, info: RollInfo, stockId: number | null) =>
-    invoke<void>("catalog_update_roll", { id, name, info, stockId });
+export const updateRoll = (id: number, name: string, info: RollInfo, stockId: number | null, gear: RollGear) =>
+    invoke<void>("catalog_update_roll", { id, name, info, stockId, gear });
 export const deleteRoll = (id: number) => invoke<void>("catalog_delete_roll", { id });
 
 export const createStock = (stock: StockFields) => invoke<FilmStock>("catalog_create_stock", { stock });
 export const updateStock = (id: number, stock: StockFields) => invoke<void>("catalog_update_stock", { id, stock });
 export const deleteStock = (id: number) => invoke<void>("catalog_delete_stock", { id });
+export const createGear = (gear: GearFields) => invoke<Gear>("catalog_create_gear", { gear });
+export const updateGear = (id: number, gear: GearFields) => invoke<void>("catalog_update_gear", { id, gear });
+export const deleteGear = (id: number) => invoke<void>("catalog_delete_gear", { id });
 
 export const importFiles = (place: Place, copy: boolean) => invoke<Imported>("catalog_import_files", { place, copy });
 export const importFolder = (libraryId: number, copy: boolean) =>

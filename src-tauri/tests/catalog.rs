@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use image::{ImageBuffer, Rgb};
 use serde_json::json;
 
-use open_darkroom_lib::catalog::{fingerprint, folder_images, Catalog, Place};
+use open_darkroom_lib::catalog::{fingerprint, folder_images, Catalog, GearDetails, GearFields, Place, RollGear};
 use open_darkroom_lib::thumbnails::ThumbnailSource;
 
 struct Scratch(PathBuf);
@@ -182,7 +182,7 @@ fn deleting_a_roll_leaves_its_frames_loose_and_deleting_a_library_takes_everythi
     let file = scratch.image("a.png", 1);
     let image = c.import(&[file.clone()], Place { library_id: library.id, roll_id: Some(roll.id) }, false).unwrap();
 
-    c.update_roll(roll.id, "Ektar 100", &json!({ "filmStock": "Kodak Ektar 100", "boxIso": "100" }), None).unwrap();
+    c.update_roll(roll.id, "Ektar 100", &json!({ "filmStock": "Kodak Ektar 100", "boxIso": "100" }), None, &RollGear::default()).unwrap();
     let rolls = c.rolls().unwrap();
     assert_eq!(rolls[0].name, "Ektar 100");
     assert_eq!(rolls[0].info["filmStock"], "Kodak Ektar 100");
@@ -302,7 +302,7 @@ fn stocks_are_added_and_edited_and_a_roll_keeps_its_stock_name_when_it_goes() {
 
     let library = c.create_library("Personal").unwrap();
     let roll = c.create_roll(library.id, "Fog").unwrap();
-    c.update_roll(roll.id, "Fog", &json!({ "boxIso": "200" }), Some(stock.id)).unwrap();
+    c.update_roll(roll.id, "Fog", &json!({ "boxIso": "200" }), Some(stock.id), &RollGear::default()).unwrap();
     assert_eq!(c.rolls().unwrap()[0].stock_id, Some(stock.id));
 
     c.delete_film_stock(stock.id).unwrap();
@@ -335,4 +335,63 @@ fn a_catalog_from_before_film_stocks_is_brought_up_to_date() {
     assert_eq!((rolls[0].name.as_str(), rolls[0].stock_id), ("Old roll", None));
     assert_eq!(rolls[0].info["filmStock"], "HP5");
     assert!(!c.film_stocks().unwrap().is_empty());
+}
+
+fn gear(kind: &str, maker: &str, name: &str, mount: &str) -> GearFields {
+    GearFields {
+        kind: kind.into(),
+        maker: maker.into(),
+        name: name.into(),
+        details: GearDetails { mount: mount.into(), ..Default::default() },
+    }
+}
+
+#[test]
+fn gear_is_kept_with_its_details_and_rolls_point_at_it() {
+    let scratch = Scratch::new();
+    let c = Catalog::open(&scratch.path("data")).unwrap();
+    let camera = c.create_gear(&gear("camera", "Nikon", "FM2", "F")).unwrap();
+    let fifty = c.create_gear(&gear("lens", "Nikon", "Nikkor 50mm f/1.8 AI-s", "F")).unwrap();
+    let wide = c.create_gear(&gear("lens", "Nikon", "Nikkor 28mm f/2.8 AI-s", "F")).unwrap();
+    let mut rodinal = gear("chemistry", "Adox", "Rodinal", "");
+    rodinal.details.process = "B&W".into();
+    rodinal.details.dilution = "1+50".into();
+    rodinal.details.temperature = "20 °C".into();
+    let rodinal = c.create_gear(&rodinal).unwrap();
+
+    let mut renamed = camera.fields.clone();
+    renamed.name = "FM2n".into();
+    c.update_gear(camera.id, &renamed).unwrap();
+    let stored = c.gear().unwrap();
+    assert_eq!(stored.len(), 4);
+    assert_eq!(stored.iter().find(|g| g.id == camera.id).unwrap().fields, renamed);
+    assert_eq!(stored.iter().find(|g| g.id == rodinal.id).unwrap().fields.details.dilution, "1+50");
+
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "Lisbon").unwrap();
+    let links = RollGear { camera: Some(camera.id), lenses: vec![fifty.id, wide.id], scanner: None, chemistry: Some(rodinal.id) };
+    c.update_roll(roll.id, "Lisbon", &json!({ "lenses": "Old zoom" }), None, &links).unwrap();
+    assert_eq!(c.rolls().unwrap()[0].gear, links);
+    assert_eq!(c.snapshot().unwrap().gear.len(), 4);
+}
+
+#[test]
+fn deleting_gear_leaves_its_name_on_the_rolls_that_used_it() {
+    let scratch = Scratch::new();
+    let c = Catalog::open(&scratch.path("data")).unwrap();
+    let camera = c.create_gear(&gear("camera", "Mamiya", "7", "")).unwrap();
+    let lens = c.create_gear(&gear("lens", "Mamiya", "80mm f/4", "Mamiya 7")).unwrap();
+    let other = c.create_gear(&gear("lens", "Mamiya", "43mm f/4.5", "Mamiya 7")).unwrap();
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "Night walks").unwrap();
+    let links = RollGear { camera: Some(camera.id), lenses: vec![lens.id, other.id], ..Default::default() };
+    c.update_roll(roll.id, "Night walks", &json!({ "lenses": "Old zoom" }), None, &links).unwrap();
+
+    c.delete_gear(camera.id).unwrap();
+    c.delete_gear(lens.id).unwrap();
+    let roll = &c.rolls().unwrap()[0];
+    assert_eq!(roll.gear, RollGear { lenses: vec![other.id], ..Default::default() });
+    assert_eq!(roll.info["camera"], "Mamiya 7");
+    assert_eq!(roll.info["lenses"], "Old zoom, Mamiya 80mm f/4");
+    assert_eq!(c.gear().unwrap().len(), 1);
 }

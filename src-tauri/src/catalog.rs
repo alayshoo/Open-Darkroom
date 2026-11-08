@@ -19,7 +19,9 @@ use serde_json::Value;
 use crate::metadata::{self, ImageMetadata};
 
 mod film_stocks;
+mod gear;
 pub use film_stocks::{FilmStock, StockFields};
+pub use gear::{Gear, GearDetails, GearFields, RollGear};
 
 /// How many stocks a new catalog starts with.
 pub fn film_stocks_seeds_len() -> usize {
@@ -32,7 +34,7 @@ pub const THUMBNAIL_DIR: &str = "thumbnails";
 /// Bytes read from the start of a file for its fingerprint.
 const FINGERPRINT_BYTES: usize = 64 * 1024;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -56,13 +58,21 @@ CREATE TABLE IF NOT EXISTS film_stocks (
     colour2   TEXT,
     colour3   TEXT
 );
+CREATE TABLE IF NOT EXISTS gear (
+    id      INTEGER PRIMARY KEY,
+    kind    TEXT NOT NULL,
+    maker   TEXT NOT NULL,
+    name    TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '{}'
+);
 CREATE TABLE IF NOT EXISTS rolls (
     id         INTEGER PRIMARY KEY,
     library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     info       TEXT NOT NULL DEFAULT '{}',
     created    INTEGER NOT NULL,
-    stock_id   INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL
+    stock_id   INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL,
+    gear       TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS images (
     id              INTEGER PRIMARY KEY,
@@ -102,6 +112,8 @@ pub struct Roll {
     pub created: i64,
     /// The stock it was shot on, when it is one the catalog knows.
     pub stock_id: Option<i64>,
+    /// The gear it was shot, developed and scanned with, of what the catalog knows.
+    pub gear: RollGear,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -131,6 +143,7 @@ pub struct Snapshot {
     pub rolls: Vec<Roll>,
     pub images: Vec<ImageRecord>,
     pub film_stocks: Vec<FilmStock>,
+    pub gear: Vec<Gear>,
     pub photo_folder: Option<String>,
 }
 
@@ -246,6 +259,14 @@ impl Catalog {
         if !has_third {
             self.conn.execute_batch("ALTER TABLE film_stocks ADD COLUMN colour3 TEXT;").map_err(err)?;
         }
+        let has_gear: bool = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('rolls') WHERE name = 'gear'", [], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+            .map_err(err)?;
+        if !has_gear {
+            self.conn.execute_batch("ALTER TABLE rolls ADD COLUMN gear TEXT NOT NULL DEFAULT '{}';").map_err(err)?;
+        }
         if !has_stock {
             self.conn
                 .execute_batch("ALTER TABLE rolls ADD COLUMN stock_id INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL;")
@@ -295,6 +316,7 @@ impl Catalog {
             rolls: self.rolls()?,
             images: self.images("", [])?,
             film_stocks: self.film_stocks()?,
+            gear: self.gear()?,
             photo_folder: photo_folder.map(|p| p.to_string_lossy().into_owned()),
         })
     }
@@ -310,11 +332,12 @@ impl Catalog {
     pub fn rolls(&self) -> Result<Vec<Roll>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, library_id, name, info, created, stock_id FROM rolls ORDER BY created, id")
+            .prepare("SELECT id, library_id, name, info, created, stock_id, gear FROM rolls ORDER BY created, id")
             .map_err(err)?;
         let rows = stmt
             .query_map([], |r| {
                 let info: String = r.get(3)?;
+                let gear: String = r.get(6)?;
                 Ok(Roll {
                     id: r.get(0)?,
                     library_id: r.get(1)?,
@@ -322,6 +345,7 @@ impl Catalog {
                     info: serde_json::from_str(&info).unwrap_or(Value::Object(Default::default())),
                     created: r.get(4)?,
                     stock_id: r.get(5)?,
+                    gear: serde_json::from_str(&gear).unwrap_or_default(),
                 })
             })
             .map_err(err)?;
@@ -410,14 +434,15 @@ impl Catalog {
             info: Value::Object(Default::default()),
             created,
             stock_id: None,
+            gear: RollGear::default(),
         })
     }
 
-    pub fn update_roll(&self, id: i64, name: &str, info: &Value, stock_id: Option<i64>) -> Result<(), String> {
+    pub fn update_roll(&self, id: i64, name: &str, info: &Value, stock_id: Option<i64>, gear: &RollGear) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE rolls SET name = ?1, info = ?2, stock_id = ?3 WHERE id = ?4",
-                params![name, info.to_string(), stock_id, id],
+                "UPDATE rolls SET name = ?1, info = ?2, stock_id = ?3, gear = ?4 WHERE id = ?5",
+                params![name, info.to_string(), stock_id, serde_json::to_string(gear).map_err(err)?, id],
             )
             .map(|_| ())
             .map_err(err)

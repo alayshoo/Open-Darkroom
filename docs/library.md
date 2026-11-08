@@ -44,11 +44,16 @@ Catalog
 
 Roll level, all optional and free to fill in later:
 
-- film stock, box ISO and the ISO it was rated at, push or pull
-- camera and lens(es)
-- developer, dilution, time and temperature, home or lab development
-- date shot, date developed
+- film stock, format, box ISO and the ISO it was rated at
+- the dates it was shot over, and the date it was developed
+- camera and any number of lenses
+- home or lab development: the chemistry, dilution, time and temperature at
+  home, or the lab and its chemistry; push or pull either way
 - scanner, notes
+
+Film stocks, cameras, lenses, scanners and home lab chemistry are kept in the
+catalog and managed in Settings. A roll picks from them, or takes what is typed
+as a new one; deleting one leaves its name on the rolls that used it.
 
 Frame level: frame number, aperture and shutter if logged, location, notes.
 
@@ -178,6 +183,7 @@ To be revisited once it has been used:
 - Rolls are made both ways: a folder imported as a roll, or a new roll that
   frames are added or moved to.
 - Undo history stays with the session.
+- A roll and a library are renamed by double-clicking their name.
 
 ## Open questions
 

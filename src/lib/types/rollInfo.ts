@@ -25,6 +25,7 @@ export type RollField =
     | "lab"
     | "chemistry"
     | "dateShot"
+    | "dateShotEnd"
     | "dateDeveloped"
     | "scanner"
     | "notes";
@@ -41,6 +42,8 @@ export interface FieldSpec<K extends string> {
     multiline?: boolean;
     /** A fixed set of answers instead of free text. */
     options?: readonly string[];
+    /** Makes the field a range, from its own key to this one. */
+    until?: K;
     /** Shown only while this holds, so fields that do not apply stay out of the way. */
     when?: (info: RollInfo) => boolean;
 }
@@ -61,7 +64,7 @@ export const ROLL_SECTIONS: { title: string; fields: FieldSpec<RollField>[] }[] 
     {
         title: "Dates",
         fields: [
-            { key: "dateShot", label: "Shot", placeholder: "March 2024", half: true },
+            { key: "dateShot", label: "Shot", placeholder: "March 2024", until: "dateShotEnd" },
             { key: "dateDeveloped", label: "Developed", placeholder: "April 2024", half: true },
         ],
     },

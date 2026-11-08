@@ -3,6 +3,8 @@
     import { library } from "$lib/library/library.svelte";
     import StockPicker from "./StockPicker.svelte";
     import EditableName from "./EditableName.svelte";
+    import GearPicker from "./GearPicker.svelte";
+    import LensPicker from "./LensPicker.svelte";
     import { metadataRows } from "$lib/types/imageMetadata";
     import {
         FRAME_FIELDS,
@@ -16,6 +18,10 @@
     let roll = $derived(library.currentRoll);
     let single = $derived(library.selectedImages.length === 1 ? library.selectedImages[0] : null);
     // Dimensions are not known until an image is opened, so the info panel's row for them is left out.
+    // Roll fields that pick from the catalog's gear instead of taking free text.
+    const GEAR_SLOTS = { camera: "camera", scanner: "scanner", developer: "chemistry" } as const;
+    const gearSlot = (key: RollField) => (key in GEAR_SLOTS ? GEAR_SLOTS[key as keyof typeof GEAR_SLOTS] : null);
+
     let shootingRows = $derived(single ? metadataRows(single.metadata, 0, 0).filter((r) => r.label !== "Dimensions") : []);
 </script>
 
@@ -87,10 +93,37 @@
                     <h3>{section.title}</h3>
                     <div class="fields flex flex-wrap">
                         {#each section.fields.filter((f) => !f.when || f.when(roll.info)) as spec (spec.key)}
-                            {#if spec.key === "filmStock"}
+                            {@const slot = gearSlot(spec.key)}
+                            {#if spec.key === "filmStock" || spec.key === "lenses" || slot}
                                 <div class="field flex flex-col">
                                     <span class="label">{spec.label}</span>
-                                    <StockPicker {roll} />
+                                    {#if spec.key === "filmStock"}
+                                        <StockPicker {roll} />
+                                    {:else if spec.key === "lenses"}
+                                        <LensPicker {roll} />
+                                    {:else if slot}
+                                        <GearPicker {roll} {slot} label={spec.label} />
+                                    {/if}
+                                </div>
+                            {:else if spec.until}
+                                {@const until = spec.until}
+                                <div class="field flex flex-col">
+                                    <span class="label">{spec.label}</span>
+                                    <div class="range flex items-center">
+                                        <input
+                                            aria-label={`${spec.label} from`}
+                                            placeholder={spec.placeholder}
+                                            value={roll.info[spec.key] ?? ""}
+                                            oninput={(e) => library.updateRoll(roll.id, { info: { [spec.key]: e.currentTarget.value } })}
+                                        />
+                                        <span class="dash" aria-hidden="true">–</span>
+                                        <input
+                                            aria-label={`${spec.label} until`}
+                                            placeholder="Optional"
+                                            value={roll.info[until] ?? ""}
+                                            oninput={(e) => library.updateRoll(roll.id, { info: { [until]: e.currentTarget.value } })}
+                                        />
+                                    </div>
                                 </div>
                             {:else}
                                 {@render field(spec, roll.info[spec.key], spec.placeholder, (v) =>
@@ -168,6 +201,14 @@
 
     .field.third {
         flex-basis: calc((100% - 16px) / 3);
+    }
+
+    .range {
+        gap: 6px;
+    }
+
+    .dash {
+        color: var(--color3);
     }
 
     .label {

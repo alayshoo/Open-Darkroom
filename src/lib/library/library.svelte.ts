@@ -14,6 +14,7 @@ import { settings } from "$lib/settings/settings.svelte";
 import { type ImageEdit, cloneImageEdit, newImageEdit, parseImageEdit, serializeImageEdit } from "$lib/types/imageEdit";
 import type { FrameInfo, RollInfo } from "$lib/types/rollInfo";
 import { type FilmStock, type StockFields, stockLabel } from "$lib/types/filmStock";
+import { type Gear, type GearFields, type GearKind, type RollGear, NO_ROLL_GEAR, gearLabel } from "$lib/types/gear";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
 import { fitRect, fly, imageRect, land, nextFrame, rectOf, settle } from "./flight";
@@ -42,6 +43,7 @@ class Library {
     rolls = $state.raw<RollRecord[]>([]);
     images = $state.raw<ImageRecord[]>([]);
     filmStocks = $state.raw<FilmStock[]>([]);
+    gear = $state.raw<Gear[]>([]);
     photoFolder = $state<string | null>(null);
     loaded = $state(false);
 
@@ -133,9 +135,10 @@ class Library {
         try {
             const snapshot = await api.loadCatalog();
             this.libraries = snapshot.libraries;
-            this.rolls = snapshot.rolls;
+            this.rolls = snapshot.rolls.map((r) => ({ ...r, gear: { ...NO_ROLL_GEAR, ...r.gear } }));
             this.images = snapshot.images;
             this.filmStocks = snapshot.filmStocks;
+            this.gear = snapshot.gear ?? [];
             this.photoFolder = snapshot.photoFolder;
             if (!this.view && this.libraries.length > 0) this.view = { kind: "library", id: this.libraries[0].id };
         } catch (e) {
@@ -224,7 +227,10 @@ class Library {
 
     #rollSaves = new Map<number, ReturnType<typeof setTimeout>>();
 
-    updateRoll = (id: number, patch: { name?: string; info?: RollInfo; stockId?: number | null }) => {
+    updateRoll = (
+        id: number,
+        patch: { name?: string; info?: RollInfo; stockId?: number | null; gear?: Partial<RollGear> },
+    ) => {
         this.rolls = this.rolls.map((r) =>
             r.id === id
                 ? {
@@ -232,6 +238,7 @@ class Library {
                       name: patch.name ?? r.name,
                       info: { ...r.info, ...patch.info },
                       stockId: patch.stockId === undefined ? r.stockId : patch.stockId,
+                      gear: { ...r.gear, ...patch.gear },
                   }
                 : r,
         );
@@ -243,7 +250,7 @@ class Library {
                 const roll = this.rolls.find((r) => r.id === id);
                 if (!roll) return;
                 const name = roll.name.trim() || "Untitled roll";
-                api.updateRoll(id, name, roll.info, roll.stockId).catch((e) => this.#fail("The roll could not be saved", e));
+                api.updateRoll(id, name, roll.info, roll.stockId, roll.gear).catch((e) => this.#fail("The roll could not be saved", e));
             }, SAVE_DELAY_MS),
         );
     };
@@ -321,6 +328,92 @@ class Library {
             );
         } catch (e) {
             this.#fail("The film stock could not be deleted", e);
+        }
+    };
+
+    // ===== Gear =====
+
+    gearOf(id: number | null): Gear | null {
+        return id === null ? null : (this.gear.find((g) => g.id === id) ?? null);
+    }
+
+    gearOfKind(kind: GearKind): Gear[] {
+        return this.gear.filter((g) => g.kind === kind);
+    }
+
+    /** Puts a roll on a camera, scanner or chemistry, or takes it off one. */
+    setRollGear = (rollId: number, slot: "camera" | "scanner" | "chemistry", gear: Gear | null) => {
+        const info: RollInfo = { [slot === "chemistry" ? "developer" : slot]: gear ? gearLabel(gear) : "" };
+        if (slot === "chemistry" && gear) {
+            if (gear.dilution) info.dilution = gear.dilution;
+            if (gear.temperature) info.devTemp = gear.temperature;
+        }
+        this.updateRoll(rollId, { gear: { [slot]: gear?.id ?? null }, info });
+    };
+
+    addRollLens = (rollId: number, lens: Gear) => {
+        const roll = this.rolls.find((r) => r.id === rollId);
+        if (!roll || roll.gear.lenses.includes(lens.id)) return;
+        this.updateRoll(rollId, { gear: { lenses: [...roll.gear.lenses, lens.id] } });
+    };
+
+    removeRollLens = (rollId: number, lensId: number) => {
+        const roll = this.rolls.find((r) => r.id === rollId);
+        if (roll) this.updateRoll(rollId, { gear: { lenses: roll.gear.lenses.filter((l) => l !== lensId) } });
+    };
+
+    createGear = async (fields: GearFields): Promise<Gear | null> => {
+        try {
+            const gear = await api.createGear(fields);
+            this.gear = [...this.gear, gear];
+            return gear;
+        } catch (e) {
+            this.#fail("The gear could not be added", e);
+            return null;
+        }
+    };
+
+    #gearSaves = new Map<number, ReturnType<typeof setTimeout>>();
+
+    updateGear = (id: number, patch: Partial<GearFields>) => {
+        this.gear = this.gear.map((g) => (g.id === id ? { ...g, ...patch } : g));
+        clearTimeout(this.#gearSaves.get(id));
+        this.#gearSaves.set(
+            id,
+            setTimeout(() => {
+                this.#gearSaves.delete(id);
+                const gear = this.gear.find((g) => g.id === id);
+                if (!gear) return;
+                const { id: _, ...fields } = gear;
+                api.updateGear(id, fields).catch((e) => this.#fail("The gear could not be saved", e));
+            }, SAVE_DELAY_MS),
+        );
+    };
+
+    /** Removes a piece of gear. The rolls that used it keep its name, as the catalog does. */
+    deleteGear = async (id: number) => {
+        const gear = this.gear.find((g) => g.id === id);
+        if (!gear) return;
+        try {
+            await api.deleteGear(id);
+            const label = gearLabel(gear);
+            this.gear = this.gear.filter((g) => g.id !== id);
+            this.rolls = this.rolls.map((r) => {
+                const links = { ...r.gear, lenses: r.gear.lenses.filter((l) => l !== id) };
+                const info = { ...r.info };
+                if (links.lenses.length !== r.gear.lenses.length) {
+                    info.lenses = info.lenses?.trim() ? `${info.lenses.trim()}, ${label}` : label;
+                }
+                for (const [slot, key] of [["camera", "camera"], ["scanner", "scanner"], ["chemistry", "developer"]] as const) {
+                    if (links[slot] === id) {
+                        links[slot] = null;
+                        info[key] = label;
+                    }
+                }
+                return { ...r, gear: links, info };
+            });
+        } catch (e) {
+            this.#fail("The gear could not be deleted", e);
         }
     };
 

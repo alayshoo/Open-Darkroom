@@ -102,14 +102,17 @@
                     {@const currentRoll = library.view?.kind === "roll" && library.view.id === roll.id}
                     {@const stock = library.stockOf(roll)}
                     {#if library.renamingRollId === roll.id}
-                        <input
-                            class="rename roll-rename"
-                            value={roll.name}
-                            aria-label="Roll name"
-                            use:focusAndSelect
-                            onkeydown={(e) => renameRollKey(e, roll.id)}
-                            onblur={(e) => renameRoll(roll.id, e.currentTarget.value)}
-                        />
+                        <div class="row roll-row flex items-center">
+                            <span class="glyph roll-glyph flex"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} /></span>
+                            <input
+                                class="rename roll-rename"
+                                value={roll.name}
+                                aria-label="Roll name"
+                                use:focusAndSelect
+                                onkeydown={(e) => renameRollKey(e, roll.id)}
+                                onblur={(e) => renameRoll(roll.id, e.currentTarget.value)}
+                            />
+                        </div>
                     {:else}
                         <button
                             class="row roll-row flex items-center"
@@ -288,8 +291,11 @@
 
     /* Lines its text up with the roll names around it. */
     .roll-rename {
-        height: 28px;
-        margin-left: 45px;
+        flex: 1;
+        min-width: 0;
+        height: 26px;
+        margin-left: -7px;
+        padding: 0 6px;
         font-size: 13px;
         font-weight: 400;
     }
