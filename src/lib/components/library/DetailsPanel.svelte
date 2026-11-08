@@ -7,6 +7,7 @@
     import LensPicker from "./LensPicker.svelte";
     import { type GearSlot, GEAR_SLOTS } from "$lib/types/gear";
     import { metadataRows } from "$lib/types/imageMetadata";
+    import { outsideRollDates } from "$lib/types/looseDate";
     import {
         FRAME_FIELDS,
         ROLL_SECTIONS,
@@ -23,11 +24,22 @@
     const gearSlot = (key: RollField) =>
         (Object.keys(GEAR_SLOTS) as GearSlot[]).find((slot) => GEAR_SLOTS[slot] === key) ?? null;
 
+    // A frame may be dated outside its roll's dates; it is only pointed out.
+    let outsideRoll = $derived(
+        !!roll && !!single && outsideRollDates(single.frameInfo.date, roll.info.dateShot, roll.info.dateShotEnd),
+    );
+
     let shootingRows = $derived(single ? metadataRows(single.metadata, 0, 0).filter((r) => r.label !== "Dimensions") : []);
 </script>
 
-{#snippet field(spec: FieldSpec<string>, value: string | undefined, placeholder: string | undefined, onchange: (v: string) => void)}
-    <label class="field flex flex-col" class:half={spec.half} class:third={spec.third}>
+{#snippet field(
+    spec: FieldSpec<string>,
+    value: string | undefined,
+    placeholder: string | undefined,
+    onchange: (v: string) => void,
+    warn?: boolean,
+)}
+    <label class="field flex flex-col" class:half={spec.half} class:third={spec.third} class:warn>
         <span class="label">{spec.label}</span>
         {#if spec.options}
             <div class="choice flex" role="radiogroup" aria-label={spec.label}>
@@ -61,7 +73,15 @@
                                 single.frameInfo[spec.key],
                                 framePlaceholder(spec.key, single.metadata),
                                 (v) => library.setFrameInfo(single.id, { [spec.key as FrameField]: v }),
+                                spec.key === "date" && outsideRoll,
                             )}
+                            {#if spec.key === "time" && outsideRoll}
+                                <p class="warning" role="status">
+                                    Outside the dates the roll was shot, {[roll.info.dateShot, roll.info.dateShotEnd]
+                                        .filter((d) => d?.trim())
+                                        .join(" – ")}
+                                </p>
+                            {/if}
                         {/each}
                     </div>
                 {:else}
@@ -199,6 +219,17 @@
 
     .field.half {
         flex-basis: calc(50% - 4px);
+    }
+
+    .warning {
+        flex: 1 1 100%;
+        margin: -2px 0 0;
+        font-size: 11.5px;
+        color: #f2c46d;
+    }
+
+    .field.warn input {
+        border-color: rgba(242, 196, 109, 0.55);
     }
 
     .field.third {

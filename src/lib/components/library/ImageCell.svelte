@@ -22,6 +22,8 @@
 
     let src = $derived(library.thumbs[image.id]);
 
+    const withoutExtension = (name: string) => name.replace(/(.)\.[^.]+$/, "$1");
+
     $effect(() => {
         void library.requestThumbnail(image);
     });
@@ -54,7 +56,7 @@
         {#if image.frame !== null}
             <span class="frame-no">{image.frame}</span>
         {/if}
-        <span class="file flex-1">{image.fileName}</span>
+        <span class="file flex-1" title={image.fileName}>{withoutExtension(image.fileName)}</span>
         {#if image.edited}
             <span class="edited" title="Edited" aria-label="Edited"></span>
         {/if}

@@ -56,7 +56,8 @@ the catalog and managed in Settings. A roll picks from them; a scanner is added
 from what is typed, and the rest are set up in Settings from the roll. Deleting
 one leaves its name on the rolls that used it.
 
-Frame level: frame number, aperture and shutter if logged, location, notes.
+Frame level: frame number, aperture and shutter if logged, the date and time it
+was taken, location, notes.
 
 The inversion is **not** shared across a roll. Every frame keeps its own black,
 white and gamma points, like any other edit.

@@ -30,7 +30,7 @@ export type RollField =
     | "scanner"
     | "notes";
 
-export type FrameField = "aperture" | "shutter" | "location" | "notes";
+export type FrameField = "aperture" | "shutter" | "date" | "time" | "location" | "notes";
 
 export interface FieldSpec<K extends string> {
     key: K;
@@ -100,6 +100,8 @@ export const ROLL_SECTIONS: { title: string; fields: FieldSpec<RollField>[] }[] 
 export const FRAME_FIELDS: FieldSpec<FrameField>[] = [
     { key: "aperture", label: "Aperture", placeholder: "f/8", half: true },
     { key: "shutter", label: "Shutter", placeholder: "1/125 s", half: true },
+    { key: "date", label: "Date", placeholder: "12 March 2024", half: true },
+    { key: "time", label: "Time", placeholder: "14:30", half: true },
     { key: "location", label: "Location" },
     { key: "notes", label: "Notes", multiline: true },
 ];

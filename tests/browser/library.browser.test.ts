@@ -348,6 +348,32 @@ describe("the library", () => {
         (document.activeElement as HTMLElement).blur();
     });
 
+    it("dates a frame, and points out a date outside the roll's without refusing it", async () => {
+        cell("frame02.tif")!.click();
+        await vi.waitFor(() => expect($(".details h2")?.textContent).toBe("Frame 2"));
+        const date = $<HTMLInputElement>('.details input[placeholder="12 March 2024"]')!;
+        const time = $<HTMLInputElement>('.details input[placeholder="14:30"]')!;
+        await userEvent.fill(date, "2 June 2024");
+        await userEvent.fill(time, "18:05");
+        await vi.waitFor(() =>
+            expect($(".details .warning")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+                "Outside the dates the roll was shot, March 2024 – May 2024",
+            ),
+        );
+        await vi.waitFor(() =>
+            expect(called("catalog_set_frame_info").at(-1)?.args).toEqual({ id: 3, info: { date: "2 June 2024", time: "18:05" } }),
+        );
+        await userEvent.fill(date, "12 April 2024");
+        await vi.waitFor(() => expect($(".details .warning")).toBeNull());
+        (document.activeElement as HTMLElement).blur();
+        cell("frame02.tif")!.click();
+    });
+
+    it("shows file names without their extension in the grid", () => {
+        expect([...document.querySelectorAll("[role=option] .file")].map((f) => f.textContent)).toEqual(["frame01", "frame02"]);
+        expect(cell("frame02.tif")).not.toBeNull();
+    });
+
     it("renames the roll in place when its name is double-clicked", async () => {
         $(".head h1 .name-text")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
         const field = await vi.waitFor(() => {
