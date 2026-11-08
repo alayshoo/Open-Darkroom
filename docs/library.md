@@ -21,7 +21,7 @@ image from the grid plays the same motion in reverse.
 |---|---|
 | **Catalog** | The record of everything opened on this computer: every library, roll and image, with their edits and thumbnails. One per install, and it can be exported whole. |
 | **Library** | A named group of images and rolls, such as "Personal" or "Client work". |
-| **Roll** | A library with film information on top: how it was shot and developed, and its frames in order. |
+| **Roll** | Inside a library: a group of images like a library, with film information on top (how it was shot and developed) and its frames in order. |
 | **Image** | One file on disk: where it is, its edit, how it was shot, and its thumbnail. |
 
 ```
@@ -30,14 +30,14 @@ Catalog
 │   ├── Image
 │   └── Roll
 │       └── Image (frame)
-└── Roll
-    └── Image (frame)
+└── Library
+    └── …
 ```
 
 - Opening the app shows the whole catalog.
 - Libraries sit at the top of the catalog and never inside one another.
-- A roll holds images the way a library does, and can sit inside a library or at
-  the top of the catalog.
+- A roll holds images the way a library does, and always sits inside a library.
+  Rolls do not nest either.
 - An image is either loose in a library or a frame on a roll.
 
 ### Roll information
@@ -64,7 +64,8 @@ edits, with thumbnails cached beside it.
 It belongs to this computer, but nothing in it is tied to it:
 
 - the whole catalog exports and imports as one bundle (see Exporting)
-- any library or roll exports on its own and merges into another catalog
+- any library or roll exports on its own and merges into another catalog; an
+  imported roll goes into a library chosen on import
 - **Open**: whether the catalog's location can also be moved, for example to an
   external drive. If it can, it is locked while open, so two computers sharing
   it through a synced folder cannot both write to it.
@@ -166,11 +167,12 @@ These land together with the library:
 Settled by the prototype, not ahead of it:
 
 - **Where an image lives.** The proposal: each image has one home, either loose
-  in a library or on one roll. **Open**: whether images can also sit loose at the
-  top of the catalog, as an inbox not yet sorted into anything. That keeps one edit, one roll and one thumbnail
+  in a library or on one roll. That keeps one edit, one roll and one thumbnail
   per file with no ambiguity. Rolls are not tied to the folders the files sit in,
   since scanner software often puts a whole session in one folder and folders get
   renamed. An image in several places at once is better served later by albums.
+  **Open**: whether images can also sit loose at the top of the catalog, as an
+  inbox not yet sorted into a library.
 - **How rolls are made.** Importing a folder as a roll, making an empty roll and
   dragging frames in, or both.
 - **Undo history.** Kept per session only, or stored with the edit.
