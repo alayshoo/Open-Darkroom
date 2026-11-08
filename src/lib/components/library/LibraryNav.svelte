@@ -73,7 +73,7 @@
                         oncontextmenu={(e) => libraryMenu(e, lib.id)}
                     >
                         <div class="face glass absolute"></div>
-                        <svg class="glyph" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
                             <rect x="3.5" y="5.5" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" />
                             <path d="M3.5 15l4.5-4 4 3.5 3-2.5 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
                         </svg>
@@ -91,11 +91,13 @@
                         oncontextmenu={(e) => rollMenu(e, roll.id)}
                     >
                         <div class="face glass absolute"></div>
-                        <svg class="glyph" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                            <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
-                                <rect x="4" y="5" width="11" height="14" rx="1.5" />
-                                <path d="M15 8h5v8h-5" />
-                                <path d="M7 5v14M12 5v14" stroke-dasharray="1.6 2.2" />
+                        <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                            <!-- A 35mm canister with its leader pulled out. -->
+                            <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
+                                <rect x="3.5" y="6" width="10" height="14" rx="2" />
+                                <path d="M6.5 6V3.8h4V6" />
+                                <path d="M13.5 9.5h5l1.5 1.5v5.5h-6.5" />
+                                <path d="M15.6 12h0.01M18 12h0.01" stroke-width="1.8" />
                             </g>
                         </svg>
                         <span class="name flex-1">{roll.name}</span>
