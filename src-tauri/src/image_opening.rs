@@ -83,6 +83,8 @@ pub struct OriginalImage {
     pub id: u32,
     /// How the file says it was shot.
     pub metadata: ImageMetadata,
+    /// Where the image was opened from.
+    pub path: std::path::PathBuf,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -706,16 +708,33 @@ fn decode_encoded(
 /// exact string to tell it apart from an open that got far enough to purge.
 pub const OPEN_CANCELLED: &str = "open:cancelled";
 
+/// The file's samples, channel count, dimensions and what those samples mean,
+/// whatever kind of file it is.
+pub fn decode_path(path: &std::path::Path) -> Result<(Vec<u16>, usize, u32, u32, SourceSpace), String> {
+    // Sensor data takes its own decoder, and arrives already linear and in the
+    // camera's primaries rather than carrying a profile to be read.
+    if crate::raw::is_raw_extension(path) {
+        let decoded = crate::raw::decode(path)?;
+        Ok((decoded.pixels_u16, crate::raw::RAW_CHANNELS, decoded.width, decoded.height, decoded.space))
+    } else {
+        decode_encoded(path)
+    }
+}
+
+/// The extensions the app opens, for file pickers and folder imports.
+pub fn image_extensions() -> Vec<String> {
+    let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
+    extensions.extend(crate::raw::dialog_extensions());
+    extensions
+}
+
 #[tauri::command]
 pub(crate) async fn open_image_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, ImageState>,
     image_id: u32,
 ) -> Result<Response, String> {
-    println!("open_image_file: started");
-
-    let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
-    extensions.extend(crate::raw::dialog_extensions());
+    let extensions = image_extensions();
     let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
 
     let path = app
@@ -727,32 +746,33 @@ pub(crate) async fn open_image_file(
         .into_path()
         .map_err(|e| e.to_string())?;
 
+    open_path(&state, path, image_id)
+}
+
+/// Opens a file the caller already knows the path of, such as one in the library.
+#[tauri::command]
+pub(crate) async fn open_image_path(
+    state: tauri::State<'_, ImageState>,
+    path: std::path::PathBuf,
+    image_id: u32,
+) -> Result<Response, String> {
+    if !path.is_file() {
+        return Err(format!("{} could not be found", path.display()));
+    }
+    open_path(&state, path, image_id)
+}
+
+fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Result<Response, String> {
     // Release the previous image before decoding the next one. Held any longer
     // and two full-resolution buffers are resident at once, which for large
-    // files roughly doubles the peak. The dialog has already returned a path, so
-    // a cancelled open never reaches here and leaves the current image alone.
+    // files roughly doubles the peak.
     {
         let mut guard = state.lock().unwrap();
         *guard = None;
     }
 
     let overall_start = Instant::now();
-
-    // Sensor data takes its own decoder, and arrives already linear and in the
-    // camera's primaries rather than carrying a profile to be read.
-    let (samples, channels, full_width, full_height, space) = if crate::raw::is_raw_extension(&path)
-    {
-        let decoded = crate::raw::decode(&path)?;
-        (
-            decoded.pixels_u16,
-            crate::raw::RAW_CHANNELS,
-            decoded.width,
-            decoded.height,
-            decoded.space,
-        )
-    } else {
-        decode_encoded(&path)?
-    };
+    let (samples, channels, full_width, full_height, space) = decode_path(&path)?;
 
     let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
     let metadata = crate::metadata::read(&path);
@@ -772,13 +792,14 @@ pub(crate) async fn open_image_file(
             full_resolution: Arc::default(),
             id: image_id,
             metadata,
+            path,
         });
     }
 
     let payload = build_payload(&prepared);
 
     println!(
-        "open_image_file: total backend time = {} ms, payload size = {} bytes, \
+        "open_image: total backend time = {} ms, payload size = {} bytes, \
          colour converted on {}",
         overall_start.elapsed().as_millis(),
         payload.len(),

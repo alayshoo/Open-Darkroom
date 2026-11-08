@@ -16,15 +16,28 @@ pub mod shaders;
 pub mod export_encoding;
 pub mod export_progress;
 pub mod jxl_encoding;
+pub mod catalog;
+pub mod thumbnails;
+mod catalog_commands;
 mod export;
 mod presets;
 
 use image_opening::ImageState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(ImageState::new(None))
+        .manage(catalog_commands::CatalogState::new(None))
+        .setup(|app| {
+            // The editor still works without a catalog, so a failure is reported rather than fatal.
+            match catalog_commands::open_catalog(app.handle()) {
+                Ok(catalog) => *app.state::<catalog_commands::CatalogState>().lock().unwrap() = Some(catalog),
+                Err(e) => eprintln!("catalog: could not open: {e}"),
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -33,12 +46,32 @@ pub fn run() {
             wrap_cursor,
             grab_cursor,
             image_opening::open_image_file,
+            image_opening::open_image_path,
             image_opening::crop_histograms,
             image_opening::image_metadata,
             full_resolution::full_resolution_rows,
             export::export_image,
             presets::export_preset,
             presets::import_presets,
+            catalog_commands::catalog_load,
+            catalog_commands::catalog_create_library,
+            catalog_commands::catalog_rename_library,
+            catalog_commands::catalog_delete_library,
+            catalog_commands::catalog_create_roll,
+            catalog_commands::catalog_update_roll,
+            catalog_commands::catalog_delete_roll,
+            catalog_commands::catalog_import_files,
+            catalog_commands::catalog_import_folder,
+            catalog_commands::catalog_open_file,
+            catalog_commands::catalog_move_images,
+            catalog_commands::catalog_remove_images,
+            catalog_commands::catalog_set_frame_info,
+            catalog_commands::catalog_locate,
+            catalog_commands::catalog_edit,
+            catalog_commands::catalog_save_edit,
+            catalog_commands::catalog_choose_photo_folder,
+            catalog_commands::catalog_thumbnail,
+            catalog_commands::catalog_render_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

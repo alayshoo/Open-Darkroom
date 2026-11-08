@@ -1,0 +1,85 @@
+// src-tauri/src/thumbnails.rs
+//
+// Small renders of an image with its edit, through the same WGSL as export.
+// Free of Tauri, like export_rendering.rs.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use image::codecs::jpeg::JpegEncoder;
+use image::ExtendedColorType;
+
+use crate::crop::CropPayload;
+use crate::export_rendering::{render_cropped_image, SlidersPayload};
+use crate::icc::SourceSpace;
+use crate::image_opening::{decode_path, downscale_to_max_edge};
+use crate::output_space::OutputSpace;
+use crate::retouch::RetouchPayload;
+
+/// Longest edge of a stored thumbnail: a grid cell on a high density display.
+pub const THUMBNAIL_EDGE: u32 = 768;
+
+const JPEG_QUALITY: u8 = 85;
+
+/// An image shrunk to thumbnail size, before any edit.
+pub struct ThumbnailSource {
+    pub path: PathBuf,
+    pub pixels: Vec<u16>,
+    pub width: u32,
+    pub height: u32,
+    pub channels: usize,
+    pub space: SourceSpace,
+}
+
+impl ThumbnailSource {
+    pub fn from_pixels(path: &Path, pixels: &[u16], width: u32, height: u32, channels: usize, space: SourceSpace) -> Self {
+        let (pixels, width, height) = downscale_to_max_edge(pixels, width, height, channels, THUMBNAIL_EDGE);
+        Self { path: path.to_path_buf(), pixels, width, height, channels, space }
+    }
+
+    /// Decodes the file and keeps only the shrunk copy.
+    pub fn decode(path: &Path) -> Result<Self, String> {
+        let (pixels, channels, width, height, space) = decode_path(path)?;
+        Ok(Self::from_pixels(path, &pixels, width, height, channels, space))
+    }
+}
+
+/// The source last rendered from, so re-rendering an image as it is edited
+/// does not shrink it again each time.
+static LAST_SOURCE: Mutex<Option<Arc<ThumbnailSource>>> = Mutex::new(None);
+
+pub fn cached_source(path: &Path) -> Option<Arc<ThumbnailSource>> {
+    LAST_SOURCE.lock().unwrap_or_else(|e| e.into_inner()).clone().filter(|s| s.path == path)
+}
+
+pub fn keep_source(source: Arc<ThumbnailSource>) {
+    *LAST_SOURCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
+}
+
+/// The edit rendered over the source in sRGB, encoded as a JPEG.
+pub async fn render_thumbnail(
+    source: &ThumbnailSource,
+    sliders: &SlidersPayload,
+    crop: &CropPayload,
+    retouch: &[RetouchPayload],
+) -> Result<Vec<u8>, String> {
+    let rendered = render_cropped_image(
+        &source.pixels,
+        source.width,
+        source.height,
+        source.channels,
+        sliders,
+        crop,
+        retouch,
+        &source.space,
+        OutputSpace::Srgb,
+        8,
+        |_| {},
+    )
+    .await?;
+    let mut jpeg = Vec::new();
+    JpegEncoder::new_with_quality(&mut jpeg, JPEG_QUALITY)
+        .encode(&rendered.rgb, rendered.width, rendered.height, ExtendedColorType::Rgb8)
+        .map_err(|e| e.to_string())?;
+    Ok(jpeg)
+}
