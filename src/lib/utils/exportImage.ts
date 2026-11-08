@@ -38,6 +38,11 @@ export function exportDefaults(): Promise<ExportDestination | null> {
     return invoke("export_defaults");
 }
 
+/** The save dialog; null when it is dismissed. */
+export function pickExportFile(format: ExportFormat, folder: string | null): Promise<ExportDestination | null> {
+    return invoke("pick_export_file", { format, folder });
+}
+
 /** Null when the picker is dismissed. */
 export function pickExportFolder(start: string | null): Promise<string | null> {
     return invoke("pick_export_folder", { start });

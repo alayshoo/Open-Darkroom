@@ -81,6 +81,16 @@ impl ExportFormat {
     pub fn extension(self) -> &'static str {
         self.extensions()[0]
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ExportFormat::Png => "PNG",
+            ExportFormat::Jpeg => "JPEG",
+            ExportFormat::Webp => "WebP",
+            ExportFormat::Tiff => "TIFF",
+            ExportFormat::Jxl => "JPEG XL",
+        }
+    }
 }
 
 impl ExportSettings {

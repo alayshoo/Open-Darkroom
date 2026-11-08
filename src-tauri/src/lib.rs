@@ -41,6 +41,7 @@ pub fn run() {
             export::export_image,
             export::export_defaults,
             export::pick_export_folder,
+            export::pick_export_file,
             export::check_export_destination,
             presets::export_preset,
             presets::import_presets,

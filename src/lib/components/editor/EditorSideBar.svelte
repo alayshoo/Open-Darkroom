@@ -192,7 +192,12 @@
             class:dimmed={editor.sidebarInactive}
             inert={editor.sidebarInactive}
         >
-            <ExportButton onclick={exportDialog.show} />
+            <ExportButton
+                onexport={exportDialog.quickExport}
+                onoptions={exportDialog.show}
+                open={exportDialog.open}
+                busy={exportDialog.running}
+            />
         </div>
         <div
             class="footer-item page-dots-wrapper relative flex justify-center items-center"

@@ -19,7 +19,7 @@ use crate::image_opening::ImageState;
 use crate::retouch::RetouchPayload;
 
 /// Where an export is written: a folder, and a name without its extension.
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportDestination {
     pub folder: String,
@@ -180,6 +180,45 @@ pub(crate) async fn pick_export_folder(app: tauri::AppHandle, start: Option<Stri
     }
     let folder = dialog.blocking_pick_folder()?.into_path().ok()?;
     Some(folder.to_string_lossy().into_owned())
+}
+
+/// The save dialog, starting in `folder` when it still exists and in the open
+/// image's own folder otherwise. None when it is dismissed.
+#[tauri::command]
+pub(crate) async fn pick_export_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ImageState>,
+    format: ExportFormat,
+    folder: Option<String>,
+) -> Result<Option<ExportDestination>, String> {
+    let source = state.lock().unwrap().as_ref().map(|img| img.path.clone());
+    let start = folder
+        .map(PathBuf::from)
+        .filter(|f| f.is_dir())
+        .or_else(|| source.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf));
+    let stem = source
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .map_or("Untitled".into(), |s| s.to_string_lossy().into_owned());
+
+    let mut dialog = app
+        .dialog()
+        .file()
+        .add_filter(format!("{} Image", format.label()), format.extensions())
+        .set_file_name(format!("{stem}.{}", format.extension()));
+    if let Some(start) = start {
+        dialog = dialog.set_directory(start);
+    }
+    let Some(picked) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let folder = path.parent().ok_or("The file has no folder")?;
+    let file_name = path.file_name().ok_or("The file has no name")?;
+    Ok(Some(ExportDestination {
+        folder: folder.to_string_lossy().into_owned(),
+        file_name: file_name.to_string_lossy().into_owned(),
+    }))
 }
 
 /// The file an export would write, and whether one is already there.

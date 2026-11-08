@@ -71,6 +71,9 @@ const SHOT: ImageMetadata = {
 
 // Every export the page asks for, and the text on the stubbed clipboard.
 const exports: any[] = [];
+// What the save dialog was opened with, and what it hands back.
+const saveDialogs: any[] = [];
+let saveDialogAnswer: { folder: string; fileName: string } | null = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
 let clipboard = "";
 
 function stubTauri() {
@@ -86,6 +89,10 @@ function stubTauri() {
             if (cmd === "check_export_destination")
                 return { path: `${args.folder}/${args.fileName}.jxl`, exists: args.fileName === "taken" };
             if (cmd === "pick_export_folder") return "/photos/exports";
+            if (cmd === "pick_export_file") {
+                saveDialogs.push(args);
+                return saveDialogAnswer;
+            }
             if (cmd === "plugin:clipboard-manager|write_text") return void (clipboard = args.text);
             if (cmd === "plugin:clipboard-manager|read_text") return clipboard;
             if (/^plugin:store\|(entries|keys|values)$/.test(cmd)) return [];
@@ -164,14 +171,16 @@ async function exportAction() {
     });
 }
 
+/** An export from the side bar's button, through the save dialog. */
 async function exported() {
     const count = exports.length;
     document.querySelector<HTMLButtonElement>(".export-button")!.click();
-    (await exportAction()).click();
     await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
-    await vi.waitFor(() => expect(exportDialog()).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>(".export-button")!.disabled).toBe(false));
     return exports[count];
 }
+
+const openExportModal = () => button("Export options").click();
 
 const isInert = (selector: string) => $(selector)!.hasAttribute("inert");
 
@@ -262,7 +271,8 @@ describe("with an image open", () => {
         expect(args.crop).toEqual(FULL_FRAME);
         expect(args.retouch).toEqual([]);
         expect(args.settings).toBeTypeOf("object");
-        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127" });
+        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127.jxl" });
+        expect(exportDialog()).toBeNull();
         expect(args.size).toEqual({ mode: "none", pixels: 2048, percent: 50 });
         expect(args.metadata).toBe(true);
         expect(Array.isArray(args.sliders.curveLut)).toBe(true);
@@ -323,8 +333,22 @@ describe("with an image open", () => {
         await vi.waitFor(() => expect(exportDialog()).toBeNull());
     });
 
+    it("exports nothing when the save dialog is dismissed", async () => {
+        const count = exports.length;
+        saveDialogAnswer = null;
+        try {
+            document.querySelector<HTMLButtonElement>(".export-button")!.click();
+            await vi.waitFor(() => expect(saveDialogs.at(-1)?.format).toBeDefined());
+            await new Promise((r) => setTimeout(r, 100));
+            expect(exports).toHaveLength(count);
+            expect(exportDialog()).toBeNull();
+        } finally {
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+        }
+    });
+
     it("exports at the size, name and folder the modal is given", async () => {
-        document.querySelector<HTMLButtonElement>(".export-button")!.click();
+        openExportModal();
         await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
         const dialog = exportDialog()!;
         const pill = (label: string) =>
@@ -358,8 +382,11 @@ describe("with an image open", () => {
         expect(args.size).toEqual({ mode: "longEdge", pixels: 4, percent: 50 });
         await vi.waitFor(() => expect(exportDialog()).toBeNull());
 
-        // The choices carry over to the next export.
-        document.querySelector<HTMLButtonElement>(".export-button")!.click();
+        // The choices carry over to the next export, from the button as well.
+        const before = saveDialogs.length;
+        expect((await exported()).settings.format).toBe("jpeg");
+        expect(saveDialogs[before]).toEqual({ format: "jpeg", folder: "/photos/exports" });
+        openExportModal();
         await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
         expect(pill("JPEG").classList.contains("active")).toBe(true);
         expect(exportDialog()!.querySelector<HTMLInputElement>(".name-input")!.value).toBe("roll 3");

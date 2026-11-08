@@ -9,7 +9,13 @@ import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
 import { proofing } from "$lib/gpu/proofing.svelte";
 import { loadSettings, saveSetting } from "$lib/settings/persistence";
 import { defaultExportSettings, restoreExportSettings, type ExportSettings } from "$lib/types/exportSettings";
-import { exportDefaults, exportImage, pickExportFolder } from "$lib/utils/exportImage";
+import {
+    exportDefaults,
+    exportImage,
+    pickExportFile,
+    pickExportFolder,
+    type ExportDestination,
+} from "$lib/utils/exportImage";
 
 export type ExportPhase = "preparing" | "rendering" | "encoding";
 
@@ -29,6 +35,8 @@ class ExportDialog {
     running = $state(false);
     progress = $state<ExportProgress | null>(null);
     error = $state<string | null>(null);
+    /** Whether the running export came from the save dialog rather than the modal. */
+    quick = $state(false);
 
     // The open the name was taken from, so the next image brings its own.
     #namedFor: number | null = null;
@@ -78,7 +86,37 @@ class ExportDialog {
         if (folder) this.folder = folder;
     };
 
+    /** The save dialog, then an export with the settings as they stand. */
+    quickExport = async () => {
+        if (this.running || this.open || !editor.imagePayload) return;
+        if (editor.isCropping) editor.applyCrop();
+        const destination = await pickExportFile(this.settings.format, this.folder || null).catch((e) => {
+            console.error("Failed to open the save dialog:", e);
+            return null;
+        });
+        if (!destination) return;
+        this.quick = true;
+        try {
+            await this.#export(destination);
+        } catch (e) {
+            console.error("Failed to export:", e);
+        } finally {
+            this.quick = false;
+        }
+    };
+
+    /** The export the modal is set up for; a failure stays on the modal. */
     run = async () => {
+        if (this.running) return;
+        try {
+            await this.#export({ folder: this.folder, fileName: this.fileName });
+            this.close();
+        } catch (e) {
+            this.error = String(e);
+        }
+    };
+
+    async #export(destination: ExportDestination) {
         if (this.running || !editor.imagePayload) return;
         this.running = true;
         this.error = null;
@@ -92,21 +130,15 @@ class ExportDialog {
             this.progress = e.payload;
         });
         try {
-            await exportImage(editor.edit, editor.curveLut, colorSpaceDebug.toneMap, $state.snapshot(this.settings), {
-                folder: this.folder,
-                fileName: this.fileName,
-            });
-            void saveSetting("exportFolder", this.folder);
-            this.running = false;
-            this.close();
-        } catch (e) {
-            this.error = String(e);
+            await exportImage(editor.edit, editor.curveLut, colorSpaceDebug.toneMap, $state.snapshot(this.settings), destination);
+            this.folder = destination.folder;
+            void saveSetting("exportFolder", destination.folder);
         } finally {
             unlisten();
             this.running = false;
             this.progress = null;
         }
-    };
+    }
 }
 
 export const exportDialog = new ExportDialog();

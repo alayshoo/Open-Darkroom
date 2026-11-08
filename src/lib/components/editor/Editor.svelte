@@ -9,6 +9,7 @@
     import InfoPanel from "./InfoPanel.svelte";
     import PresetModal from "$lib/components/presets/PresetModal.svelte";
     import ExportModal from "$lib/components/export/ExportModal.svelte";
+    import ExportProgress from "$lib/components/export/ExportProgress.svelte";
     import { exportDialog } from "$lib/export/exportDialog.svelte";
     import { shortcuts } from "$lib/settings/shortcuts.svelte";
     import CustomAspectModal from "$lib/components/CustomAspectModal.svelte";
@@ -92,6 +93,11 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        // Nothing but the window itself answers while an export runs.
+        if (exportDialog.running && !exportDialog.open) {
+            e.preventDefault();
+            return;
+        }
         // The export modal takes the keyboard while it is up; Escape and its own
         // shortcut close it, unless an export is running.
         if (exportDialog.open) {
@@ -210,6 +216,7 @@
 </div>
 
 <ExportModal />
+<ExportProgress />
 <CustomAspectModal
     bind:open={editor.customAspectOpen}
     initial={editor.aspectLock.custom ?? [1, 1]}

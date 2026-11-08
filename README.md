@@ -71,7 +71,7 @@ It edits regular photos too, so a roll of film and a folder of digital shots go 
 
 Exports run the same shaders as the preview, at full resolution in 32-bit float, so what you see is what you get.
 
-The Export window (**File → Export…**, `Ctrl+Shift+E`, or the button under the controls) sets the folder and file name, resizes by long edge, short edge, width, height or percentage, and can write the camera, lens, exposure and date taken into the file.
+The **Export** button under the controls saves straight away through the system's save dialog, with the settings last used. The Export window (**File → Export…**, `Ctrl+Shift+E`, or the arrow beside that button) sets the folder and file name, resizes by long edge, short edge, width, height or percentage, and can write the camera, lens, exposure and date taken into the file.
 
 ## Download
 
