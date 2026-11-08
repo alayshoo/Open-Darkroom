@@ -42,7 +42,7 @@
 
 <nav class="library-nav flex flex-col h-full">
     <header class="flex items-center shrink-0 ml-2.5 mr-1 mt-2.5 h-7">
-        <span class="title flex-1">Library</span>
+        <span class="title flex-1">Catalog</span>
         <button class="add" title="New library" aria-label="New library" onclick={() => library.createLibrary()}>
             <svg width="18" height="18" viewBox="0 0 24 24">
                 <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
@@ -67,6 +67,7 @@
                     <button
                         class="row library-row flex items-center"
                         class:current
+                        class:glass={current}
                         aria-current={current ? "page" : undefined}
                         onclick={() => library.show({ kind: "library", id: lib.id })}
                         ondblclick={() => (library.renamingId = lib.id)}
@@ -85,6 +86,7 @@
                     <button
                         class="row roll-row flex items-center"
                         class:current={currentRoll}
+                        class:glass={currentRoll}
                         aria-current={currentRoll ? "page" : undefined}
                         onclick={() => library.show({ kind: "roll", id: roll.id })}
                         oncontextmenu={(e) => rollMenu(e, roll.id)}
@@ -167,13 +169,21 @@
         transition: background 0.12s ease, color 0.12s ease;
     }
 
-    .row:hover {
-        background: var(--bg4);
+    .row:not(.current):hover {
+        background: color-mix(in srgb, var(--glassRim) 6%, transparent);
         color: var(--color1);
     }
 
+    /* The selected row takes the glass the settings tabs do: a light tint and
+       the rim, with no blur over the flat side list. */
     .row.current {
-        background: var(--bg5);
+        --panel-tint: color-mix(in srgb, var(--glassRim) 8%, transparent);
+        --rim-hi: 0.2;
+        --rim-mid: 0.09;
+        --rim-lo: 0.05;
+        --rim-end: 0.1;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         color: var(--color1);
     }
 

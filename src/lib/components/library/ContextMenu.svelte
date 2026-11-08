@@ -123,10 +123,8 @@
     }
 
     .heading {
-        font-size: 11px;
+        font-size: 12px;
         color: var(--color3);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
     }
 
     .separator {

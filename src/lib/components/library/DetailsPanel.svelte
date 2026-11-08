@@ -154,11 +154,10 @@
 
     h3 {
         margin: 14px 0 6px;
-        font-size: 11px;
+        font-family: var(--font-ui);
+        font-size: 14px;
         font-weight: 600;
-        letter-spacing: 0.07em;
-        text-transform: uppercase;
-        color: var(--color3);
+        color: var(--color1);
     }
 
     .fields {

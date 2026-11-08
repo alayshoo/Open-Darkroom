@@ -376,11 +376,10 @@
 
     h2 {
         margin: 6px 6px 10px;
-        font-size: 11px;
+        font-family: var(--font-ui);
+        font-size: 15px;
         font-weight: 600;
-        letter-spacing: 0.07em;
-        text-transform: uppercase;
-        color: var(--color3);
+        color: var(--color2);
     }
 
     .rolls {
