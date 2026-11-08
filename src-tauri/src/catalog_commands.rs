@@ -12,7 +12,7 @@ use tauri::ipc::Response;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-use crate::catalog::{folder_images, Catalog, ImageRecord, Place, Roll, Snapshot};
+use crate::catalog::{folder_images, Catalog, FilmStock, ImageRecord, Place, Roll, Snapshot, StockFields};
 use crate::crop::CropPayload;
 use crate::export_rendering::SlidersPayload;
 use crate::image_opening::{image_extensions, ImageState};
@@ -70,8 +70,24 @@ pub(crate) fn catalog_update_roll(
     id: i64,
     name: String,
     info: Value,
+    stock_id: Option<i64>,
 ) -> Result<(), String> {
-    with_catalog(&state, |c| c.update_roll(id, &name, &info))
+    with_catalog(&state, |c| c.update_roll(id, &name, &info, stock_id))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_create_stock(state: tauri::State<'_, CatalogState>, stock: StockFields) -> Result<FilmStock, String> {
+    with_catalog(&state, |c| c.create_film_stock(&stock))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_update_stock(state: tauri::State<'_, CatalogState>, id: i64, stock: StockFields) -> Result<(), String> {
+    with_catalog(&state, |c| c.update_film_stock(id, &stock))
+}
+
+#[tauri::command]
+pub(crate) fn catalog_delete_stock(state: tauri::State<'_, CatalogState>, id: i64) -> Result<(), String> {
+    with_catalog(&state, |c| c.delete_film_stock(id))
 }
 
 #[tauri::command]

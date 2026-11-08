@@ -99,8 +99,8 @@ export function framePlaceholder(key: FrameField, metadata: ImageMetadata | null
 }
 
 /** One line about a roll for its card: the stock, and how it was rated if not at box speed. */
-export function rollSummary(info: RollInfo): string {
-    const parts = [info.filmStock, info.format].filter(Boolean) as string[];
+export function rollSummary(info: RollInfo, stockName = info.filmStock): string {
+    const parts = [stockName, info.format].filter(Boolean) as string[];
     if (info.ratedIso && info.ratedIso !== info.boxIso) parts.push(`@ ${info.ratedIso}`);
     if (info.pushPull) parts.push(info.pushPull);
     return parts.join(" · ");

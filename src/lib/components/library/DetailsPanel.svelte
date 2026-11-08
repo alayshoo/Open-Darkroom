@@ -1,6 +1,7 @@
 <!-- lib/components/library/DetailsPanel.svelte -->
 <script lang="ts">
     import { library } from "$lib/library/library.svelte";
+    import StockPicker from "./StockPicker.svelte";
     import { metadataRows } from "$lib/types/imageMetadata";
     import {
         FRAME_FIELDS,
@@ -88,9 +89,16 @@
                     <h3>{section.title}</h3>
                     <div class="fields flex flex-wrap">
                         {#each section.fields as spec (spec.key)}
-                            {@render field(spec, roll.info[spec.key], spec.placeholder, (v) =>
-                                library.updateRoll(roll.id, { info: { [spec.key as RollField]: v } }),
-                            )}
+                            {#if spec.key === "filmStock"}
+                                <div class="field flex flex-col">
+                                    <span class="label">{spec.label}</span>
+                                    <StockPicker {roll} />
+                                </div>
+                            {:else}
+                                {@render field(spec, roll.info[spec.key], spec.placeholder, (v) =>
+                                    library.updateRoll(roll.id, { info: { [spec.key as RollField]: v } }),
+                                )}
+                            {/if}
                         {/each}
                     </div>
                 {/each}

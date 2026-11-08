@@ -27,7 +27,7 @@ export const PICKED = {
 export function catalogCommand(cmd: string, openPayload: () => ArrayBuffer): unknown {
     switch (cmd) {
         case "catalog_load":
-            return { libraries: [LIBRARY], rolls: [], images: [], photoFolder: null };
+            return { libraries: [LIBRARY], rolls: [], images: [], filmStocks: [], photoFolder: null };
         case "catalog_open_file":
             return { ...PICKED };
         case "open_image_path":

@@ -3,13 +3,15 @@
     import type { RollRecord } from "$lib/library/catalogApi";
     import { library } from "$lib/library/library.svelte";
     import { rollSummary } from "$lib/types/rollInfo";
+    import FilmCanister from "./FilmCanister.svelte";
 
     let { roll, onmenu }: { roll: RollRecord; onmenu: (e: MouseEvent) => void } = $props();
 
     const STRIP = 4;
     let frames = $derived(library.framesOf(roll.id));
     let strip = $derived(frames.slice(0, STRIP));
-    let summary = $derived(rollSummary(roll.info));
+    let summary = $derived(rollSummary(roll.info, library.stockNameOf(roll)));
+    let stock = $derived(library.stockOf(roll));
 
     $effect(() => {
         for (const frame of strip) void library.requestThumbnail(frame);
@@ -29,7 +31,7 @@
         {/each}
     </div>
     <div class="meta flex flex-col">
-        <span class="name">{roll.name}</span>
+        <span class="name flex items-center gap-1.5"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} size={18} />{roll.name}</span>
         <span class="summary">{summary || "No film information yet"}</span>
         <span class="count">{frames.length} frame{frames.length === 1 ? "" : "s"}</span>
     </div>

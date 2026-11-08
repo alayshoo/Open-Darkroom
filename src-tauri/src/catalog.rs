@@ -18,13 +18,21 @@ use serde_json::Value;
 
 use crate::metadata::{self, ImageMetadata};
 
+mod film_stocks;
+pub use film_stocks::{FilmStock, StockFields};
+
+/// How many stocks a new catalog starts with.
+pub fn film_stocks_seeds_len() -> usize {
+    film_stocks::seeds().len()
+}
+
 pub const CATALOG_FILE: &str = "catalog.sqlite";
 pub const THUMBNAIL_DIR: &str = "thumbnails";
 
 /// Bytes read from the start of a file for its fingerprint.
 const FINGERPRINT_BYTES: usize = 64 * 1024;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -36,12 +44,24 @@ CREATE TABLE IF NOT EXISTS libraries (
     name    TEXT NOT NULL,
     created INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS film_stocks (
+    id        INTEGER PRIMARY KEY,
+    maker     TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    box_iso   INTEGER,
+    kind      TEXT NOT NULL,
+    process   TEXT NOT NULL,
+    formats   TEXT NOT NULL DEFAULT '[]',
+    colour    TEXT,
+    colour2   TEXT
+);
 CREATE TABLE IF NOT EXISTS rolls (
     id         INTEGER PRIMARY KEY,
     library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
     info       TEXT NOT NULL DEFAULT '{}',
-    created    INTEGER NOT NULL
+    created    INTEGER NOT NULL,
+    stock_id   INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS images (
     id              INTEGER PRIMARY KEY,
@@ -79,6 +99,8 @@ pub struct Roll {
     /// Film, camera and development, as the frontend's roll form writes it.
     pub info: Value,
     pub created: i64,
+    /// The stock it was shot on, when it is one the catalog knows.
+    pub stock_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -107,6 +129,7 @@ pub struct Snapshot {
     pub libraries: Vec<Library>,
     pub rolls: Vec<Roll>,
     pub images: Vec<ImageRecord>,
+    pub film_stocks: Vec<FilmStock>,
     pub photo_folder: Option<String>,
 }
 
@@ -197,12 +220,34 @@ impl Catalog {
         let conn = Connection::open(dir.join(CATALOG_FILE)).map_err(err)?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;").map_err(err)?;
         conn.execute_batch(SCHEMA).map_err(err)?;
-        conn.execute(
-            "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema', ?1)",
-            params![SCHEMA_VERSION.to_string()],
-        )
-        .map_err(err)?;
-        Ok(Self { conn, dir: dir.to_path_buf() })
+        let catalog = Self { conn, dir: dir.to_path_buf() };
+        catalog.migrate()?;
+        catalog.seed_film_stocks()?;
+        Ok(catalog)
+    }
+
+    /// Brings a catalog written by an older build up to this one's schema.
+    fn migrate(&self) -> Result<(), String> {
+        let has_stock: bool = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('rolls') WHERE name = 'stock_id'", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map(|n| n > 0)
+            .map_err(err)?;
+        if !has_stock {
+            self.conn
+                .execute_batch("ALTER TABLE rolls ADD COLUMN stock_id INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL;")
+                .map_err(err)?;
+        }
+        self.conn
+            .execute(
+                "INSERT INTO meta (key, value) VALUES ('schema', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![SCHEMA_VERSION.to_string()],
+            )
+            .map(|_| ())
+            .map_err(err)
     }
 
     pub fn thumbnail_path(&self, image_id: i64) -> PathBuf {
@@ -238,6 +283,7 @@ impl Catalog {
             libraries: self.libraries()?,
             rolls: self.rolls()?,
             images: self.images("", [])?,
+            film_stocks: self.film_stocks()?,
             photo_folder: photo_folder.map(|p| p.to_string_lossy().into_owned()),
         })
     }
@@ -253,7 +299,7 @@ impl Catalog {
     pub fn rolls(&self) -> Result<Vec<Roll>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, library_id, name, info, created FROM rolls ORDER BY created, id")
+            .prepare("SELECT id, library_id, name, info, created, stock_id FROM rolls ORDER BY created, id")
             .map_err(err)?;
         let rows = stmt
             .query_map([], |r| {
@@ -264,6 +310,7 @@ impl Catalog {
                     name: r.get(2)?,
                     info: serde_json::from_str(&info).unwrap_or(Value::Object(Default::default())),
                     created: r.get(4)?,
+                    stock_id: r.get(5)?,
                 })
             })
             .map_err(err)?;
@@ -351,12 +398,16 @@ impl Catalog {
             name: name.into(),
             info: Value::Object(Default::default()),
             created,
+            stock_id: None,
         })
     }
 
-    pub fn update_roll(&self, id: i64, name: &str, info: &Value) -> Result<(), String> {
+    pub fn update_roll(&self, id: i64, name: &str, info: &Value, stock_id: Option<i64>) -> Result<(), String> {
         self.conn
-            .execute("UPDATE rolls SET name = ?1, info = ?2 WHERE id = ?3", params![name, info.to_string(), id])
+            .execute(
+                "UPDATE rolls SET name = ?1, info = ?2, stock_id = ?3 WHERE id = ?4",
+                params![name, info.to_string(), stock_id, id],
+            )
             .map(|_| ())
             .map_err(err)
     }

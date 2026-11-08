@@ -11,6 +11,7 @@ import type { Component } from "svelte";
 import DebugSection from "./sections/DebugSection.svelte";
 import ShortcutsSection from "./sections/ShortcutsSection.svelte";
 import LibrarySection from "./sections/LibrarySection.svelte";
+import FilmStocksSection from "./sections/FilmStocksSection.svelte";
 
 export interface SettingsSection {
     /** Stable id; what `settings.section` holds. */
@@ -33,6 +34,12 @@ export const settingsSections: SettingsSection[] = [
         label: "Library",
         icon: "M4 6.5h16v11H4zM4 14l4.5-4 4 3.5 3-2.5 4.5 4",
         component: LibrarySection,
+    },
+    {
+        id: "film-stocks",
+        label: "Film stocks",
+        icon: "M5 6.5h9v13H5zM7.5 6.5V4.3h4v2.2M14 9.5h4.5l1.5 1.5v5.5H14",
+        component: FilmStocksSection,
     },
     {
         id: "debug",

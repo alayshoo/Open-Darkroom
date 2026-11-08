@@ -182,7 +182,7 @@ fn deleting_a_roll_leaves_its_frames_loose_and_deleting_a_library_takes_everythi
     let file = scratch.image("a.png", 1);
     let image = c.import(&[file.clone()], Place { library_id: library.id, roll_id: Some(roll.id) }, false).unwrap();
 
-    c.update_roll(roll.id, "Ektar 100", &json!({ "filmStock": "Kodak Ektar 100", "boxIso": "100" })).unwrap();
+    c.update_roll(roll.id, "Ektar 100", &json!({ "filmStock": "Kodak Ektar 100", "boxIso": "100" }), None).unwrap();
     let rolls = c.rolls().unwrap();
     assert_eq!(rolls[0].name, "Ektar 100");
     assert_eq!(rolls[0].info["filmStock"], "Kodak Ektar 100");
@@ -256,4 +256,78 @@ fn a_thumbnail_renders_the_crop_as_a_jpeg() {
     let jpeg = pollster::block_on(render_thumbnail(&source, &SlidersPayload::default(), &crop, &[])).unwrap();
     let decoded = image::load_from_memory(&jpeg).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (384, 512));
+}
+
+#[test]
+fn a_new_catalog_is_seeded_with_stocks_once() {
+    let scratch = Scratch::new();
+    let seeded = open_darkroom_lib::catalog::film_stocks_seeds_len();
+    let stocks = catalog(&scratch).film_stocks().unwrap();
+    assert_eq!(stocks.len(), seeded);
+    let portra = stocks.iter().find(|s| s.fields.label() == "Kodak Portra 400").unwrap();
+    assert_eq!((portra.fields.box_iso, portra.fields.process.as_str()), (Some(400), "C-41"));
+    assert!(portra.fields.colour.is_some());
+
+    // A deleted stock stays deleted the next time the catalog opens.
+    catalog(&scratch).delete_film_stock(portra.id).unwrap();
+    assert_eq!(catalog(&scratch).film_stocks().unwrap().len(), seeded - 1);
+}
+
+#[test]
+fn stocks_are_added_and_edited_and_a_roll_keeps_its_stock_name_when_it_goes() {
+    use open_darkroom_lib::catalog::StockFields;
+
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let mut fields = StockFields {
+        maker: "Foma".into(),
+        name: "Fomapan 200".into(),
+        box_iso: Some(200),
+        kind: "blackAndWhite".into(),
+        process: "B&W".into(),
+        formats: vec!["35mm".into(), "120".into()],
+        colour: Some("#3a6ea5".into()),
+        colour2: None,
+    };
+    let stock = c.create_film_stock(&fields).unwrap();
+    fields.colour2 = Some("#e8e8e8".into());
+    c.update_film_stock(stock.id, &fields).unwrap();
+    let stored = c.film_stocks().unwrap().into_iter().find(|s| s.id == stock.id).unwrap();
+    assert_eq!(stored.fields, fields);
+
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "Fog").unwrap();
+    c.update_roll(roll.id, "Fog", &json!({ "boxIso": "200" }), Some(stock.id)).unwrap();
+    assert_eq!(c.rolls().unwrap()[0].stock_id, Some(stock.id));
+
+    c.delete_film_stock(stock.id).unwrap();
+    let roll = &c.rolls().unwrap()[0];
+    assert_eq!(roll.stock_id, None);
+    assert_eq!(roll.info["filmStock"], "Foma Fomapan 200");
+    assert_eq!(roll.info["boxIso"], "200");
+}
+
+#[test]
+fn a_catalog_from_before_film_stocks_is_brought_up_to_date() {
+    let scratch = Scratch::new();
+    let dir = scratch.path("data");
+    std::fs::create_dir_all(&dir).unwrap();
+    {
+        let old = rusqlite::Connection::open(dir.join("catalog.sqlite")).unwrap();
+        old.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema', '1');
+             CREATE TABLE libraries (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created INTEGER NOT NULL);
+             CREATE TABLE rolls (id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL, name TEXT NOT NULL,
+                                 info TEXT NOT NULL DEFAULT '{}', created INTEGER NOT NULL);
+             INSERT INTO libraries VALUES (1, 'Personal', 1);
+             INSERT INTO rolls VALUES (1, 1, 'Old roll', '{\"filmStock\":\"HP5\"}', 2);",
+        )
+        .unwrap();
+    }
+    let c = Catalog::open(&dir).unwrap();
+    let rolls = c.rolls().unwrap();
+    assert_eq!((rolls[0].name.as_str(), rolls[0].stock_id), ("Old roll", None));
+    assert_eq!(rolls[0].info["filmStock"], "HP5");
+    assert!(!c.film_stocks().unwrap().is_empty());
 }

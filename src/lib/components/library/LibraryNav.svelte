@@ -2,6 +2,7 @@
 <script lang="ts">
     import { library } from "$lib/library/library.svelte";
     import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
+    import FilmCanister from "./FilmCanister.svelte";
 
     let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
@@ -83,6 +84,7 @@
                 {/if}
                 {#each library.rollsOf(lib.id) as roll (roll.id)}
                     {@const currentRoll = library.view?.kind === "roll" && library.view.id === roll.id}
+                    {@const stock = library.stockOf(roll)}
                     <button
                         class="row roll-row flex items-center"
                         class:current={currentRoll}
@@ -91,15 +93,7 @@
                         oncontextmenu={(e) => rollMenu(e, roll.id)}
                     >
                         <div class="face glass absolute"></div>
-                        <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-                            <!-- A 35mm canister with its leader pulled out. -->
-                            <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">
-                                <rect x="3.5" y="6" width="10" height="14" rx="2" />
-                                <path d="M6.5 6V3.8h4V6" />
-                                <path d="M13.5 9.5h5l1.5 1.5v5.5h-6.5" />
-                                <path d="M15.6 12h0.01M18 12h0.01" stroke-width="1.8" />
-                            </g>
-                        </svg>
+                        <span class="glyph roll-glyph flex"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} /></span>
                         <span class="name flex-1">{roll.name}</span>
                         <span class="count">{library.framesOf(roll.id).length}</span>
                     </button>
@@ -231,6 +225,11 @@
     .glyph {
         flex-shrink: 0;
         opacity: 0.75;
+    }
+
+    /* At full strength, so a stock's colours read true. */
+    .roll-glyph {
+        opacity: 1;
     }
 
     .name {

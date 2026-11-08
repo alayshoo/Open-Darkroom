@@ -10,6 +10,7 @@ import type { ImageEdit } from "$lib/types/imageEdit";
 import type { ToneMap } from "$lib/types/toneMap";
 import { bakeCurveLut } from "$lib/types/curves";
 import { cloneRetouch } from "$lib/types/retouch";
+import type { FilmStock, StockFields } from "$lib/types/filmStock";
 
 // Returned when an image has no stored thumbnail yet. Must match NO_THUMBNAIL
 // in catalog_commands.rs.
@@ -27,6 +28,8 @@ export interface RollRecord {
     name: string;
     info: RollInfo;
     created: number;
+    /** The stock it was shot on, when it is one the catalog knows. */
+    stockId: number | null;
 }
 
 export interface ImageRecord {
@@ -48,6 +51,7 @@ export interface CatalogSnapshot {
     libraries: LibraryRecord[];
     rolls: RollRecord[];
     images: ImageRecord[];
+    filmStocks: FilmStock[];
     photoFolder: string | null;
 }
 
@@ -70,9 +74,13 @@ export const deleteLibrary = (id: number) => invoke<void>("catalog_delete_librar
 
 export const createRoll = (libraryId: number, name: string) =>
     invoke<RollRecord>("catalog_create_roll", { libraryId, name });
-export const updateRoll = (id: number, name: string, info: RollInfo) =>
-    invoke<void>("catalog_update_roll", { id, name, info });
+export const updateRoll = (id: number, name: string, info: RollInfo, stockId: number | null) =>
+    invoke<void>("catalog_update_roll", { id, name, info, stockId });
 export const deleteRoll = (id: number) => invoke<void>("catalog_delete_roll", { id });
+
+export const createStock = (stock: StockFields) => invoke<FilmStock>("catalog_create_stock", { stock });
+export const updateStock = (id: number, stock: StockFields) => invoke<void>("catalog_update_stock", { id, stock });
+export const deleteStock = (id: number) => invoke<void>("catalog_delete_stock", { id });
 
 export const importFiles = (place: Place, copy: boolean) => invoke<Imported>("catalog_import_files", { place, copy });
 export const importFolder = (libraryId: number, copy: boolean) =>

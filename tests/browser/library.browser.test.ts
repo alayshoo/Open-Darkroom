@@ -69,8 +69,12 @@ function stubTauri() {
     let callback = 0;
     const catalog = {
         libraries: [{ id: 1, name: "Personal", created: 1 }, { id: 2, name: "Client work", created: 2 }],
-        rolls: [{ id: 10, libraryId: 1, name: "Portra in Lisbon", created: 3, info: { filmStock: "Kodak Portra 400" } }],
+        rolls: [{ id: 10, libraryId: 1, name: "Portra in Lisbon", created: 3, stockId: 1, info: { filmStock: "Kodak Portra 400" } }],
         images: [record(1, null, null, "loose.jpg"), record(2, 10, 1, "frame01.tif"), record(3, 10, 2, "frame02.tif")],
+        filmStocks: [
+            { id: 1, maker: "Kodak", name: "Portra 400", boxIso: 400, kind: "colourNegative", process: "C-41", formats: ["35mm", "120"], colour: "#f2b33d", colour2: "#e4572e" },
+            { id: 2, maker: "Kodak", name: "Tri-X 400", boxIso: 400, kind: "blackAndWhite", process: "B&W", formats: ["35mm"], colour: "#f7c600", colour2: "#2b2b2b" },
+        ],
         photoFolder: null,
     };
     (window as any).__TAURI_INTERNALS__ = {
@@ -139,18 +143,40 @@ describe("the library", () => {
     });
 
     it("saves what is typed into the roll's information", async () => {
-        const stock = [...document.querySelectorAll<HTMLLabelElement>(".details .field")].find(
-            (f) => f.querySelector(".label")?.textContent === "Film stock",
+        const camera = [...document.querySelectorAll<HTMLLabelElement>(".details .field")].find(
+            (f) => f.querySelector(".label")?.textContent === "Camera",
         )!;
-        const input = stock.querySelector("input")!;
+        const input = camera.querySelector("input")!;
         input.focus();
-        input.select();
-        await userEvent.keyboard("Kodak Portra 800");
+        await userEvent.keyboard("Nikon FM2");
         await vi.waitFor(() => {
             const last = called("catalog_update_roll").at(-1);
-            expect(last?.args).toEqual({ id: 10, name: "Portra in Lisbon", info: { filmStock: "Kodak Portra 800" } });
+            expect(last?.args).toEqual({ id: 10, name: "Portra in Lisbon", info: { filmStock: "Kodak Portra 400", camera: "Nikon FM2" }, stockId: 1 });
         });
         input.blur();
+    });
+
+    it("puts the roll on a stock picked from the list, with its box speed", async () => {
+        const picker = $<HTMLInputElement>('[role=combobox][aria-label="Film stock"]')!;
+        expect(picker.value).toBe("Kodak Portra 400");
+        picker.focus();
+        await userEvent.keyboard("tri");
+        const option = await vi.waitFor(() => {
+            const found = [...document.querySelectorAll<HTMLButtonElement>("#stock-options [role=option]")];
+            expect(found.map((o) => o.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+                "Kodak Tri-X 400 B&W",
+                "+ Add “tri” as a new stock",
+                "No stock",
+            ]);
+            return found[0];
+        });
+        option.click();
+        await vi.waitFor(() => {
+            const last = called("catalog_update_roll").at(-1);
+            expect(last?.args.stockId).toBe(2);
+            expect(last?.args.info).toMatchObject({ filmStock: "Kodak Tri-X 400", boxIso: "400", ratedIso: "400" });
+        });
+        expect($(".roll-row .name")).not.toBeNull();
     });
 });
 

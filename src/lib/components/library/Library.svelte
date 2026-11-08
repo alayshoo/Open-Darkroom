@@ -18,7 +18,7 @@
     let title = $derived(library.currentRoll?.name ?? library.currentLibrary?.name ?? "");
     let subtitle = $derived.by(() => {
         if (library.currentRoll) {
-            const summary = rollSummary(library.currentRoll.info);
+            const summary = rollSummary(library.currentRoll.info, library.stockNameOf(library.currentRoll));
             const parts = [`In ${library.currentLibrary?.name ?? ""}`, summary].filter(Boolean);
             return parts.join(" · ");
         }

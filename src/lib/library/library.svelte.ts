@@ -13,6 +13,7 @@ import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
 import { settings } from "$lib/settings/settings.svelte";
 import { type ImageEdit, cloneImageEdit, newImageEdit, parseImageEdit, serializeImageEdit } from "$lib/types/imageEdit";
 import type { FrameInfo, RollInfo } from "$lib/types/rollInfo";
+import { type FilmStock, type StockFields, stockLabel } from "$lib/types/filmStock";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
 import { fitRect, fly, imageRect, land, nextFrame, rectOf, settle } from "./flight";
@@ -40,6 +41,7 @@ class Library {
     libraries = $state.raw<LibraryRecord[]>([]);
     rolls = $state.raw<RollRecord[]>([]);
     images = $state.raw<ImageRecord[]>([]);
+    filmStocks = $state.raw<FilmStock[]>([]);
     photoFolder = $state<string | null>(null);
     loaded = $state(false);
 
@@ -132,6 +134,7 @@ class Library {
             this.libraries = snapshot.libraries;
             this.rolls = snapshot.rolls;
             this.images = snapshot.images;
+            this.filmStocks = snapshot.filmStocks;
             this.photoFolder = snapshot.photoFolder;
             if (!this.view && this.libraries.length > 0) this.view = { kind: "library", id: this.libraries[0].id };
         } catch (e) {
@@ -220,9 +223,16 @@ class Library {
 
     #rollSaves = new Map<number, ReturnType<typeof setTimeout>>();
 
-    updateRoll = (id: number, patch: { name?: string; info?: RollInfo }) => {
+    updateRoll = (id: number, patch: { name?: string; info?: RollInfo; stockId?: number | null }) => {
         this.rolls = this.rolls.map((r) =>
-            r.id === id ? { ...r, name: patch.name ?? r.name, info: { ...r.info, ...patch.info } } : r,
+            r.id === id
+                ? {
+                      ...r,
+                      name: patch.name ?? r.name,
+                      info: { ...r.info, ...patch.info },
+                      stockId: patch.stockId === undefined ? r.stockId : patch.stockId,
+                  }
+                : r,
         );
         clearTimeout(this.#rollSaves.get(id));
         this.#rollSaves.set(
@@ -232,9 +242,90 @@ class Library {
                 const roll = this.rolls.find((r) => r.id === id);
                 if (!roll) return;
                 const name = roll.name.trim() || "Untitled roll";
-                api.updateRoll(id, name, roll.info).catch((e) => this.#fail("The roll could not be saved", e));
+                api.updateRoll(id, name, roll.info, roll.stockId).catch((e) => this.#fail("The roll could not be saved", e));
             }, SAVE_DELAY_MS),
         );
+    };
+
+    // ===== Film stocks =====
+
+    stockOf(roll: RollRecord | null): FilmStock | null {
+        return roll?.stockId == null ? null : (this.filmStocks.find((s) => s.id === roll.stockId) ?? null);
+    }
+
+    /** What a roll was shot on: its stock's name, or what was typed for it. */
+    stockNameOf(roll: RollRecord): string {
+        const stock = this.stockOf(roll);
+        return stock ? stockLabel(stock) : (roll.info.filmStock ?? "");
+    }
+
+    /**
+     * Puts a roll on a stock, or takes it off one. The box speed comes from the
+     * stock, and the rated speed follows it unless it was set apart.
+     */
+    setRollStock = (rollId: number, stock: FilmStock | null) => {
+        const roll = this.rolls.find((r) => r.id === rollId);
+        if (!roll) return;
+        if (!stock) {
+            this.updateRoll(rollId, { stockId: null, info: { filmStock: "" } });
+            return;
+        }
+        const info: RollInfo = { filmStock: stockLabel(stock) };
+        if (stock.boxIso !== null) {
+            const iso = String(stock.boxIso);
+            if (!roll.info.ratedIso || roll.info.ratedIso === roll.info.boxIso) info.ratedIso = iso;
+            info.boxIso = iso;
+        }
+        if (!roll.info.format && stock.formats.length === 1) info.format = stock.formats[0];
+        this.updateRoll(rollId, { stockId: stock.id, info });
+    };
+
+    createStock = async (fields: StockFields): Promise<FilmStock | null> => {
+        try {
+            const stock = await api.createStock(fields);
+            this.filmStocks = [...this.filmStocks, stock];
+            return stock;
+        } catch (e) {
+            this.#fail("The film stock could not be added", e);
+            return null;
+        }
+    };
+
+    #stockSaves = new Map<number, ReturnType<typeof setTimeout>>();
+
+    updateStock = (id: number, patch: Partial<StockFields>) => {
+        this.filmStocks = this.filmStocks.map((s) => (s.id === id ? { ...s, ...patch } : s));
+        clearTimeout(this.#stockSaves.get(id));
+        this.#stockSaves.set(
+            id,
+            setTimeout(() => {
+                this.#stockSaves.delete(id);
+                const stock = this.filmStocks.find((s) => s.id === id);
+                if (!stock) return;
+                const { id: _, ...fields } = stock;
+                api.updateStock(id, fields).catch((e) => this.#fail("The film stock could not be saved", e));
+            }, SAVE_DELAY_MS),
+        );
+    };
+
+    /** How many rolls are shot on a stock. */
+    rollsOnStock(id: number) {
+        return this.rolls.filter((r) => r.stockId === id).length;
+    }
+
+    deleteStock = async (id: number) => {
+        const stock = this.filmStocks.find((s) => s.id === id);
+        if (!stock) return;
+        try {
+            await api.deleteStock(id);
+            const label = stockLabel(stock);
+            this.filmStocks = this.filmStocks.filter((s) => s.id !== id);
+            this.rolls = this.rolls.map((r) =>
+                r.stockId === id ? { ...r, stockId: null, info: { ...r.info, filmStock: label } } : r,
+            );
+        } catch (e) {
+            this.#fail("The film stock could not be deleted", e);
+        }
     };
 
     deleteRoll = (id: number) => {
