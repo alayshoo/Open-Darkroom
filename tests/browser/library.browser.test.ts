@@ -97,6 +97,7 @@ function stubTauri() {
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
             if (cmd === "catalog_save_edit") return 1234;
             if (cmd === "catalog_create_gear") return { id: nextGear++, ...args.gear };
+            if (cmd === "catalog_create_stock") return { id: 100 + calls.length, ...args.stock };
             if (cmd === "catalog_thumbnail" || cmd === "catalog_render_thumbnail") return new ArrayBuffer(0);
             if (cmd === "open_image_path") return openPayload();
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
@@ -402,5 +403,44 @@ describe("moving and removing", () => {
         [...document.querySelectorAll<HTMLButtonElement>(".notice button")].find((b) => b.textContent === "Remove")!.click();
         await vi.waitFor(() => expect(called("catalog_remove_images")[0]?.args).toEqual({ ids: [1] }));
         await vi.waitFor(() => expect(cell("loose.jpg")).toBeNull());
+    });
+});
+
+describe("film makers in Settings", () => {
+    it("adds a maker as a group to add stocks to, and renames one across its stocks", async () => {
+        const SettingsModal = (await import("$lib/components/settings/SettingsModal.svelte")).default;
+        const modal = mount(SettingsModal, { target: document.body });
+        settings.show("film-stocks");
+        const button = (name: string, within: ParentNode = document) =>
+            [...within.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
+        await vi.waitFor(() => expect(button("Add a film maker")).toBeDefined());
+        button("Add a film maker")!.click();
+        const field = await vi.waitFor(() => {
+            const input = $<HTMLInputElement>('input[aria-label="Film maker"]');
+            expect(input).not.toBeNull();
+            return input!;
+        });
+        await userEvent.fill(field, "Ilford");
+        await userEvent.keyboard("{Enter}");
+        const group = await vi.waitFor(() => {
+            const found = $('[data-maker="ilford"]');
+            expect(found?.querySelector("h3")?.textContent?.trim()).toBe("Ilford");
+            return found!;
+        });
+        button("Add a stock", group)!.click();
+        await vi.waitFor(() => expect(called("catalog_create_stock").at(-1)?.args.stock.maker).toBe("Ilford"));
+
+        $('[data-maker="kodak"] h3 .name-text')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        const title = await vi.waitFor(() => {
+            const input = $<HTMLInputElement>('[data-maker="kodak"] h3 input');
+            expect(input).not.toBeNull();
+            return input!;
+        });
+        await userEvent.fill(title, "Eastman Kodak");
+        await userEvent.keyboard("{Enter}");
+        await vi.waitFor(() => expect($('[data-maker="eastman kodak"]')).not.toBeNull());
+        expect(library.filmStocks.filter((s) => s.maker === "Eastman Kodak").map((s) => s.name)).toEqual(["Portra 400", "Tri-X 400"]);
+        settings.close();
+        unmount(modal);
     });
 });
