@@ -5,16 +5,14 @@
     import { editor } from "$lib/editor/editor.svelte";
     import { proofing } from "$lib/gpu/proofing.svelte";
     import { OUTPUT_SPACE_IDS, OUTPUT_SPACE_LABELS } from "$lib/gpu/outputSpace";
-    import { cropView } from "$lib/types/crop";
     import { metadataRows } from "$lib/types/imageMetadata";
+    import { RESIZE_LABELS, RESIZE_MODES, FORMAT_EXTENSION } from "$lib/types/exportSettings";
     import {
-        RESIZE_LABELS,
-        RESIZE_MODES,
-        exportFileName,
-        targetSize,
-        FORMAT_EXTENSIONS,
-    } from "$lib/types/exportSettings";
-    import { checkExportDestination, type DestinationCheck } from "$lib/utils/exportImage";
+        checkExportDestination,
+        exportOutputSize,
+        type DestinationCheck,
+        type OutputDimensions,
+    } from "$lib/utils/exportImage";
     import GlassButton from "$lib/components/inputs/GlassButton.svelte";
     import SettingsToggle from "$lib/components/settings/SettingsToggle.svelte";
     import ExportFormatOptions from "./ExportFormatOptions.svelte";
@@ -26,16 +24,25 @@
     };
 
     const settings = $derived(exportDialog.settings);
-    const extension = $derived(`.${FORMAT_EXTENSIONS[settings.format][0]}`);
+    const extension = $derived(`.${FORMAT_EXTENSION[settings.format]}`);
 
-    // The crop as it will be rendered, before any resize.
-    const source = $derived.by((): [number, number] | null => {
-        const image = editor.imagePayload;
-        if (!image) return null;
-        const view = cropView(editor.edit.crop, image.fullWidth, image.fullHeight);
-        return [view.width, view.height];
+    // The crop as it will be rendered and the size it is written at, as the backend works them out.
+    let dimensions = $state<OutputDimensions | null>(null);
+    $effect(() => {
+        if (!exportDialog.open || !editor.imagePayload) {
+            dimensions = null;
+            return;
+        }
+        let stale = false;
+        exportOutputSize(editor.edit.crop, settings)
+            .then((d) => !stale && (dimensions = d))
+            .catch(() => !stale && (dimensions = null));
+        return () => {
+            stale = true;
+        };
     });
-    const output = $derived(source ? targetSize(settings, ...source) : null);
+    const source = $derived(dimensions?.source ?? null);
+    const output = $derived(dimensions?.output ?? null);
     const resized = $derived(!!source && !!output && (output[0] !== source[0] || output[1] !== source[1]));
 
     const shotRows = $derived(
@@ -44,21 +51,12 @@
             : [],
     );
 
-    // What the backend says about the folder and name, after the frontend's own check.
+    // What the backend says about the folder and name.
     let check = $state<DestinationCheck | { error: string } | null>(null);
     $effect(() => {
         if (!exportDialog.open) return;
         const { folder, fileName } = exportDialog;
         const format = settings.format;
-        const local = exportFileName(fileName, format);
-        if ("error" in local) {
-            check = { error: local.error };
-            return;
-        }
-        if (!folder) {
-            check = { error: "Choose a folder to export to" };
-            return;
-        }
         // Until the backend answers for these, nothing can be exported over them.
         check = null;
         let stale = false;
@@ -76,10 +74,7 @@
     const problem = $derived(check && "error" in check ? check.error : null);
     const replaces = $derived(!!check && "exists" in check && check.exists);
     const canExport = $derived(!!check && !problem && !exportDialog.running && !!editor.imagePayload);
-    const finalName = $derived.by(() => {
-        const name = exportFileName(exportDialog.fileName, settings.format);
-        return "name" in name ? name.name : null;
-    });
+    const finalName = $derived(check && "fileName" in check ? check.fileName : null);
 
     let dialogEl: HTMLElement | undefined = $state();
     $effect(() => {

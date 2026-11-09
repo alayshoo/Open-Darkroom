@@ -7,10 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use open_darkroom_lib::exif_writing::{exif_block, exif_tags, tag};
-use open_darkroom_lib::export::export_file_name;
+use open_darkroom_lib::exif_writing::{clean, exif_block, exif_tags, tag};
+use open_darkroom_lib::export::{default_stem, destination_path, export_file_name, refuse_source, ExportDestination};
 use open_darkroom_lib::export_encoding::{encode_and_save_with_progress, ExportFormat, ExportSettings};
-use open_darkroom_lib::export_size::{resize_rgb, target_size, OutputSize, ResizeMode};
+use open_darkroom_lib::export_size::{resize_rgb, resize_rgb_with_progress, target_size, OutputSize, ResizeMode};
 use open_darkroom_lib::metadata::{from_exif_block, ImageMetadata};
 use open_darkroom_lib::output_space::{OutputSpace, Transfer};
 
@@ -103,14 +103,18 @@ impl Drop for Scratch {
 }
 
 fn encode(format: ExportFormat, bit_depth: u8, with_metadata: bool) -> (Scratch, Vec<u8>) {
+    encode_shot(format, bit_depth, with_metadata.then(shot))
+}
+
+fn encode_shot(format: ExportFormat, bit_depth: u8, meta: Option<ImageMetadata>) -> (Scratch, Vec<u8>) {
     let (w, h) = (24u32, 16);
     let mut s = settings(format);
     s.tiff_bit_depth = bit_depth;
     let bytes = if s.bit_depth() > 8 { 6 } else { 3 };
     let rgb: Vec<u8> = (0..w * h * bytes).map(|i| (i * 7 % 251) as u8).collect();
     let scratch = Scratch::new(format.extension());
-    let tags = exif_tags(&shot());
-    encode_and_save_with_progress(rgb, w, h, &s, with_metadata.then_some(&tags), scratch.path(), &mut |_| {})
+    let tags = meta.as_ref().map(exif_tags);
+    encode_and_save_with_progress(rgb, w, h, &s, tags.as_ref(), scratch.path(), &mut |_| {})
         .expect("encode");
     let file = std::fs::read(scratch.path()).expect("read");
     (scratch, file)
@@ -169,6 +173,18 @@ fn tiff_carries_the_shot_in_its_own_directories() {
         // A TIFF is the structure an EXIF block borrows, so it parses as one.
         assert_same_shot(&from_exif_block(&file).expect("parse"));
         image::open(scratch.path()).expect("still decodes");
+    }
+}
+
+#[test]
+fn text_beyond_ascii_is_folded_rather_than_breaking_the_file() {
+    assert_eq!(clean("Voigtl\u{e4}nder Nokton 40mm f/1.2 \u{d8}52"), "Voigtlander Nokton 40mm f/1.2 O52");
+    assert_eq!(clean(" \u{b5}4/3 Stra\u{df}e \u{2603}\0"), "u4/3 Strasse");
+    let meta = ImageMetadata { lens: Some("Voigtl\u{e4}nder Nokton 40mm".into()), ..shot() };
+    let (_, tiff) = encode_shot(ExportFormat::Tiff, 8, Some(meta.clone()));
+    let (jpeg, _) = encode_shot(ExportFormat::Jpeg, 8, Some(meta));
+    for read in [from_exif_block(&tiff).unwrap(), open_darkroom_lib::metadata::read(jpeg.path())] {
+        assert_eq!(read.lens.as_deref(), Some("Voigtlander Nokton 40mm"));
     }
 }
 
@@ -298,6 +314,17 @@ fn a_16_bit_resample_in_bands_matches_one_in_a_single_pass() {
 }
 
 #[test]
+fn a_16_bit_resample_reports_its_progress_up_to_the_end() {
+    let (from, to) = ((40u32, 3000u32), (4u32, 300u32));
+    let rgb = vec![0x80; from.0 as usize * from.1 as usize * 6];
+    let mut seen = Vec::new();
+    resize_rgb_with_progress(rgb, from, to, 16, Transfer::Srgb, &mut |f| seen.push(f)).unwrap();
+    assert!(seen.len() > 1);
+    assert!(seen.windows(2).all(|w| w[0] <= w[1]));
+    assert_eq!(seen.last(), Some(&1.0));
+}
+
+#[test]
 fn a_mismatched_buffer_is_refused() {
     assert!(resize_rgb(vec![0; 10], (4, 4), (2, 2), 8, Transfer::Srgb).is_err());
 }
@@ -309,7 +336,8 @@ fn the_file_name_takes_the_formats_extension_once() {
     assert_eq!(export_file_name("IMG_0042", ExportFormat::Jxl).unwrap(), "IMG_0042.jxl");
     assert_eq!(export_file_name("  roll 3  ", ExportFormat::Png).unwrap(), "roll 3.png");
     assert_eq!(export_file_name("frame.jpg", ExportFormat::Jpeg).unwrap(), "frame.jpg");
-    assert_eq!(export_file_name("frame.png", ExportFormat::Jpeg).unwrap(), "frame.png.jpg");
+    assert_eq!(export_file_name("frame.png", ExportFormat::Jpeg).unwrap(), "frame.jpg");
+    assert_eq!(export_file_name("frame.tif", ExportFormat::Jxl).unwrap(), "frame.jxl");
     assert_eq!(export_file_name("v1.2", ExportFormat::Webp).unwrap(), "v1.2.webp");
 }
 
@@ -334,4 +362,36 @@ fn a_name_no_platform_can_hold_is_refused() {
     for bad in ["", "   ", ".jxl", "..", "a/b", "a\\b", "a:b", "what?", "dot.", "tab\there"] {
         assert!(export_file_name(bad, ExportFormat::Jxl).is_err(), "{bad:?}");
     }
+}
+
+#[test]
+fn a_name_from_the_save_dialog_is_taken_as_the_platform_allows() {
+    let folder = std::env::temp_dir().to_string_lossy().into_owned();
+    let picked = |name: &str, format| {
+        let destination = ExportDestination { folder: folder.clone(), file_name: name.into(), picked: true };
+        destination_path(&destination, format).map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+    };
+    assert_eq!(picked("Roll 3: frame 12?.jpg", ExportFormat::Jpeg).unwrap(), "Roll 3: frame 12?.jpg");
+    assert_eq!(picked("frame.png", ExportFormat::Jpeg).unwrap(), "frame.jpg");
+    assert_eq!(picked("frame", ExportFormat::Tiff).unwrap(), "frame.tiff");
+    let typed = ExportDestination { folder, file_name: "a:b".into(), picked: false };
+    assert!(destination_path(&typed, ExportFormat::Jpeg).is_err());
+}
+
+#[test]
+fn an_export_starts_out_beside_its_source_under_another_name() {
+    assert_eq!(default_stem(Path::new("/scans/IMG_0042.JPG")), "IMG_0042-edit");
+    assert_eq!(default_stem(Path::new("/scans/roll3.tif")), "roll3-edit");
+    assert_eq!(default_stem(Path::new("/scans/DSCF4127.RAF")), "DSCF4127");
+}
+
+#[test]
+fn an_export_never_replaces_its_source() {
+    let source = Scratch::new("jpg");
+    std::fs::write(source.path(), b"original").unwrap();
+    assert!(refuse_source(source.path(), source.path()).is_err());
+    let other = Scratch::new("jpg");
+    assert!(refuse_source(other.path(), source.path()).is_ok());
+    std::fs::write(other.path(), b"another").unwrap();
+    assert!(refuse_source(other.path(), source.path()).is_ok());
 }

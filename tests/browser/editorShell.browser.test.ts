@@ -73,9 +73,11 @@ const SHOT: ImageMetadata = {
 const exports: any[] = [];
 // What the save dialog was opened with, and what it hands back.
 const saveDialogs: any[] = [];
-type SaveAnswer = { folder: string; fileName: string } | null;
-let saveDialogAnswer: SaveAnswer | Promise<SaveAnswer> = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+type SaveAnswer = { folder: string; fileName: string; picked: true } | null;
+let saveDialogAnswer: SaveAnswer | Promise<SaveAnswer> = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
 let clipboard = "";
+// The reason the next export fails with, if it should.
+let exportFailure: string | null = null;
 
 function stubTauri() {
     let callback = 0;
@@ -85,10 +87,17 @@ function stubTauri() {
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
             if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
-            if (cmd === "export_image") return void exports.push(JSON.parse(JSON.stringify(args)));
+            if (cmd === "export_image") {
+                if (exportFailure) throw exportFailure;
+                return void exports.push(JSON.parse(JSON.stringify(args)));
+            }
             if (cmd === "export_defaults") return { folder: "/photos/2024", fileName: "DSCF4127" };
-            if (cmd === "check_export_destination")
-                return { path: `${args.folder}/${args.fileName}.jxl`, exists: args.fileName === "taken" };
+            if (cmd === "check_export_destination") {
+                const { folder, fileName } = args.destination;
+                if (fileName.includes("/")) throw "A file name cannot contain '/'";
+                return { path: `${folder}/${fileName}.jxl`, fileName: `${fileName}.jxl`, exists: fileName === "taken" };
+            }
+            if (cmd === "export_output_size") return { source: [SIZE, SIZE], output: [SIZE, SIZE] };
             if (cmd === "pick_export_folder") return "/photos/exports";
             if (cmd === "pick_export_file") {
                 saveDialogs.push(args);
@@ -272,7 +281,7 @@ describe("with an image open", () => {
         expect(args.crop).toEqual(FULL_FRAME);
         expect(args.retouch).toEqual([]);
         expect(args.settings).toBeTypeOf("object");
-        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127.jxl" });
+        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true });
         expect(exportDialog()).toBeNull();
         expect(args.size).toEqual({ mode: "none", pixels: 2048, percent: 50 });
         expect(args.metadata).toBe(true);
@@ -344,7 +353,26 @@ describe("with an image open", () => {
             expect(exports).toHaveLength(count);
             expect(exportDialog()).toBeNull();
         } finally {
-            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
+        }
+    });
+
+    it("shows why an export from the button failed until it is dismissed", async () => {
+        exportFailure = "That is the image being edited; choose another name";
+        try {
+            const exportButton = document.querySelector<HTMLButtonElement>(".export-button")!;
+            exportButton.click();
+            const alert = await vi.waitFor(() => {
+                const shown = $('[role="alertdialog"]');
+                expect(shown?.textContent).toContain("That is the image being edited");
+                return shown!;
+            });
+            expect(exportButton.disabled).toBe(true);
+            alert.querySelector<HTMLButtonElement>("button")!.click();
+            await vi.waitFor(() => expect($('[role="alertdialog"]')).toBeNull());
+            expect(exportButton.disabled).toBe(false);
+        } finally {
+            exportFailure = null;
         }
     });
 
@@ -365,12 +393,12 @@ describe("with an image open", () => {
             expect(saveDialogs).toHaveLength(dialogs + 1);
             expect(exportDialog()).toBeNull();
 
-            answer({ folder: "/photos/2024", fileName: "DSCF4127.jxl" });
+            answer({ folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true });
             await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
             await vi.waitFor(() => expect(exportButton.disabled).toBe(false));
             expect(exportDialog()).toBeNull();
         } finally {
-            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl" };
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
         }
     });
 

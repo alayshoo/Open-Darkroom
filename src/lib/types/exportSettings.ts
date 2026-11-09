@@ -12,13 +12,13 @@ export const FORMAT_LABELS: Record<ExportFormat, string> = {
     webp: "WebP",
 };
 
-// The first is what a new file is given. Must match ExportFormat::extensions in export_encoding.rs.
-export const FORMAT_EXTENSIONS: Record<ExportFormat, readonly string[]> = {
-    png: ["png"],
-    jpeg: ["jpg", "jpeg"],
-    webp: ["webp"],
-    tiff: ["tiff", "tif"],
-    jxl: ["jxl"],
+// Shown beside the name field; the backend decides the name a file is written under.
+export const FORMAT_EXTENSION: Record<ExportFormat, string> = {
+    png: "png",
+    jpeg: "jpg",
+    webp: "webp",
+    tiff: "tiff",
+    jxl: "jxl",
 };
 
 export type ResizeMode = "none" | "longEdge" | "shortEdge" | "width" | "height" | "percent";
@@ -111,42 +111,4 @@ export function restoreExportSettings(stored: unknown): ExportSettings {
         record[k] = value;
     }
     return out;
-}
-
-/** The dimensions a render is written at; never larger than it. Mirrors target_size in export_size.rs. */
-export function targetSize(settings: ExportSettings, width: number, height: number): [number, number] {
-    const pixels = Math.max(1, settings.resizePixels);
-    let scale: number;
-    switch (settings.resize) {
-        case "longEdge": scale = pixels / Math.max(width, height); break;
-        case "shortEdge": scale = pixels / Math.min(width, height); break;
-        case "width": scale = pixels / width; break;
-        case "height": scale = pixels / height; break;
-        case "percent": scale = settings.resizePercent > 0 ? settings.resizePercent / 100 : 1; break;
-        default: scale = 1;
-    }
-    if (!(scale < 1)) return [width, height];
-    return [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))];
-}
-
-const FORBIDDEN = /[/\\:*?"<>|\p{Cc}]/u;
-// The device names Windows will not give a file, whatever its extension.
-const WINDOWS_DEVICE = /^(con|prn|aux|nul|(com|lpt)[0-9¹²³])$/i;
-
-/** The file name an export is written under, or why it cannot be. Mirrors export_file_name in export.rs. */
-export function exportFileName(name: string, format: ExportFormat): { name: string } | { error: string } {
-    let stem = name.trim();
-    let ext = FORMAT_EXTENSIONS[format][0];
-    const dot = stem.lastIndexOf(".");
-    if (dot >= 0 && FORMAT_EXTENSIONS[format].includes(stem.slice(dot + 1).toLowerCase())) {
-        ext = stem.slice(dot + 1);
-        stem = stem.slice(0, dot).trimEnd();
-    }
-    if (stem === "" || /^\.+$/.test(stem)) return { error: "The file needs a name" };
-    const bad = stem.match(FORBIDDEN);
-    if (bad) return { error: `A file name cannot contain ${JSON.stringify(bad[0])}` };
-    if (stem.endsWith(".")) return { error: "A file name cannot end with a full stop" };
-    const device = stem.split(".")[0].trimEnd();
-    if (WINDOWS_DEVICE.test(device)) return { error: `${device} is a name Windows keeps for itself` };
-    return { name: `${stem}.${ext}` };
 }

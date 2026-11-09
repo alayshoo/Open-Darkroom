@@ -578,7 +578,7 @@ declaring the canvas and an `ICCP` chunk holding the profile. The bitstream
 itself is never touched, and the test checks both halves of that claim: the
 header is there, and the pixels still decode to what went in.
 
-## L1 — `export_options.rs` (18)
+## L1 — `export_options.rs` (23)
 
 What the export modal adds around the render.
 
@@ -591,10 +591,14 @@ What the export modal adds around the render.
 | `tiff_carries_the_shot_in_its_own_directories` | the primary tags and the EXIF sub-directory, at 8 and 16 bits |
 | `jxl_carries_the_shot_in_an_exif_box` | the `Exif` box beside libjxl's streamed codestream |
 | `without_metadata_no_format_carries_any` | the toggle off writes nothing |
-| `each_mode_lands_its_edge_on_the_number_asked_for`, `an_export_is_never_enlarged`, `a_thin_strip_keeps_at_least_a_pixel` | `target_size`, mirrored by `targetSize` in TypeScript |
+| `text_beyond_ascii_is_folded_rather_than_breaking_the_file` | accented make, model and lens names lose their accents, and a TIFF still writes |
+| `each_mode_lands_its_edge_on_the_number_asked_for`, `an_export_is_never_enlarged`, `a_thin_strip_keeps_at_least_a_pixel` | `target_size`, which the modal asks for through `export_output_size` |
 | `a_flat_colour_survives_the_resample_unchanged`, `fine_detail_is_averaged_in_linear_light`, `a_mismatched_buffer_is_refused` | the resample, at 8 and 16 bits |
 | `a_16_bit_resample_in_bands_matches_one_in_a_single_pass` | the 16-bit resample, run a band of rows at a time, shows no seams |
-| `the_file_name_takes_the_formats_extension_once`, `an_extension_the_format_also_uses_is_kept_as_picked`, `a_name_no_platform_can_hold_is_refused`, `a_name_windows_keeps_for_a_device_is_refused` | `export_file_name`, mirrored by `exportFileName` |
+| `a_16_bit_resample_reports_its_progress_up_to_the_end` | the banded resample reports a rising fraction that ends at 1 |
+| `the_file_name_takes_the_formats_extension_once`, `an_extension_the_format_also_uses_is_kept_as_picked`, `a_name_no_platform_can_hold_is_refused`, `a_name_windows_keeps_for_a_device_is_refused` | `export_file_name`, which the modal asks for through `check_export_destination` |
+| `a_name_from_the_save_dialog_is_taken_as_the_platform_allows` | a picked name skips the every-platform rules but still takes the format's extension |
+| `an_export_starts_out_beside_its_source_under_another_name`, `an_export_never_replaces_its_source` | the default name and the guard that keep an export off the file being edited |
 
 ## L1 — `tests/unit/` (161, TypeScript)
 
@@ -609,7 +613,7 @@ What the export modal adds around the render.
 | `adjustmentsClipboard` × 11, `settingsPersistence` × 14, `shortcuts` × 20 | the panels' own state |
 | `viewport` × 30 | placing the image: fit, zoom about the cursor, the crop tool's frame; which region of the image the chain renders, its pan margin and apron, and how the canvas and the source map onto it; when a fresh sharp region is rendered, put off or kept, and when it is drawn over the backdrop |
 | `fullResolution` × 8 | the band header, band sizing, mip level counts, and how far the blurs reach at a render scale |
-| `exportSettings` × 28 | the export size and file name agree with the Rust cases; a stored copy of the settings is restored as far as it is valid |
+| `exportSettings` × 3 | a stored copy of the settings is restored as far as it is valid |
 
 ## L3 — `tests/browser/` (50, real WebGPU)
 

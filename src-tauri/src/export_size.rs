@@ -13,6 +13,10 @@ use crate::output_space::{Transfer, ADOBE_GAMMA, BT2020_ALPHA, BT2020_BETA};
 /// Source rows a 16-bit resample converts to f32 at once.
 const SOURCE_BAND_ROWS: u32 = 512;
 
+/// Resample seconds per source megapixel, measured on four cores.
+const RESIZE_SECONDS_8: f32 = 0.017;
+const RESIZE_SECONDS_16: f32 = 0.025;
+
 #[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ResizeMode {
@@ -55,6 +59,12 @@ pub fn target_size(size: &OutputSize, width: u32, height: u32) -> (u32, u32) {
     (side(w), side(h))
 }
 
+/// Rough resample time per source megapixel. It only decides how much of the
+/// progress bar resizing gets, so the order of magnitude is enough.
+pub fn resize_seconds_per_megapixel(bit_depth: u8) -> f32 {
+    if bit_depth > 8 { RESIZE_SECONDS_16 } else { RESIZE_SECONDS_8 }
+}
+
 /// Resample interleaved RGB, 8-bit or 16-bit little-endian, from `from` to `to`.
 pub fn resize_rgb(
     rgb: Vec<u8>,
@@ -62,6 +72,18 @@ pub fn resize_rgb(
     to: (u32, u32),
     bit_depth: u8,
     transfer: Transfer,
+) -> Result<Vec<u8>, String> {
+    resize_rgb_with_progress(rgb, from, to, bit_depth, transfer, &mut |_| {})
+}
+
+/// As [`resize_rgb`], calling `on_progress` with the fraction done so far.
+pub fn resize_rgb_with_progress(
+    rgb: Vec<u8>,
+    from: (u32, u32),
+    to: (u32, u32),
+    bit_depth: u8,
+    transfer: Transfer,
+    on_progress: &mut dyn FnMut(f32),
 ) -> Result<Vec<u8>, String> {
     if from == to {
         return Ok(rgb);
@@ -86,13 +108,16 @@ pub fn resize_rgb(
         let mut linear = Image::new(from.0, from.1, fir::PixelType::U16x3);
         mapper.forward_map(&source, &mut linear).map_err(|e| err(&e))?;
         drop(rgb);
+        on_progress(0.2);
 
         let mut resized = Image::new(to.0, to.1, fir::PixelType::U16x3);
         resizer.resize(&linear, &mut resized, &options).map_err(|e| err(&e))?;
         drop(linear);
+        on_progress(0.95);
 
         let mut out = Image::new(to.0, to.1, fir::PixelType::U8x3);
         mapper.backward_map(&resized, &mut out).map_err(|e| err(&e))?;
+        on_progress(1.0);
         return Ok(out.into_vec());
     }
 
@@ -130,6 +155,7 @@ pub fn resize_rgb(
             let code = (from_linear(transfer, v.clamp(0.0, 1.0)) * 65535.0).round() as u16;
             code.to_le_bytes()
         }));
+        on_progress((out_top + out_rows) as f32 / to.1 as f32);
     }
     Ok(out)
 }

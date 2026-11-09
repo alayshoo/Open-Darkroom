@@ -67,6 +67,9 @@ pub struct ExportSettings {
 }
 
 impl ExportFormat {
+    pub const ALL: [ExportFormat; 5] =
+        [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::Webp, ExportFormat::Tiff, ExportFormat::Jxl];
+
     /// The extension a new file is given, first, then any other it may carry.
     pub fn extensions(self) -> &'static [&'static str] {
         match self {

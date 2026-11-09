@@ -186,10 +186,40 @@ fn write_directory(out: &mut Vec<u8>, entries: &[ExifEntry]) {
     out.extend(data);
 }
 
-/// ASCII fields end at their first NUL, so none can sit inside one.
-fn clean(s: &str) -> String {
-    s.chars().filter(|c| *c != '\0').collect::<String>().trim().to_string()
+/// EXIF's text fields are ASCII, so accented letters lose their accents and
+/// anything else without a plain stand-in is left out. NUL ends a field early.
+pub fn clean(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            ' '..='~' => out.push(c),
+            '\u{A0}' => out.push(' '),
+            'Æ' => out.push_str("AE"),
+            'æ' => out.push_str("ae"),
+            'Œ' => out.push_str("OE"),
+            'œ' => out.push_str("oe"),
+            'ß' => out.push_str("ss"),
+            'Þ' => out.push_str("Th"),
+            'þ' => out.push_str("th"),
+            'Ĳ' => out.push_str("IJ"),
+            'ĳ' => out.push_str("ij"),
+            'µ' | 'μ' => out.push('u'),
+            '×' => out.push('x'),
+            '\u{C0}'..='\u{17F}' => {
+                let folded = LATIN[c as usize - 0xC0];
+                if folded != b'?' {
+                    out.push(char::from(folded));
+                }
+            }
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }
+
+/// The unaccented letter for each of U+00C0 to U+017F; '?' marks the few handled
+/// above or left out.
+const LATIN: &[u8; 192] = b"AAAAAA?CEEEEIIIIDNOOOOO?OUUUUY??aaaaaa?ceeeeiiiidnooooo?ouuuuy?yAaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIi??JjKk?LlLlLlLlLlNnNnNnn??OoOoOo??RrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
 
 /// The smallest of a few usual denominators that holds `v` exactly, so f/2.8
 /// stays 28/10 and a third of a stop stays 1/3.

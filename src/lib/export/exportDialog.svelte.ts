@@ -39,6 +39,8 @@ class ExportDialog {
     error = $state<string | null>(null);
     /** Whether the running export came from the save dialog rather than the modal. */
     quick = $state(false);
+    /** Why the last export from the save dialog failed, until it is dismissed. */
+    quickError = $state<string | null>(null);
 
     // The open the name was taken from, so the next image brings its own.
     #namedFor: number | null = null;
@@ -58,10 +60,14 @@ class ExportDialog {
         });
     }
 
-    /** The save dialog is up or an export is running. */
+    /** The save dialog is up, an export is running or its failure is showing. */
     get busy() {
-        return this.picking || this.running;
+        return this.picking || this.running || this.quickError !== null;
     }
+
+    dismissError = () => {
+        this.quickError = null;
+    };
 
     show = async () => {
         if (this.open || this.busy || this.#opening || !editor.imagePayload) return;
@@ -118,7 +124,7 @@ class ExportDialog {
         try {
             await this.#export(destination);
         } catch (e) {
-            console.error("Failed to export:", e);
+            this.quickError = String(e);
         } finally {
             this.quick = false;
         }
