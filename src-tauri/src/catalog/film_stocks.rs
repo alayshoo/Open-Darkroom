@@ -271,20 +271,22 @@ impl Catalog {
             .ok_or_else(|| format!("No film stock {id} in the catalog"))?
             .fields
             .label();
-        let rolls: Vec<(i64, String)> = {
-            let mut stmt = self.conn.prepare("SELECT id, info FROM rolls WHERE stock_id = ?1").map_err(err)?;
-            let rows = stmt.query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
-            rows.collect::<Result<_, _>>().map_err(err)?
-        };
-        for (roll, info) in rolls {
-            let mut info: Value = serde_json::from_str(&info).unwrap_or(Value::Object(Default::default()));
-            if let Value::Object(fields) = &mut info {
-                fields.insert("filmStock".into(), Value::String(label.clone()));
+        self.atomically(|| {
+            let rolls: Vec<(i64, String)> = {
+                let mut stmt = self.conn.prepare("SELECT id, info FROM rolls WHERE stock_id = ?1").map_err(err)?;
+                let rows = stmt.query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
+                rows.collect::<Result<_, _>>().map_err(err)?
+            };
+            for (roll, info) in rolls {
+                let mut info: Value = serde_json::from_str(&info).unwrap_or(Value::Object(Default::default()));
+                if let Value::Object(fields) = &mut info {
+                    fields.insert("filmStock".into(), Value::String(label.clone()));
+                }
+                self.conn
+                    .execute("UPDATE rolls SET info = ?1 WHERE id = ?2", params![info.to_string(), roll])
+                    .map_err(err)?;
             }
-            self.conn
-                .execute("UPDATE rolls SET info = ?1 WHERE id = ?2", params![info.to_string(), roll])
-                .map_err(err)?;
-        }
-        self.conn.execute("DELETE FROM film_stocks WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+            self.conn.execute("DELETE FROM film_stocks WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+        })
     }
 }

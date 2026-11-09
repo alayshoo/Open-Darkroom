@@ -357,7 +357,7 @@ pub(crate) async fn catalog_render_thumbnail(
             let path = path.clone();
             let source = tauri::async_runtime::spawn_blocking(move || match open {
                 Some((pixels, w, h, channels, space)) => {
-                    Ok(ThumbnailSource::from_pixels(&path, &pixels, w, h, channels, space))
+                    ThumbnailSource::from_pixels(&path, &pixels, w, h, channels, space)
                 }
                 None => ThumbnailSource::decode(&path),
             })

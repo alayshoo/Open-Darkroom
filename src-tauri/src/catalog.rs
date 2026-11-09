@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,10 +33,13 @@ pub fn film_stocks_seeds_len() -> usize {
 pub const CATALOG_FILE: &str = "catalog.sqlite";
 pub const THUMBNAIL_DIR: &str = "thumbnails";
 
-/// Bytes read from the start of a file for its fingerprint.
-const FINGERPRINT_BYTES: usize = 64 * 1024;
+/// Bytes read from each of the start, middle and end of a file for its fingerprint.
+const FINGERPRINT_BYTES: u64 = 64 * 1024;
 
-const SCHEMA_VERSION: i64 = 4;
+/// Starts every fingerprint, telling it from the older kind read off the start of a file alone.
+const FINGERPRINT_PREFIX: &str = "s2-";
+
+const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -260,7 +263,7 @@ fn prepare_file(
                 *folder_made = true;
             }
             let name = path.file_name().ok_or_else(|| Failure::File("It has no name".into()))?.to_string_lossy();
-            let target = free_path(&folder, &name);
+            let target = reserve_path(&folder, &name).map_err(|e| Failure::File(format!("Could not copy it: {e}")))?;
             fs::copy(path, &target).map_err(|e| {
                 let _ = fs::remove_file(&target);
                 Failure::File(format!("Could not copy it: {e}"))
@@ -287,18 +290,51 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// A file's size and an FNV-1a hash of its first bytes: enough to know it
-/// again after it has moved, without reading all of it.
+/// A file's size and an FNV-1a hash of its start, middle and end: enough to
+/// know it again after it has moved, without reading all of it.
 pub fn fingerprint(path: &Path) -> Result<(u64, String), String> {
-    let size = fs::metadata(path).map_err(err)?.len();
-    let mut head = Vec::with_capacity(FINGERPRINT_BYTES);
-    fs::File::open(path).map_err(err)?.take(FINGERPRINT_BYTES as u64).read_to_end(&mut head).map_err(err)?;
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in head {
+    let mut file = fs::File::open(path).map_err(err)?;
+    let size = file.metadata().map_err(err)?.len();
+    let spans = if size <= 3 * FINGERPRINT_BYTES {
+        vec![(0, size)]
+    } else {
+        vec![(0, FINGERPRINT_BYTES), ((size - FINGERPRINT_BYTES) / 2, FINGERPRINT_BYTES), (size - FINGERPRINT_BYTES, FINGERPRINT_BYTES)]
+    };
+    let mut hash = FNV_OFFSET;
+    for (start, len) in spans {
+        file.seek(SeekFrom::Start(start)).map_err(err)?;
+        hash = fnv(hash, &read_span(&mut file, len)?);
+    }
+    Ok((size, format!("{FINGERPRINT_PREFIX}{size:x}-{hash:016x}")))
+}
+
+/// The fingerprint earlier builds took, of the start of a file alone.
+fn legacy_fingerprint(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(err)?;
+    let size = file.metadata().map_err(err)?.len();
+    let hash = fnv(FNV_OFFSET, &read_span(&mut file, FINGERPRINT_BYTES)?);
+    Ok(format!("{size:x}-{hash:016x}"))
+}
+
+/// The fingerprint of `path` of the same kind as `stored`, to compare with it.
+pub fn fingerprint_like(stored: &str, path: &Path) -> Result<String, String> {
+    if stored.starts_with(FINGERPRINT_PREFIX) { fingerprint(path).map(|(_, print)| print) } else { legacy_fingerprint(path) }
+}
+
+const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+
+fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    for &byte in bytes {
         hash ^= byte as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    Ok((size, format!("{size:x}-{hash:016x}")))
+    hash
+}
+
+fn read_span(file: &mut fs::File, len: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::with_capacity(len as usize);
+    file.take(len).read_to_end(&mut bytes).map_err(err)?;
+    Ok(bytes)
 }
 
 /// Whether a path names a file the app opens.
@@ -331,19 +367,21 @@ fn folder_name(name: &str) -> String {
     if cleaned.is_empty() { "Untitled".into() } else { cleaned }
 }
 
-/// `dir/name`, or `dir/stem (2).ext` and so on if that is taken.
-fn free_path(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name);
-    if !first.exists() {
-        return first;
-    }
+/// Makes an empty `dir/name`, or `dir/stem (2).ext` and so on if that is
+/// taken, so no other import can take the same name before it is written.
+fn reserve_path(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
     let path = Path::new(name);
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    (2..)
-        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
-        .find(|p| !p.exists())
-        .unwrap()
+    let names = std::iter::once(dir.join(name)).chain((2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))));
+    for candidate in names {
+        match fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("the names never run out")
 }
 
 impl Catalog {
@@ -378,6 +416,7 @@ impl Catalog {
                 self.conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};")).map_err(err)?;
             }
         }
+        self.refingerprint()?;
         self.conn
             .execute(
                 "INSERT INTO meta (key, value) VALUES ('schema', ?1)
@@ -386,6 +425,35 @@ impl Catalog {
             )
             .map(|_| ())
             .map_err(err)
+    }
+
+    /// Takes fingerprints of the current kind for images that still have the
+    /// older kind and whose files are there. Missing ones keep theirs to be found by.
+    fn refingerprint(&self) -> Result<(), String> {
+        let photo_folder = self.photo_folder()?;
+        let old: Vec<(i64, PathBuf)> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id, path, in_photo_folder FROM images WHERE fingerprint NOT LIKE ?1")
+                .map_err(err)?;
+            let rows = stmt
+                .query_map(params![format!("{FINGERPRINT_PREFIX}%")], |r| {
+                    Ok((r.get(0)?, resolve(&r.get::<_, String>(1)?, r.get(2)?, photo_folder.as_deref())))
+                })
+                .map_err(err)?;
+            rows.collect::<Result<_, _>>().map_err(err)?
+        };
+        let fresh: Vec<(i64, String)> =
+            old.into_iter().filter_map(|(id, path)| fingerprint(&path).ok().map(|(_, print)| (id, print))).collect();
+        if fresh.is_empty() {
+            return Ok(());
+        }
+        self.atomically(|| {
+            for (id, print) in &fresh {
+                self.conn.execute("UPDATE images SET fingerprint = ?1 WHERE id = ?2", params![print, id]).map_err(err)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn thumbnail_path(&self, image_id: i64) -> PathBuf {
@@ -407,7 +475,7 @@ impl Catalog {
             .execute(
                 "INSERT INTO meta (key, value) VALUES ('photo_folder', ?1)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![folder.to_string_lossy()],
+                params![absolute(folder).to_string_lossy()],
             )
             .map(|_| ())
             .map_err(err)
@@ -556,8 +624,10 @@ impl Catalog {
 
     /// The roll's frames stay in its library, loose.
     pub fn delete_roll(&self, id: i64) -> Result<(), String> {
-        self.conn.execute("UPDATE images SET frame = NULL WHERE roll_id = ?1", params![id]).map_err(err)?;
-        self.conn.execute("DELETE FROM rolls WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+        self.atomically(|| {
+            self.conn.execute("UPDATE images SET frame = NULL WHERE roll_id = ?1", params![id]).map_err(err)?;
+            self.conn.execute("DELETE FROM rolls WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+        })
     }
 
     fn roll_library(&self, roll_id: i64) -> Result<i64, String> {
@@ -781,12 +851,13 @@ impl Catalog {
             .conn
             .query_row("SELECT fingerprint FROM images WHERE id = ?1", params![id], |r| r.get(0))
             .map_err(err)?;
-        let (_, print) = fingerprint(path)?;
-        if print != stored {
+        if fingerprint_like(&stored, path)? != stored {
             return Err("That is not the same file".into());
         }
+        let (_, print) = fingerprint(path)?;
         let path = absolute(path);
-        let (stored, in_photo_folder) = match self.photo_folder()? {
+        let root = self.photo_folder()?.map(|root| absolute(&root));
+        let (stored, in_photo_folder) = match root {
             Some(root) if path.starts_with(&root) => {
                 (path.strip_prefix(&root).map_err(err)?.to_string_lossy().into_owned(), true)
             }
@@ -794,8 +865,8 @@ impl Catalog {
         };
         self.conn
             .execute(
-                "UPDATE images SET path = ?1, in_photo_folder = ?2 WHERE id = ?3",
-                params![stored, in_photo_folder, id],
+                "UPDATE images SET path = ?1, in_photo_folder = ?2, fingerprint = ?3 WHERE id = ?4",
+                params![stored, in_photo_folder, print, id],
             )
             .map_err(err)?;
         self.image(id)

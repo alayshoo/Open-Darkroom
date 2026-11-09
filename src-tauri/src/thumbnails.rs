@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use image::codecs::jpeg::JpegEncoder;
 use image::ExtendedColorType;
 
+use crate::color::{to_linear_u16, LUT_SIZE};
 use crate::crop::CropPayload;
 use crate::export_rendering::{chunk_rows_for_margin, render_cropped_in_view, sharp_margin_rows, SlidersPayload, ViewPayload};
 use crate::icc::SourceSpace;
@@ -35,9 +36,20 @@ pub struct ThumbnailSource {
 }
 
 impl ThumbnailSource {
-    pub fn from_pixels(path: &Path, pixels: &[u16], width: u32, height: u32, channels: usize, space: SourceSpace) -> Self {
-        let (pixels, shrunk_width, shrunk_height) = downscale_to_max_edge(pixels, width, height, channels, THUMBNAIL_EDGE);
-        Self {
+    /// Shrunk in linear light, as the preview is, so fine texture keeps its brightness.
+    pub fn from_pixels(
+        path: &Path,
+        pixels: &[u16],
+        width: u32,
+        height: u32,
+        channels: usize,
+        space: SourceSpace,
+    ) -> Result<Self, String> {
+        let baked = space.bake(pixels, channels)?;
+        let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
+        let linear = to_linear_u16(baked.as_deref().unwrap_or(pixels), channels, &luts);
+        let (pixels, shrunk_width, shrunk_height) = downscale_to_max_edge(&linear, width, height, channels, THUMBNAIL_EDGE);
+        Ok(Self {
             path: path.to_path_buf(),
             pixels,
             width: shrunk_width,
@@ -45,14 +57,14 @@ impl ThumbnailSource {
             full_width: width,
             full_height: height,
             channels,
-            space,
-        }
+            space: SourceSpace::linear_with_matrix(space.to_working),
+        })
     }
 
     /// Decodes the file and keeps only the shrunk copy.
     pub fn decode(path: &Path) -> Result<Self, String> {
         let (pixels, channels, width, height, space) = decode_path(path)?;
-        Ok(Self::from_pixels(path, &pixels, width, height, channels, space))
+        Self::from_pixels(path, &pixels, width, height, channels, space)
     }
 }
 

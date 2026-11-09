@@ -120,30 +120,32 @@ impl Catalog {
             .ok_or_else(|| format!("No gear {id} in the catalog"))?
             .fields;
         let label = gear.label();
-        for roll in self.rolls()?.into_iter().filter(|r| r.gear.uses(id)) {
-            let mut links = roll.gear;
-            let mut info = roll.info;
-            let Value::Object(fields) = &mut info else { continue };
-            let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string();
-            if links.lenses.contains(&id) {
-                links.lenses.retain(|&l| l != id);
-                let others = text("lenses");
-                let joined = if others.is_empty() { label.clone() } else { format!("{others}, {label}") };
-                fields.insert("lenses".into(), Value::String(joined));
-            }
-            for (slot, key) in [(&mut links.camera, "camera"), (&mut links.scanner, "scanner"), (&mut links.chemistry, "developer"), (&mut links.lab, "lab")] {
-                if *slot == Some(id) {
-                    *slot = None;
-                    fields.insert(key.into(), Value::String(label.clone()));
+        self.atomically(|| {
+            for roll in self.rolls()?.into_iter().filter(|r| r.gear.uses(id)) {
+                let mut links = roll.gear;
+                let mut info = roll.info;
+                let Value::Object(fields) = &mut info else { continue };
+                let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string();
+                if links.lenses.contains(&id) {
+                    links.lenses.retain(|&l| l != id);
+                    let others = text("lenses");
+                    let joined = if others.is_empty() { label.clone() } else { format!("{others}, {label}") };
+                    fields.insert("lenses".into(), Value::String(joined));
                 }
+                for (slot, key) in [(&mut links.camera, "camera"), (&mut links.scanner, "scanner"), (&mut links.chemistry, "developer"), (&mut links.lab, "lab")] {
+                    if *slot == Some(id) {
+                        *slot = None;
+                        fields.insert(key.into(), Value::String(label.clone()));
+                    }
+                }
+                self.conn
+                    .execute(
+                        "UPDATE rolls SET info = ?1, gear = ?2 WHERE id = ?3",
+                        params![info.to_string(), serde_json::to_string(&links).map_err(err)?, roll.id],
+                    )
+                    .map_err(err)?;
             }
-            self.conn
-                .execute(
-                    "UPDATE rolls SET info = ?1, gear = ?2 WHERE id = ?3",
-                    params![info.to_string(), serde_json::to_string(&links).map_err(err)?, roll.id],
-                )
-                .map_err(err)?;
-        }
-        self.conn.execute("DELETE FROM gear WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+            self.conn.execute("DELETE FROM gear WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
+        })
     }
 }

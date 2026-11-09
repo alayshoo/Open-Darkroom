@@ -77,6 +77,8 @@ let nextGear = 10;
 let moved: { found: unknown[]; missing: number[] } = { found: [], missing: [] };
 let located: unknown = null;
 let imported: unknown = { roll: null, images: [], skipped: [] };
+// Held open to keep a search for moved files running.
+let findGate: Promise<void> | null = null;
 // Event listeners the app registered, by event name.
 const listeners = new Map<string, (event: unknown) => unknown>();
 
@@ -108,7 +110,10 @@ function stubTauri() {
             if (cmd.startsWith("catalog_") || cmd === "open_image_path" || cmd === "plugin:window|destroy") calls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? {})) });
             if (cmd === "catalog_load") return structuredClone(catalog);
             if (cmd === "catalog_edit") return args.id === 2 ? STORED : null;
-            if (cmd === "catalog_find_moved") return structuredClone(moved);
+            if (cmd === "catalog_find_moved") {
+                await findGate;
+                return structuredClone(moved);
+            }
             if (cmd === "catalog_locate") return structuredClone(located);
             if (cmd === "catalog_import_files") return structuredClone(imported);
             if (cmd === "catalog_edit_history") return args.id === 2 ? STORED_HISTORY : null;
@@ -581,6 +586,21 @@ describe("files that have moved", () => {
         await vi.waitFor(() => expect(badges()).toEqual([]));
         expect(library.images.find((i) => i.id === 3)!.missing).toBe(false);
     });
+
+    it("searches next to a file located while another search was running", async () => {
+        let release!: () => void;
+        findGate = new Promise((resolve) => (release = resolve));
+        const before = called("catalog_find_moved").length;
+        const running = library.findMoved();
+        await library.findMoved("/archive/Lisbon/frame02.tif");
+        expect(called("catalog_find_moved")).toHaveLength(before + 1);
+        findGate = null;
+        release();
+        await running;
+        await vi.waitFor(() => expect(called("catalog_find_moved")).toHaveLength(before + 2));
+        expect(called("catalog_find_moved").at(-1)!.args.near).toBe("/archive/Lisbon/frame02.tif");
+        library.notice = null;
+    });
 });
 
 describe("saving and importing", () => {
@@ -606,5 +626,23 @@ describe("saving and importing", () => {
         await library.importFiles();
         expect($(".notice span")?.textContent).toBe("Could not import DSC_0001.NEF, DSC_0002.NEF: Permission denied (os error 13)");
         library.notice = null;
+    });
+});
+
+describe("removing the open image", () => {
+    it("lets go of it in the editor, and saves nothing more for it", async () => {
+        expect(editor.libraryImageId).toBe(2);
+        library.removeImages([2]);
+        const remove = library.notice!.confirm!.run;
+        library.notice = null;
+        await remove();
+        await vi.waitFor(() => expect(editor.libraryImageId).toBeNull());
+        expect(editor.imagePayload).toBeNull();
+
+        const saves = called("catalog_save_edit").length;
+        editor.edit.sliders.contrast = 40;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(called("catalog_save_edit")).toHaveLength(saves);
+        expect(library.notice).toBeNull();
     });
 });

@@ -349,6 +349,12 @@ class Editor {
         }
     };
 
+    /** Lets go of the open image, as when its library record is removed. */
+    closeImage = () => {
+        this.#clearImage();
+        history.clear();
+    };
+
     #clearImage() {
         this.imagePayload = null;
         this.metadata = null;

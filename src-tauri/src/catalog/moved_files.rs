@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{err, fingerprint, resolve, Catalog};
+use super::{err, fingerprint_like, resolve, Catalog, FINGERPRINT_PREFIX};
 
 /// How deep a search goes below each folder it starts from.
 const SEARCH_DEPTH: usize = 4;
@@ -114,10 +114,16 @@ pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathB
             }
             let Some(candidates) = entry.metadata().ok().and_then(|m| by_size.get(&m.len())) else { continue };
             let path = entry.path();
-            let Ok((_, print)) = fingerprint(&path) else { continue };
-            if let Some(file) = candidates.iter().find(|f| f.fingerprint == print && !claimed.contains(&f.id)) {
-                claimed.insert(file.id);
-                found.push((file.id, path));
+            // Each kind of fingerprint is taken at most once per file, however many candidates there are.
+            let mut prints: HashMap<bool, Option<String>> = HashMap::new();
+            for file in candidates.iter().filter(|f| !claimed.contains(&f.id)) {
+                let kind = file.fingerprint.starts_with(FINGERPRINT_PREFIX);
+                let print = prints.entry(kind).or_insert_with(|| fingerprint_like(&file.fingerprint, &path).ok());
+                if print.as_deref() == Some(file.fingerprint.as_str()) {
+                    claimed.insert(file.id);
+                    found.push((file.id, path));
+                    break;
+                }
             }
         }
     }

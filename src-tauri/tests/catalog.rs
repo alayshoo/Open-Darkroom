@@ -569,3 +569,108 @@ fn files_far_away_are_found_next_to_one_that_was_located() {
     assert_eq!(found, [images[1].id, images[2].id]);
     assert!(c.missing_files().unwrap().is_empty());
 }
+
+/// Two files of the same size whose starts and ends match, as uncompressed scans with a clipped border do.
+fn lookalike_files(scratch: &Scratch) -> [PathBuf; 2] {
+    let same = vec![0u8; 100 * 1024];
+    ["a.tif", "b.tif"].map(|name| {
+        let mut bytes = same.clone();
+        bytes.extend((0..100 * 1024).map(|i| (i as u8).wrapping_mul(name.as_bytes()[0])));
+        bytes.extend(&same);
+        let path = scratch.path(&format!("scans/{name}"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        path
+    })
+}
+
+#[test]
+fn files_that_only_differ_in_the_middle_are_told_apart() {
+    let scratch = Scratch::new();
+    let [a, b] = lookalike_files(&scratch);
+    assert_ne!(fingerprint(&a).unwrap(), fingerprint(&b).unwrap());
+
+    let c = catalog(&scratch);
+    let library = c.create_library("Scans").unwrap();
+    assert_eq!(c.import(&[a, b], loose(library.id), false).unwrap().images.len(), 2);
+}
+
+/// The fingerprint earlier builds stored: the size, and an FNV-1a hash of the first 64 KiB.
+fn legacy_fingerprint(path: &Path) -> String {
+    let bytes = std::fs::read(path).unwrap();
+    let hash = bytes.iter().take(64 * 1024).fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    format!("{:x}-{hash:016x}", bytes.len())
+}
+
+fn set_stored_fingerprint(scratch: &Scratch, id: i64, print: &str) {
+    let conn = rusqlite::Connection::open(scratch.path("data").join("catalog.sqlite")).unwrap();
+    conn.execute("UPDATE images SET fingerprint = ?1 WHERE id = ?2", rusqlite::params![print, id]).unwrap();
+}
+
+fn stored_fingerprint(scratch: &Scratch, id: i64) -> String {
+    let conn = rusqlite::Connection::open(scratch.path("data").join("catalog.sqlite")).unwrap();
+    conn.query_row("SELECT fingerprint FROM images WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+}
+
+#[test]
+fn older_fingerprints_are_retaken_and_still_find_files_that_moved() {
+    let scratch = Scratch::new();
+    let (present, moved) = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths = [scratch.image("old/01.png", 1), scratch.image("old/02.png", 2)];
+        let images = c.import(&paths, loose(library.id), false).unwrap().images;
+        (images[0].id, images[1].id)
+    };
+    for id in [present, moved] {
+        let path = scratch.path(&format!("old/0{}.png", if id == present { 1 } else { 2 }));
+        set_stored_fingerprint(&scratch, id, &legacy_fingerprint(&path));
+    }
+    std::fs::create_dir_all(scratch.path("old/sorted")).unwrap();
+    std::fs::rename(scratch.path("old/02.png"), scratch.path("old/sorted/02.png")).unwrap();
+
+    let c = catalog(&scratch);
+    assert_eq!(stored_fingerprint(&scratch, present), fingerprint(&scratch.path("old/01.png")).unwrap().1);
+    assert_eq!(find_and_relink(&c, None), [moved]);
+    assert_eq!(stored_fingerprint(&scratch, moved), fingerprint(&scratch.path("old/sorted/02.png")).unwrap().1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_located_through_a_link_to_the_photo_folder_is_kept_relative_to_it() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    std::fs::create_dir_all(scratch.path("real/Photos")).unwrap();
+    std::os::unix::fs::symlink(scratch.path("real/Photos"), scratch.path("Photos")).unwrap();
+    c.set_photo_folder(&scratch.path("Photos")).unwrap();
+
+    let library = c.create_library("Personal").unwrap();
+    let image = c.import(&[scratch.image("card/01.png", 1)], loose(library.id), false).unwrap().images.remove(0);
+    std::fs::create_dir_all(scratch.path("real/Photos/2024")).unwrap();
+    std::fs::rename(scratch.path("card/01.png"), scratch.path("real/Photos/2024/01.png")).unwrap();
+
+    let found = c.relink(image.id, &scratch.path("Photos/2024/01.png")).unwrap();
+    assert!(found.in_photo_folder);
+    assert!(!found.missing);
+}
+
+#[test]
+fn deleting_gear_in_use_is_all_or_nothing() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "Roll 1").unwrap();
+    let camera = c
+        .create_gear(&GearFields { kind: "camera".into(), maker: "Hasselblad".into(), name: "500C/M".into(), details: GearDetails::default() })
+        .unwrap();
+    c.update_roll(roll.id, &roll.name, &json!({}), None, &RollGear { camera: Some(camera.id), ..RollGear::default() }).unwrap();
+    {
+        let conn = rusqlite::Connection::open(scratch.path("data").join("catalog.sqlite")).unwrap();
+        conn.execute_batch("CREATE TRIGGER keep_gear BEFORE DELETE ON gear BEGIN SELECT RAISE(ABORT, 'kept'); END;").unwrap();
+    }
+
+    assert!(c.delete_gear(camera.id).is_err());
+    let roll = c.rolls().unwrap().remove(0);
+    assert_eq!(roll.gear.camera, Some(camera.id));
+    assert_eq!(roll.info, json!({}));
+}

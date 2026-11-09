@@ -44,6 +44,12 @@ function sameHistory(a: EditHistory, b: EditHistory) {
     return a.pointer === b.pointer && a.steps.length === b.steps.length && a.steps.every((step, i) => step === b.steps[i]);
 }
 
+/** Reads every value in `value`, so an effect depends on all of them without copying any. */
+function touchDeep(value: unknown) {
+    if (value === null || typeof value !== "object") return;
+    for (const key in value) touchDeep((value as Record<string, unknown>)[key]);
+}
+
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** `base`, or `base 2`, `base 3`… whichever is not taken yet. */
@@ -594,9 +600,16 @@ class Library {
     /** Whether missing files are being looked for. */
     finding = $state(false);
 
+    /** A file located by hand while a search was running, to search next to once it is done. */
+    #findNear: string | null = null;
+
     /** Looks for the files that are not where they were, and points their images at them. */
     findMoved = async (near: string | null = null) => {
-        if (this.finding || this.images.length === 0) return;
+        if (this.images.length === 0) return;
+        if (this.finding) {
+            if (near !== null) this.#findNear = near;
+            return;
+        }
         this.finding = true;
         try {
             const { found, missing } = await api.findMoved(near);
@@ -611,6 +624,9 @@ class Library {
             console.error("Failed to look for moved files:", e);
         } finally {
             this.finding = false;
+            const next = this.#findNear;
+            this.#findNear = null;
+            if (next !== null) void this.findMoved(next);
         }
     };
 
@@ -645,6 +661,7 @@ class Library {
         });
     };
 
+    /** Lets go of everything held for images no longer in the catalog, the open one included. */
     #forget(ids: number[]) {
         const thumbs = { ...this.thumbs };
         for (const id of ids) {
@@ -652,8 +669,13 @@ class Library {
             delete thumbs[id];
             this.#thumbsAsked.delete(id);
             this.#renderQueue.delete(id);
+            this.#resolveRendered(id);
+            this.#lastSaved.delete(id);
         }
         this.thumbs = thumbs;
+        if (this.#changedId !== null && ids.includes(this.#changedId)) this.#changedId = null;
+        if (this.#pendingSave && ids.includes(this.#pendingSave.id)) this.#pendingSave = null;
+        if (editor.libraryImageId !== null && ids.includes(editor.libraryImageId)) editor.closeImage();
     }
 
     // ===== Thumbnails =====
@@ -686,11 +708,18 @@ class Library {
     }
 
     #renderDone = new Map<number, (() => void)[]>();
+    /** The image whose thumbnail is rendering now. */
+    #renderingId: number | null = null;
 
-    /** Resolves once a thumbnail queued for `id` has rendered, or failed to. */
+    /** Resolves once every thumbnail asked for `id` so far has rendered, or failed to. */
     #rendered(id: number): Promise<void> {
-        if (!this.#renderQueue.has(id) && !this.#rendering) return Promise.resolve();
+        if (!this.#renderQueue.has(id) && this.#renderingId !== id) return Promise.resolve();
         return new Promise((resolve) => this.#renderDone.set(id, [...(this.#renderDone.get(id) ?? []), resolve]));
+    }
+
+    #resolveRendered(id: number) {
+        for (const resolve of this.#renderDone.get(id) ?? []) resolve();
+        this.#renderDone.delete(id);
     }
 
     async #pumpRenders() {
@@ -701,17 +730,20 @@ class Library {
             while (this.#renderQueue.size > 0) {
                 const [id, given] = [...this.#renderQueue].at(-1)!;
                 this.#renderQueue.delete(id);
+                this.#renderingId = id;
                 try {
                     const edit = given ?? (await this.#storedEdit(id)) ?? newImageEdit(1, 1);
                     this.#setThumb(id, await api.renderThumbnail(id, edit, colorSpaceDebug.toneMap));
                 } catch (e) {
                     console.error(`Failed to render thumbnail ${id}:`, e);
                 }
-                for (const resolve of this.#renderDone.get(id) ?? []) resolve();
-                this.#renderDone.delete(id);
+                this.#renderingId = null;
+                // Asked again meanwhile: those waiting want the newer render.
+                if (!this.#renderQueue.has(id)) this.#resolveRendered(id);
             }
         } finally {
             this.#rendering = false;
+            this.#renderingId = null;
         }
     }
 
@@ -724,29 +756,42 @@ class Library {
 
     #lastSaved = new Map<number, Saved>();
     #pendingSave: ({ id: number } & Saved) | null = null;
+    /** The open image, when it has changed since its edit was last read out. */
+    #changedId: number | null = null;
     #saveTimer: ReturnType<typeof setTimeout> | null = null;
     #thumbTimer: ReturnType<typeof setTimeout> | null = null;
 
-    #scheduleSave(id: number, saved: Saved) {
-        const last = this.#lastSaved.get(id);
+    /** The open image changed. It is read out only once the changes settle, or when it is flushed. */
+    #openChanged(id: number) {
         // The first look at an image just opened is what was stored for it.
-        if (!last) {
-            this.#lastSaved.set(id, saved);
+        if (!this.#lastSaved.has(id)) {
+            this.#lastSaved.set(id, openSaved());
             return;
         }
-        if (last.edit === saved.edit && sameHistory(last.history, saved.history)) return;
-        this.#pendingSave = { id, ...saved };
+        this.#changedId = id;
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
         this.#saveTimer = setTimeout(() => void this.flushSave(), SAVE_DELAY_MS);
+    }
+
+    /** Reads out the open image's changes into a pending save, and renders its thumbnail if its edit changed. */
+    #takeChanges() {
+        const id = this.#changedId;
+        this.#changedId = null;
+        const last = id === null ? undefined : this.#lastSaved.get(id);
+        if (id === null || id !== editor.libraryImageId || !last) return;
+        const saved = openSaved();
+        if (last.edit === saved.edit && sameHistory(last.history, saved.history)) return;
+        this.#pendingSave = { id, ...saved };
         if (last.edit === saved.edit) return;
         if (this.#thumbTimer) clearTimeout(this.#thumbTimer);
-        this.#thumbTimer = setTimeout(() => this.#rerenderOpen(), THUMBNAIL_DELAY_MS);
+        this.#thumbTimer = setTimeout(() => this.#rerenderOpen(), THUMBNAIL_DELAY_MS - SAVE_DELAY_MS);
     }
 
     /** Writes the open image's edit now rather than when the edits settle. */
     flushSave = async () => {
         if (this.#saveTimer) clearTimeout(this.#saveTimer);
         this.#saveTimer = null;
+        this.#takeChanges();
         const pending = this.#pendingSave;
         this.#pendingSave = null;
         if (!pending) return;
@@ -909,8 +954,10 @@ class Library {
             $effect(() => {
                 const id = editor.libraryImageId;
                 if (id === null || !editor.imagePayload) return;
-                const saved = openSaved();
-                untrack(() => this.#scheduleSave(id, saved));
+                touchDeep(editor.edit);
+                void history.pointer;
+                void history.stack.length;
+                untrack(() => this.#openChanged(id));
             });
         });
     }
