@@ -74,4 +74,18 @@
     .resize-vertical {
         cursor: ns-resize;
     }
+
+    /* A control that has nothing to act on yet, or is set aside for a moment */
+    .dimmed {
+        opacity: 0.25;
+        pointer-events: none;
+    }
+
+    /* The heading over each group of controls */
+    .section-title {
+        font-family: var(--font-ui);
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--color1);
+    }
 }

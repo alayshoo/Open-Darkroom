@@ -1,50 +1,29 @@
-<!-- ExportModal.svelte -->
+<!-- lib/components/export/ExportProgress.svelte -->
+<!-- The progress of an export started from the save dialog rather than the modal, and its failure. -->
 <script lang="ts">
-    import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-    import { onDestroy } from "svelte";
+    import { exportDialog, type ExportPhase } from "$lib/export/exportDialog.svelte";
 
-    let { visible }: { visible: boolean } = $props();
-
-    type Phase = "preparing" | "rendering" | "encoding";
-    interface ExportProgress {
-        phase: Phase;
-        progress: number;
-        indeterminate: boolean;
-    }
-
-    const PHASE_LABELS: Record<Phase, string> = {
+    const PHASE_LABELS: Record<ExportPhase, string> = {
         preparing: "Preparing",
         rendering: "Rendering",
         encoding: "Encoding",
     };
 
-    const initial: ExportProgress = { phase: "preparing", progress: 0, indeterminate: true };
-    let current = $state<ExportProgress>({ ...initial });
-    let unlisten: UnlistenFn | null = null;
-
-    $effect(() => {
-        if (visible) {
-            current = { ...initial };
-            listen<ExportProgress>("export:progress", (e) => {
-                current = e.payload;
-            }).then((fn) => {
-                unlisten = fn;
-            });
-        } else {
-            unlisten?.();
-            unlisten = null;
-        }
-    });
-
-    onDestroy(() => {
-        unlisten?.();
-    });
+    const current = $derived(exportDialog.progress);
 </script>
 
-{#if visible}
+{#if exportDialog.quickError}
+    <div class="overlay fixed z-1000 flex items-center justify-center">
+        <div class="modal flex flex-col gap-3.5 px-9 py-7 rounded-[10px]" role="alertdialog" aria-labelledby="export-failed">
+            <p id="export-failed" class="label m-0">Export failed</p>
+            <p class="reason m-0">{exportDialog.quickError}</p>
+            <button class="dismiss self-center px-4 py-1.25 border-0 rounded-[6px]" onclick={exportDialog.dismissError}>OK</button>
+        </div>
+    </div>
+{:else if exportDialog.quick && current}
     <div class="overlay fixed z-1000 flex items-center justify-center">
         <div class="modal flex flex-col gap-3.5 px-9 py-7 rounded-[10px]">
-            <p class="label m-0">
+            <p class="label m-0" role="status">
                 {PHASE_LABELS[current.phase]}…{current.indeterminate ? "" : ` ${Math.round(current.progress * 100)}%`}
             </p>
             <div class="track relative w-full h-1 rounded-[2px]">
@@ -76,6 +55,23 @@
         font-weight: 500;
         color: var(--color2);
         text-align: center;
+    }
+
+    .reason {
+        font-size: 13px;
+        color: var(--color3);
+        text-align: center;
+        max-width: 360px;
+    }
+
+    .dismiss {
+        font-size: 13px;
+        background: var(--bg4);
+        color: var(--color2);
+    }
+
+    .dismiss:hover {
+        background: var(--bg5);
     }
 
     .track {

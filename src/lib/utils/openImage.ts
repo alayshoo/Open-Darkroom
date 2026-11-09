@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { type ImagePayload } from "$lib/types/imagePayload";
+import { type ImageMetadata } from "$lib/types/imageMetadata";
 
 
 // Returned by the backend when the file picker is dismissed. Must match
@@ -87,4 +88,9 @@ export function fetchFullResolutionRows(
     rows: number,
 ): Promise<ArrayBuffer> {
     return invoke<ArrayBuffer>("full_resolution_rows", { imageId, maxEdge, y, rows });
+}
+
+// How the open image was shot, or null once another image has replaced it.
+export function fetchImageMetadata(imageId: number): Promise<ImageMetadata | null> {
+    return invoke<ImageMetadata | null>("image_metadata", { imageId });
 }

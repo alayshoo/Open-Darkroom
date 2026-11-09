@@ -8,6 +8,12 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   preprocess: vitePreprocess(),
+  // The app's own components always compile in runes mode, whether or not
+  // they use a rune themselves. Dependencies keep the mode they infer.
+  vitePlugin: {
+    dynamicCompileOptions: ({ filename }) =>
+      filename.includes("/node_modules/") ? undefined : { runes: true },
+  },
   kit: {
     adapter: adapter({
       fallback: "index.html",

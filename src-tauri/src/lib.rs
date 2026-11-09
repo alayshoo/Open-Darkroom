@@ -8,6 +8,7 @@ pub mod icc;
 pub mod raw;
 pub mod output_space;
 pub mod image_opening;
+pub mod metadata;
 pub mod full_resolution;
 pub mod export_rendering;
 pub mod retouch;
@@ -15,7 +16,9 @@ pub mod shaders;
 pub mod export_encoding;
 pub mod export_progress;
 pub mod jxl_encoding;
-mod export;
+pub mod exif_writing;
+pub mod export_size;
+pub mod export;
 mod presets;
 
 use image_opening::ImageState;
@@ -33,8 +36,14 @@ pub fn run() {
             grab_cursor,
             image_opening::open_image_file,
             image_opening::crop_histograms,
+            image_opening::image_metadata,
             full_resolution::full_resolution_rows,
             export::export_image,
+            export::export_defaults,
+            export::pick_export_folder,
+            export::pick_export_file,
+            export::check_export_destination,
+            export::export_output_size,
             presets::export_preset,
             presets::import_presets,
         ])

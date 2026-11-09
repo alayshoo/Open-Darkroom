@@ -1,6 +1,6 @@
 // tests/unit/sharpnessPage.test.ts
 //
-// The sharpness panel is markup, so this reads the page as text and checks the
+// The sharpness panel is markup, so this reads the controls as text and checks the
 // wiring the compiler cannot: that each slider binds its own key, that the
 // history entry it commits names that same key, and that its rails and reset
 // value agree with the defaults the app starts from.
@@ -17,7 +17,9 @@ import {
   type Sliders,
 } from "$lib/types/imgParameters";
 
-import PAGE from "../../src/routes/+page.svelte?raw";
+import LIGHTER from "../../src/lib/components/editor/LighterRoomPages.svelte?raw";
+import DARKROOM from "../../src/lib/components/editor/DarkroomPages.svelte?raw";
+import UNSHARP_MASK from "../../src/lib/components/editor/UnsharpMask.svelte?raw";
 
 interface SliderBlock {
   name: string;
@@ -28,12 +30,12 @@ interface SliderBlock {
 }
 
 /** The markup between two comment markers. */
-function section(from: string, to: string): string {
-  const start = PAGE.indexOf(from);
-  if (start < 0) throw new Error(`marker ${from} not found in +page.svelte`);
-  const end = PAGE.indexOf(to, start);
+function section(markup: string, from: string, to: string): string {
+  const start = markup.indexOf(from);
+  if (start < 0) throw new Error(`marker ${from} not found`);
+  const end = markup.indexOf(to, start);
   if (end < 0) throw new Error(`marker ${to} not found after ${from}`);
-  return PAGE.slice(start, end);
+  return markup.slice(start, end);
 }
 
 /** Every `<SingleValSliderGroup>` in `markup`, in source order. */
@@ -55,17 +57,16 @@ function sliderBlocks(markup: string): SliderBlock[] {
       return {
         name: one(/name="([^"]*)"/),
         unit: one(/unit="([^"]*)"/),
-        boundKey: one(/bind:value=\{edit\.sliders\.(\w+)\}/),
+        boundKey: one(/bind:value=\{editor\.edit\.sliders\.(\w+)\}/),
         historyKey: one(/key:\s*"(\w+)"/),
         numbers,
       };
     });
 }
 
-// The unsharp mask lives in a snippet that both modes render.
+// The unsharp mask is a component that both modes render.
 const SHARPNESS = sliderBlocks(
-  section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->") +
-    section("{#snippet unsharpMask()}", "{/snippet}"),
+  section(LIGHTER, "<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->") + UNSHARP_MASK,
 );
 
 /** Name → slider key, in the order the panel lays them out. */
@@ -84,11 +85,11 @@ describe("sharpness panel wiring", () => {
   });
 
   it("renders the same unsharp mask controls in both modes", () => {
-    expect(section("<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->")).toContain(
-      "{@render unsharpMask()}",
+    expect(section(LIGHTER, "<!-- Sharpness Panel -->", "<!-- Light & Color Panel -->")).toContain(
+      "<UnsharpMask />",
     );
-    expect(section("<!-- Darkroom Sharpness Panel -->", "</div>")).toContain(
-      "{@render unsharpMask()}",
+    expect(section(DARKROOM, "<!-- Darkroom Sharpness Panel -->", "</ControlsPage>")).toContain(
+      "<UnsharpMask />",
     );
   });
 
@@ -113,10 +114,10 @@ describe("sharpness panel wiring", () => {
 });
 
 // The same mis-wiring is possible on any panel, and the parser is already here,
-// so the history check is worth running over the whole page. The Hue slider
+// so the history check is worth running over every page. The Hue slider
 // committed under "vibrance" until this test was written.
-describe("every slider on the page", () => {
-  const ALL = sliderBlocks(PAGE);
+describe("every slider in the controls", () => {
+  const ALL = sliderBlocks(LIGHTER + DARKROOM + UNSHARP_MASK);
 
   it("finds a commit handler on each one", () => {
     expect(ALL.length).toBeGreaterThan(SHARPNESS.length);
