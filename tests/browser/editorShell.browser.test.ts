@@ -71,7 +71,13 @@ const SHOT: ImageMetadata = {
 
 // Every export the page asks for, and the text on the stubbed clipboard.
 const exports: any[] = [];
+// What the save dialog was opened with, and what it hands back.
+const saveDialogs: any[] = [];
+type SaveAnswer = { folder: string; fileName: string; picked: true } | null;
+let saveDialogAnswer: SaveAnswer | Promise<SaveAnswer> = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
 let clipboard = "";
+// The reason the next export fails with, if it should.
+let exportFailure: string | null = null;
 
 function stubTauri() {
     let callback = 0;
@@ -81,7 +87,22 @@ function stubTauri() {
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
             if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
-            if (cmd === "export_image") return void exports.push(JSON.parse(JSON.stringify(args)));
+            if (cmd === "export_image") {
+                if (exportFailure) throw exportFailure;
+                return void exports.push(JSON.parse(JSON.stringify(args)));
+            }
+            if (cmd === "export_defaults") return { folder: "/photos/2024", fileName: "DSCF4127" };
+            if (cmd === "check_export_destination") {
+                const { folder, fileName } = args.destination;
+                if (fileName.includes("/")) throw "A file name cannot contain '/'";
+                return { path: `${folder}/${fileName}.jxl`, fileName: `${fileName}.jxl`, exists: fileName === "taken" };
+            }
+            if (cmd === "export_output_size") return { source: [SIZE, SIZE], output: [SIZE, SIZE] };
+            if (cmd === "pick_export_folder") return "/photos/exports";
+            if (cmd === "pick_export_file") {
+                saveDialogs.push(args);
+                return saveDialogAnswer;
+            }
             if (cmd === "plugin:clipboard-manager|write_text") return void (clipboard = args.text);
             if (cmd === "plugin:clipboard-manager|read_text") return clipboard;
             if (/^plugin:store\|(entries|keys|values)$/.test(cmd)) return [];
@@ -149,12 +170,27 @@ async function setMode(darkroom: boolean) {
     }, { timeout: 5000 });
 }
 
+const exportDialog = () => $('[role=dialog][aria-labelledby="export-title"]');
+
+/** The primary button once the destination has been checked and allows it. */
+async function exportAction() {
+    return vi.waitFor(() => {
+        const action = exportDialog()?.querySelector<HTMLButtonElement>(".pill.primary");
+        expect(action?.disabled).toBe(false);
+        return action!;
+    });
+}
+
+/** An export from the side bar's button, through the save dialog. */
 async function exported() {
     const count = exports.length;
     document.querySelector<HTMLButtonElement>(".export-button")!.click();
     await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>(".export-button")!.disabled).toBe(false));
     return exports[count];
 }
+
+const openExportModal = () => button("Export options").click();
 
 const isInert = (selector: string) => $(selector)!.hasAttribute("inert");
 
@@ -245,6 +281,10 @@ describe("with an image open", () => {
         expect(args.crop).toEqual(FULL_FRAME);
         expect(args.retouch).toEqual([]);
         expect(args.settings).toBeTypeOf("object");
+        expect(args.destination).toEqual({ folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true });
+        expect(exportDialog()).toBeNull();
+        expect(args.size).toEqual({ mode: "none", pixels: 2048, percent: 50 });
+        expect(args.metadata).toBe(true);
         expect(Array.isArray(args.sliders.curveLut)).toBe(true);
         expect(history.stack.map((a) => a.type)).toEqual(["slider", "slider"]);
         button("Toggle image inversion").click();
@@ -293,12 +333,122 @@ describe("with an image open", () => {
         await vi.waitFor(() => expect($(".side-bar")!.classList.contains("away")).toBe(false));
     });
 
-    it("opens and closes the export menu", async () => {
-        button("Export settings").click();
-        await vi.waitFor(() => expect($('[role=menu][aria-label="Export settings"]')).not.toBeNull());
-        expect($(".controls-section")!.classList.contains("dimmed")).toBe(true);
-        document.body.click();
-        await vi.waitFor(() => expect($('[role=menu][aria-label="Export settings"]')).toBeNull());
+    it("opens the export modal from the keyboard and closes it on Escape", async () => {
+        await userEvent.keyboard("{Control>}{Shift>}e{/Shift}{/Control}");
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        // The editor's own shortcuts wait while it is up.
+        await userEvent.keyboard("{Control>}z{/Control}");
+        expect(exportDialog()).not.toBeNull();
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
+    });
+
+    it("exports nothing when the save dialog is dismissed", async () => {
+        const count = exports.length;
+        saveDialogAnswer = null;
+        try {
+            document.querySelector<HTMLButtonElement>(".export-button")!.click();
+            await vi.waitFor(() => expect(saveDialogs.at(-1)?.format).toBeDefined());
+            await new Promise((r) => setTimeout(r, 100));
+            expect(exports).toHaveLength(count);
+            expect(exportDialog()).toBeNull();
+        } finally {
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
+        }
+    });
+
+    it("shows why an export from the button failed until it is dismissed", async () => {
+        exportFailure = "That is the image being edited; choose another name";
+        try {
+            const exportButton = document.querySelector<HTMLButtonElement>(".export-button")!;
+            exportButton.click();
+            const alert = await vi.waitFor(() => {
+                const shown = $('[role="alertdialog"]');
+                expect(shown?.textContent).toContain("That is the image being edited");
+                return shown!;
+            });
+            expect(exportButton.disabled).toBe(true);
+            alert.querySelector<HTMLButtonElement>("button")!.click();
+            await vi.waitFor(() => expect($('[role="alertdialog"]')).toBeNull());
+            expect(exportButton.disabled).toBe(false);
+        } finally {
+            exportFailure = null;
+        }
+    });
+
+    it("takes nothing else while the save dialog is up", async () => {
+        const count = exports.length;
+        const dialogs = saveDialogs.length;
+        let answer!: (a: SaveAnswer) => void;
+        saveDialogAnswer = new Promise<SaveAnswer>((resolve) => (answer = resolve));
+        try {
+            const exportButton = document.querySelector<HTMLButtonElement>(".export-button")!;
+            exportButton.click();
+            await vi.waitFor(() => expect(saveDialogs).toHaveLength(dialogs + 1));
+            expect(exportButton.disabled).toBe(true);
+            expect(button("Export options").disabled).toBe(true);
+            exportButton.click();
+            await userEvent.keyboard("{Control>}{Shift>}e{/Shift}{/Control}");
+            await new Promise((r) => setTimeout(r, 100));
+            expect(saveDialogs).toHaveLength(dialogs + 1);
+            expect(exportDialog()).toBeNull();
+
+            answer({ folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true });
+            await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+            await vi.waitFor(() => expect(exportButton.disabled).toBe(false));
+            expect(exportDialog()).toBeNull();
+        } finally {
+            saveDialogAnswer = { folder: "/photos/2024", fileName: "DSCF4127.jxl", picked: true };
+        }
+    });
+
+    it("exports at the size, name and folder the modal is given", async () => {
+        openExportModal();
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        const dialog = exportDialog()!;
+        const pill = (label: string) =>
+            [...exportDialog()!.querySelectorAll<HTMLButtonElement>(".pill")].find((b) => b.textContent?.trim() === label)!;
+
+        pill("Long edge").click();
+        const edge = await vi.waitFor(() => {
+            const field = dialog.querySelector<HTMLInputElement>(".number-input");
+            expect(field).not.toBeNull();
+            return field!;
+        });
+        await userEvent.fill(edge, "4");
+        pill("JPEG").click();
+        pill("Choose…").click();
+        await vi.waitFor(() => expect(dialog.querySelector(".folder")!.textContent).toContain("exports"));
+
+        const name = dialog.querySelector<HTMLInputElement>(".name-input")!;
+        await userEvent.fill(name, "taken");
+        await vi.waitFor(() => expect(dialog.querySelector(".hint.warn")?.textContent).toContain("will be replaced"));
+        expect((await exportAction()).textContent?.trim()).toBe("Replace");
+        await userEvent.fill(name, "a/b");
+        await vi.waitFor(() => expect(dialog.querySelector<HTMLButtonElement>(".pill.primary")!.disabled).toBe(true));
+        await userEvent.fill(name, "roll 3");
+
+        const count = exports.length;
+        (await exportAction()).click();
+        await vi.waitFor(() => expect(exports).toHaveLength(count + 1));
+        const args = exports[count];
+        expect(args.destination).toEqual({ folder: "/photos/exports", fileName: "roll 3" });
+        expect(args.settings.format).toBe("jpeg");
+        expect(args.size).toEqual({ mode: "longEdge", pixels: 4, percent: 50 });
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
+
+        // The choices carry over to the next export, from the button as well.
+        const before = saveDialogs.length;
+        expect((await exported()).settings.format).toBe("jpeg");
+        expect(saveDialogs[before]).toEqual({ format: "jpeg", folder: "/photos/exports" });
+        openExportModal();
+        await vi.waitFor(() => expect(exportDialog()).not.toBeNull());
+        expect(pill("JPEG").classList.contains("active")).toBe(true);
+        expect(exportDialog()!.querySelector<HTMLInputElement>(".name-input")!.value).toBe("roll 3");
+        pill("Full size").click();
+        pill("JXL").click();
+        await userEvent.keyboard("{Escape}");
+        await vi.waitFor(() => expect(exportDialog()).toBeNull());
     });
 
     it("reverts the mode's adjustments in one step", async () => {

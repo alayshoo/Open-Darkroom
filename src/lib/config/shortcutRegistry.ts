@@ -190,6 +190,13 @@ export const shortcutActions = [
         defaults: ["ctrl+o"],
     },
     {
+        id: "exportImage",
+        group: "file",
+        label: "Export",
+        description: "Opens the export window for the image being edited.",
+        defaults: ["ctrl+shift+e"],
+    },
+    {
         id: "toggleInfo",
         group: "file",
         label: "Image info",

@@ -67,13 +67,15 @@ pub fn distance_from_quality(quality: u8) -> f32 {
 
 /// Encode RGB samples (8-bit, or 16-bit little-endian for depths above 8) to a
 /// JPEG XL file. libjxl reads the pixels straight from `rgb_bytes` and writes
-/// the file as it goes, so neither side is copied whole.
+/// the file as it goes, so neither side is copied whole. `exif` is a TIFF
+/// structure, stored in an `Exif` box ahead of the codestream.
 pub fn encode_jxl(
     rgb_bytes: Vec<u8>,
     width: u32,
     height: u32,
     options: &JxlOptions,
     icc: &[u8],
+    exif: Option<&[u8]>,
     path: &Path,
 ) -> Result<(), String> {
     let bytes_per_sample = match options.bit_depth {
@@ -146,6 +148,9 @@ pub fn encode_jxl(
             JxlEncoderSetOutputProcessor(enc, output.processor()),
             "output setup",
         )?;
+        if exif.is_some() {
+            encoder.check(JxlEncoderUseBoxes(enc), "metadata setup")?;
+        }
 
         let mut info = std::mem::MaybeUninit::<JxlBasicInfo>::uninit();
         JxlEncoderInitBasicInfo(info.as_mut_ptr());
@@ -164,6 +169,16 @@ pub fn encode_jxl(
             JxlEncoderSetICCProfile(enc, icc.as_ptr(), icc.len()),
             "colour profile",
         )?;
+
+        if let Some(exif) = exif {
+            // The box opens with the offset of the TIFF header within it.
+            let contents = [&[0u8; 4][..], exif].concat();
+            let kind = b"Exif".map(|b| b as std::ffi::c_char);
+            encoder.check(
+                JxlEncoderAddBox(enc, kind.as_ptr(), contents.as_ptr(), contents.len(), 0),
+                "metadata",
+            )?;
+        }
 
         let frame = JxlEncoderFrameSettingsCreate(enc, ptr::null());
         if frame.is_null() {

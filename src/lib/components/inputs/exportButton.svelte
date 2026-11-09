@@ -1,50 +1,36 @@
 <script lang="ts">
-    import { type ExportSettings } from "$lib/types/exportSettings";
-
     let {
         onexport,
-        menuOpen = $bindable(false),
-        settings,
+        onoptions,
+        open = false,
+        busy = false,
     }: {
-        onexport: () => Promise<void>;
-        menuOpen?: boolean;
-        settings: ExportSettings;
+        /** Straight to the save dialog, with the settings as they stand. */
+        onexport: () => void;
+        /** The export modal. */
+        onoptions: () => void;
+        open?: boolean;
+        busy?: boolean;
     } = $props();
-
-    let isExporting = $state(false);
-
-    async function handleExport() {
-        if (isExporting) return;
-        menuOpen = false;
-        isExporting = true;
-        try {
-            await onexport();
-        } catch {
-            // Dialog cancelled or error — ignore silently
-        } finally {
-            isExporting = false;
-        }
-    }
-
-    function toggleMenu() {
-        menuOpen = !menuOpen;
-    }
 </script>
 
 <div class="wrapper relative flex flex-row h-7 gap-0.25">
     <button
         class="export-button flex w-15.75 h-7 justify-center items-center border-0 rounded-l-[6px] rounded-r-[3px]"
-        onclick={handleExport}
-        disabled={isExporting}
+        onclick={onexport}
+        disabled={busy}
+        title="Export with the current settings"
     >
         Export
     </button>
     <button
         class="arrow-button flex w-6.75 h-7 justify-center items-center border-0 cursor-pointer rounded-l-[3px] rounded-r-[6px]"
-        class:open={menuOpen}
-        onclick={toggleMenu}
-        aria-label="Export settings"
-        aria-expanded={menuOpen}
+        class:open
+        onclick={onoptions}
+        disabled={busy}
+        aria-label="Export options"
+        aria-haspopup="dialog"
+        title="Export options…"
     >
         <svg width="13" height="8" viewBox="0 0 13 8" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path
@@ -75,7 +61,8 @@
             background-color 0.5s ease;
     }
 
-    .export-button:disabled {
+    .export-button:disabled,
+    .arrow-button:disabled {
         opacity: 0.6;
     }
 
@@ -89,6 +76,7 @@
         /* Matches the label it is welded to — at 0.2s the arrow finished its
            swing to red while "Export" was still mid-fade beside it. */
         transition:
+            opacity 0.2s ease,
             color 0.5s ease,
             background-color 0.5s ease;
     }
