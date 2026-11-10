@@ -200,7 +200,12 @@ pub(crate) async fn catalog_open_file(
     let path = picked.into_path().map_err(|e| e.to_string())?;
     let (_, print) = fingerprint(&path)?;
     if let Some(id) = with_catalog(&state, |c| c.find_by_fingerprint(&print))? {
-        return with_catalog(&state, |c| c.image(id)).map(Some);
+        return with_catalog(&state, |c| {
+            let record = c.image(id)?;
+            // A file that moved is found again where it was picked.
+            if record.missing { c.relink(id, &path) } else { Ok(record) }
+        })
+        .map(Some);
     }
     let mut imported = import_paths(&state, vec![path], Target::Place(place), copy).await?;
     match imported.skipped.pop() {
@@ -331,7 +336,7 @@ pub(crate) fn catalog_thumbnail(state: tauri::State<'_, CatalogState>, id: i64) 
 }
 
 /// Renders an image's thumbnail with the edit given, stores it and returns it.
-/// An image open in the editor is shrunk from the pixels already held; any
+/// An image open in the editor uses the copy shrunk when it was opened; any
 /// other is decoded, and only its shrunk copy is kept.
 #[tauri::command]
 pub(crate) async fn catalog_render_thumbnail(
@@ -345,24 +350,17 @@ pub(crate) async fn catalog_render_thumbnail(
     let (record, target) = with_catalog(&catalog, |c| Ok((c.image(id)?, c.thumbnail_path(id))))?;
     let path = PathBuf::from(&record.path);
 
-    let source = match cached_source(&path) {
+    let open = {
+        let guard = image_state.lock().unwrap();
+        guard.as_ref().filter(|img| img.path == path).map(|img| Arc::clone(&img.thumbnail))
+    };
+    let source = match open.or_else(|| cached_source(&path)) {
         Some(source) => source,
         None => {
-            let open = {
-                let guard = image_state.lock().unwrap();
-                guard.as_ref().filter(|img| img.path == path).map(|img| {
-                    (Arc::clone(&img.pixels_u16), img.width, img.height, img.channels, img.space.clone())
-                })
-            };
             let path = path.clone();
-            let source = tauri::async_runtime::spawn_blocking(move || match open {
-                Some((pixels, w, h, channels, space)) => {
-                    ThumbnailSource::from_pixels(&path, &pixels, w, h, channels, space)
-                }
-                None => ThumbnailSource::decode(&path),
-            })
-            .await
-            .map_err(|e| e.to_string())??;
+            let source = tauri::async_runtime::spawn_blocking(move || ThumbnailSource::decode(&path))
+                .await
+                .map_err(|e| e.to_string())??;
             let source = Arc::new(source);
             keep_source(Arc::clone(&source));
             source

@@ -24,8 +24,8 @@
         {#each { length: STRIP } as _, i (i)}
             {@const frame = strip[i]}
             <div class="slot flex items-center justify-center">
-                {#if frame && library.thumbs[frame.id]}
-                    <img src={library.thumbs[frame.id]} alt="" draggable="false" />
+                {#if frame && library.thumbs.get(frame.id)}
+                    <img src={library.thumbs.get(frame.id)} alt="" draggable="false" />
                 {/if}
             </div>
         {/each}

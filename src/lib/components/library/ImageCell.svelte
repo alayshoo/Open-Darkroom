@@ -20,7 +20,7 @@
         onmenu: (e: MouseEvent) => void;
     } = $props();
 
-    let src = $derived(library.thumbs[image.id]);
+    let src = $derived(library.thumbs.get(image.id));
 
     const withoutExtension = (name: string) => name.replace(/(.)\.[^.]+$/, "$1");
 

@@ -38,8 +38,13 @@
         node.select();
     }
 
+    // A field taken away by Enter or Escape blurs as it goes, which must not rename again.
+    function renameLibrary(id: number, name: string) {
+        if (library.renamingId === id) void library.renameLibrary(id, name);
+    }
+
     function renameKey(e: KeyboardEvent, id: number) {
-        if (e.key === "Enter") library.renameLibrary(id, (e.currentTarget as HTMLInputElement).value);
+        if (e.key === "Enter") renameLibrary(id, (e.currentTarget as HTMLInputElement).value);
         else if (e.key === "Escape") library.renamingId = null;
         e.stopPropagation();
     }
@@ -78,7 +83,7 @@
                         aria-label="Library name"
                         use:focusAndSelect
                         onkeydown={(e) => renameKey(e, lib.id)}
-                        onblur={(e) => library.renameLibrary(lib.id, e.currentTarget.value)}
+                        onblur={(e) => renameLibrary(lib.id, e.currentTarget.value)}
                     />
                 {:else}
                     <button

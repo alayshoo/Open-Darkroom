@@ -6,22 +6,12 @@
 
     import { settings } from "$lib/settings/settings.svelte";
     import { library } from "$lib/library/library.svelte";
-    import { choosePhotoFolder } from "$lib/library/catalogApi";
-
-    async function choose() {
-        try {
-            const folder = await choosePhotoFolder();
-            if (folder) library.photoFolder = folder;
-        } catch (e) {
-            console.error("Failed to choose the photo folder:", e);
-        }
-    }
 </script>
 
 <div class="section flex flex-col gap-4">
     <SettingsGroup>
         <SettingsRow label="Photo folder" description={library.photoFolder ?? "Not chosen yet"}>
-            <button class="choose" onclick={choose}>{library.photoFolder ? "Change…" : "Choose…"}</button>
+            <button class="choose" onclick={library.choosePhotoFolder}>{library.photoFolder ? "Change…" : "Choose…"}</button>
         </SettingsRow>
         <SettingsRow label="Copy imports into the photo folder">
             <SettingsToggle

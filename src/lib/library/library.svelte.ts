@@ -5,6 +5,7 @@
 // and the editor. See docs/library.md.
 
 import { tick, untrack } from "svelte";
+import { SvelteMap } from "svelte/reactivity";
 
 import { editor } from "$lib/editor/editor.svelte";
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
@@ -98,8 +99,8 @@ class Library {
     selection = $state.raw<number[]>([]);
     #anchor: number | null = null;
 
-    /** Object URLs of each image's thumbnail. */
-    thumbs = $state.raw<Record<number, string>>({});
+    /** Object URLs of each image's thumbnail, with a key for every image so each cell follows only its own. */
+    thumbs = new SvelteMap<number, string | null>();
     #thumbsAsked = new Set<number>();
     #renderQueue = new Map<number, ImageEdit | null>();
     #rendering = false;
@@ -176,9 +177,13 @@ class Library {
     load = async () => {
         try {
             const snapshot = await api.loadCatalog();
+            const before = new Map(this.images.map((i) => [i.id, i]));
+            // A file found again gets the thumbnail it could not have while missing.
+            for (const image of snapshot.images) if (before.get(image.id)?.missing && !image.missing) this.#thumbsAsked.delete(image.id);
             this.libraries = snapshot.libraries;
             this.rolls = snapshot.rolls.map((r) => ({ ...r, gear: { ...NO_ROLL_GEAR, ...r.gear } }));
             this.images = snapshot.images;
+            for (const image of snapshot.images) if (!this.thumbs.has(image.id)) this.thumbs.set(image.id, null);
             this.filmStocks = snapshot.filmStocks;
             this.gear = snapshot.gear ?? [];
             this.photoFolder = snapshot.photoFolder;
@@ -188,6 +193,21 @@ class Library {
             this.#fail("The catalog could not be read", e);
         } finally {
             this.loaded = true;
+        }
+    };
+
+    /** Picks the photo folder. Images kept in it are found through it, so the catalog is read again. */
+    choosePhotoFolder = async () => {
+        try {
+            if (!(await api.choosePhotoFolder())) return;
+            const missingBefore = this.images.filter((i) => i.missing).length;
+            await this.load();
+            const lost = this.images.filter((i) => i.missing).length - missingBefore;
+            if (lost > 0) {
+                this.notice = { text: `${lost} image${lost === 1 ? "" : "s"} kept in the photo folder ${lost === 1 ? "is" : "are"} not in the new one.` };
+            }
+        } catch (e) {
+            this.#fail("The photo folder could not be changed", e);
         }
     };
 
@@ -241,11 +261,16 @@ class Library {
                 run: async () => {
                     try {
                         await api.deleteLibrary(id);
-                        this.#forget(this.images.filter((i) => i.libraryId === id).map((i) => i.id));
+                        const ids = this.images.filter((i) => i.libraryId === id).map((i) => i.id);
+                        this.#forget(ids);
+                        this.images = this.images.filter((i) => i.libraryId !== id);
+                        this.selection = this.selection.filter((s) => !ids.includes(s));
                         this.libraries = this.libraries.filter((l) => l.id !== id);
                         this.rolls = this.rolls.filter((r) => r.libraryId !== id);
-                        if (this.currentLibrary === null || this.currentLibrary.id === id) {
-                            this.view = this.libraries[0] ? { kind: "library", id: this.libraries[0].id } : null;
+                        if (this.currentLibrary === null) {
+                            const next = this.libraries[0];
+                            if (next) this.show({ kind: "library", id: next.id });
+                            else this.view = null;
                         }
                     } catch (e) {
                         this.#fail("The library could not be deleted", e);
@@ -474,7 +499,9 @@ class Library {
     #added(imported: api.Imported) {
         if (imported.roll) this.rolls = [...this.rolls, imported.roll];
         const known = new Set(this.images.map((i) => i.id));
-        this.images = [...this.images, ...imported.images.filter((i) => !known.has(i.id))];
+        const added = imported.images.filter((i) => !known.has(i.id));
+        for (const image of added) this.thumbs.set(image.id, null);
+        this.images = [...this.images, ...added];
         if (imported.skipped.length > 0) this.#reportSkipped(imported.skipped);
     }
 
@@ -663,16 +690,19 @@ class Library {
 
     /** Lets go of everything held for images no longer in the catalog, the open one included. */
     #forget(ids: number[]) {
-        const thumbs = { ...this.thumbs };
         for (const id of ids) {
-            if (thumbs[id]) URL.revokeObjectURL(thumbs[id]);
-            delete thumbs[id];
+            const thumb = this.thumbs.get(id);
+            if (thumb) URL.revokeObjectURL(thumb);
+            this.thumbs.delete(id);
             this.#thumbsAsked.delete(id);
             this.#renderQueue.delete(id);
             this.#resolveRendered(id);
             this.#lastSaved.delete(id);
         }
-        this.thumbs = thumbs;
+        if (this.#thumbPending && ids.includes(this.#thumbPending.id)) {
+            clearTimeout(this.#thumbPending.timer);
+            this.#thumbPending = null;
+        }
         if (this.#changedId !== null && ids.includes(this.#changedId)) this.#changedId = null;
         if (this.#pendingSave && ids.includes(this.#pendingSave.id)) this.#pendingSave = null;
         if (editor.libraryImageId !== null && ids.includes(editor.libraryImageId)) editor.closeImage();
@@ -695,8 +725,8 @@ class Library {
 
     #setThumb(id: number, bytes: ArrayBuffer) {
         if (!this.images.some((i) => i.id === id)) return;
-        const old = this.thumbs[id];
-        this.thumbs = { ...this.thumbs, [id]: URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })) };
+        const old = this.thumbs.get(id);
+        this.thumbs.set(id, URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })));
         if (old) URL.revokeObjectURL(old);
     }
 
@@ -759,7 +789,8 @@ class Library {
     /** The open image, when it has changed since its edit was last read out. */
     #changedId: number | null = null;
     #saveTimer: ReturnType<typeof setTimeout> | null = null;
-    #thumbTimer: ReturnType<typeof setTimeout> | null = null;
+    /** A thumbnail waiting for its image's edit to settle, with the edit it was last saved with. */
+    #thumbPending: { id: number; edit: string; timer: ReturnType<typeof setTimeout> } | null = null;
 
     /** The open image changed. It is read out only once the changes settle, or when it is flushed. */
     #openChanged(id: number) {
@@ -783,8 +814,11 @@ class Library {
         if (last.edit === saved.edit && sameHistory(last.history, saved.history)) return;
         this.#pendingSave = { id, ...saved };
         if (last.edit === saved.edit) return;
-        if (this.#thumbTimer) clearTimeout(this.#thumbTimer);
-        this.#thumbTimer = setTimeout(() => this.#rerenderOpen(), THUMBNAIL_DELAY_MS - SAVE_DELAY_MS);
+        // Another image's thumbnail still waiting renders now rather than being dropped.
+        if (this.#thumbPending?.id === id) clearTimeout(this.#thumbPending.timer);
+        else this.#renderPendingThumb();
+        const timer = setTimeout(() => this.#renderPendingThumb(), THUMBNAIL_DELAY_MS - SAVE_DELAY_MS);
+        this.#thumbPending = { id, edit: saved.edit, timer };
     }
 
     /** Writes the open image's edit now rather than when the edits settle. */
@@ -812,13 +846,15 @@ class Library {
         await Promise.all([this.#saves.flush(), this.flushSave()]);
     };
 
-    /** Renders the open image's thumbnail with its edit as it stands. */
-    #rerenderOpen() {
-        if (this.#thumbTimer) clearTimeout(this.#thumbTimer);
-        this.#thumbTimer = null;
-        const id = editor.libraryImageId;
-        if (id === null || !editor.imagePayload) return;
-        this.#queueRender(id, cloneImageEdit($state.snapshot(editor.edit) as ImageEdit));
+    /** Renders the thumbnail waiting on an edit: with the edit as it stands if its image is still open. */
+    #renderPendingThumb() {
+        const pending = this.#thumbPending;
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this.#thumbPending = null;
+        const open = editor.libraryImageId === pending.id && !!editor.imagePayload;
+        const edit = open ? cloneImageEdit($state.snapshot(editor.edit) as ImageEdit) : parseImageEdit(pending.edit);
+        this.#queueRender(pending.id, edit);
     }
 
     // ===== Between the library and the editor =====
@@ -857,7 +893,7 @@ class Library {
         this.#moving = true;
         try {
             const same = editor.libraryImageId === id && !!editor.imagePayload;
-            const src = this.thumbs[id];
+            const src = this.thumbs.get(id);
             const from = imageRect(this.#cell(id));
 
             this.flyingId = id;
@@ -907,8 +943,9 @@ class Library {
                 return;
             }
 
+            // Only an edit that changed since its last render waits for a new one.
             void this.flushSave();
-            this.#rerenderOpen();
+            if (this.#thumbPending?.id === image.id) this.#renderPendingThumb();
             const fresh = this.#rendered(image.id);
 
             editor.zoom = null;
@@ -926,7 +963,7 @@ class Library {
             const from = rectOf(document.querySelector(".preview-frame"));
             const cell = this.#cell(image.id);
             cell?.scrollIntoView({ block: "nearest" });
-            const src = this.thumbs[image.id];
+            const src = this.thumbs.get(image.id);
             this.canvasHidden = true;
             if (src && from && cell) {
                 const flyer = await fly(src, from, imageRect(cell) ?? from);

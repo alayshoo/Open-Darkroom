@@ -57,7 +57,7 @@ import {
 import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
-import { fetchImageMetadata, openImage, openImagePath } from "$lib/utils/openImage";
+import { fetchImageMetadata, openImagePath } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { exportImage } from "$lib/utils/exportImage";
 import { animateObject } from "$lib/utils/animateObject";
@@ -302,25 +302,6 @@ class Editor {
     };
 
     // ===== Opening =====
-
-    // A failed open has already cost the backend the image it was holding, so
-    // the view is cleared to match rather than left showing pixels that can no
-    // longer be exported. A dismissed picker returns null and changes nothing.
-    open = async () => {
-        try {
-            const payload = await openImage();
-            if (payload) {
-                this.imagePayload = payload;
-                this.libraryImageId = null;
-                this.zoom = null;
-                this.#resetEdit(payload.fullWidth, payload.fullHeight);
-                this.#loadMetadata(payload.imageId);
-            }
-        } catch (e) {
-            this.#clearImage();
-            console.error("Failed to open image:", e);
-        }
-    };
 
     // Opens an image from the library with the edit stored for it, unless that
     // edit was made on a file of another size. Resolves false on failure.

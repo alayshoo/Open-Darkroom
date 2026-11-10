@@ -12,7 +12,7 @@ use image::ExtendedColorType;
 use crate::color::{to_linear_u16, LUT_SIZE};
 use crate::crop::CropPayload;
 use crate::export_rendering::{chunk_rows_for_margin, render_cropped_in_view, sharp_margin_rows, SlidersPayload, ViewPayload};
-use crate::icc::SourceSpace;
+use crate::icc::{Matrix3, SourceSpace};
 use crate::image_opening::{decode_path, downscale_to_max_edge};
 use crate::output_space::OutputSpace;
 use crate::retouch::RetouchPayload;
@@ -49,16 +49,28 @@ impl ThumbnailSource {
         let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
         let linear = to_linear_u16(baked.as_deref().unwrap_or(pixels), channels, &luts);
         let (pixels, shrunk_width, shrunk_height) = downscale_to_max_edge(&linear, width, height, channels, THUMBNAIL_EDGE);
-        Ok(Self {
+        Ok(Self::from_linear(path, pixels, (shrunk_width, shrunk_height), (width, height), channels, space.to_working))
+    }
+
+    /// Pixels already linear and shrunk, with the size of the image they were shrunk from.
+    pub fn from_linear(
+        path: &Path,
+        pixels: Vec<u16>,
+        (width, height): (u32, u32),
+        (full_width, full_height): (u32, u32),
+        channels: usize,
+        to_working: Matrix3,
+    ) -> Self {
+        Self {
             path: path.to_path_buf(),
             pixels,
-            width: shrunk_width,
-            height: shrunk_height,
-            full_width: width,
-            full_height: height,
+            width,
+            height,
+            full_width,
+            full_height,
             channels,
-            space: SourceSpace::linear_with_matrix(space.to_working),
-        })
+            space: SourceSpace::linear_with_matrix(to_working),
+        }
     }
 
     /// Decodes the file and keeps only the shrunk copy.

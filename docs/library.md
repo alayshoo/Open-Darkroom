@@ -165,8 +165,8 @@ and hands over to the live canvas once it has drawn.
 
 These land together with the library:
 
-- **Open by path.** `open_image_file` currently shows the file picker itself. The
-  library needs to open a known path, with the picker kept for importing.
+- **Open by path.** `open_image_path` opens a known path. The picker is kept
+  for importing, and File > Open imports the file it picks before opening it.
 - **Thumbnails.** Rendered by the backend through the same WGSL as export
   (`export_rendering.rs`), with each image's edit applied. The grid then shows
   edited images without opening them. Kept with the catalog and redone when an

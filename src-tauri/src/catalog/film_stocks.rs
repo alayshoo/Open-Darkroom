@@ -170,19 +170,21 @@ impl Catalog {
         if seeded >= SEED_BATCHES.len() {
             return Ok(());
         }
-        for batch in &SEED_BATCHES[seeded..] {
-            for stock in stocks(batch) {
-                self.create_film_stock(&stock)?;
+        self.atomically(|| {
+            for batch in &SEED_BATCHES[seeded..] {
+                for stock in stocks(batch) {
+                    self.create_film_stock(&stock)?;
+                }
             }
-        }
-        self.conn
-            .execute(
-                "INSERT INTO meta (key, value) VALUES ('stocks_seeded', ?1)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![SEED_BATCHES.len().to_string()],
-            )
-            .map(|_| ())
-            .map_err(err)
+            self.conn
+                .execute(
+                    "INSERT INTO meta (key, value) VALUES ('stocks_seeded', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![SEED_BATCHES.len().to_string()],
+                )
+                .map(|_| ())
+                .map_err(err)
+        })
     }
 
     pub fn film_stocks(&self) -> Result<Vec<FilmStock>, String> {

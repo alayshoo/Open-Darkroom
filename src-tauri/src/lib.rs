@@ -45,7 +45,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             wrap_cursor,
             grab_cursor,
-            image_opening::open_image_file,
             image_opening::open_image_path,
             image_opening::crop_histograms,
             image_opening::image_metadata,

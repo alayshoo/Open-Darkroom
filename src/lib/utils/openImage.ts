@@ -5,10 +5,6 @@ import { type ImagePayload } from "$lib/types/imagePayload";
 import { type ImageMetadata } from "$lib/types/imageMetadata";
 
 
-// Returned by the backend when the file picker is dismissed. Must match
-// OPEN_CANCELLED in image_opening.rs.
-const OPEN_CANCELLED = "open:cancelled";
-
 let lastImageId = 0;
 
 // Bytes before the pixel data. Must match PAYLOAD_HEADER_BYTES in
@@ -65,19 +61,6 @@ export function parseImagePayload(buffer: ArrayBuffer, imageId = 0): ImagePayloa
         colourBaked,
         imageId,
     };
-}
-
-// Open an image, or return null if the user dismissed the picker. Any other
-// rejection means the backend got as far as releasing the image it held, so the
-// caller has to drop what it is showing rather than keep it.
-export async function openImage(): Promise<ImagePayload | null> {
-    try {
-        const imageId = ++lastImageId;
-        return parseImagePayload(await invoke<ArrayBuffer>("open_image_file", { imageId }), imageId);
-    } catch (e) {
-        if (e === OPEN_CANCELLED) return null;
-        throw e;
-    }
 }
 
 // A band of rows of the open image at full resolution. See full_resolution.rs.

@@ -11,16 +11,15 @@ import { type ImagePayload } from "$lib/types/imagePayload";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-const { openImage } = await import("$lib/utils/openImage");
+const { openImagePath } = await import("$lib/utils/openImage");
 
 const HIST_BINS = 256;
 const HEADER = 64;
 
-/** Open and assert a payload came back; the null path has its own test. */
-async function open(): Promise<ImagePayload> {
-  const image = await openImage();
-  if (!image) throw new Error("expected a payload, got a cancelled open");
-  return image;
+const PATH = "/photos/frame.tif";
+
+function open(): Promise<ImagePayload> {
+  return openImagePath(PATH);
 }
 
 /** Column-major, as the backend sends it for a file already in the working space. */
@@ -72,7 +71,7 @@ function payload(
   return buffer;
 }
 
-describe("openImage", () => {
+describe("openImagePath", () => {
   beforeEach(() => invoke.mockReset());
 
   it("reads the dimensions from the header", async () => {
@@ -80,7 +79,7 @@ describe("openImage", () => {
 
     const image = await open();
 
-    expect(invoke).toHaveBeenCalledWith("open_image_file", { imageId: image.imageId });
+    expect(invoke).toHaveBeenCalledWith("open_image_path", { path: PATH, imageId: image.imageId });
     expect(image.width).toBe(9);
     expect(image.height).toBe(5);
   });
@@ -92,7 +91,7 @@ describe("openImage", () => {
     const second = await open();
 
     expect(second.imageId).not.toBe(first.imageId);
-    expect(invoke).toHaveBeenLastCalledWith("open_image_file", { imageId: second.imageId });
+    expect(invoke).toHaveBeenLastCalledWith("open_image_path", { path: PATH, imageId: second.imageId });
   });
 
   it("reads the full resolution the preview was downscaled from", async () => {

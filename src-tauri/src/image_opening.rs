@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 use tauri::ipc::Response;
-use tauri_plugin_dialog::DialogExt;
 
 use half::f16;
 use image::{ImageBuffer, ImageDecoder, Rgba};
@@ -18,6 +17,7 @@ use crate::color::{
 };
 use crate::crop::{crop_view, CropPayload, CropView};
 use crate::export_rendering::request_device;
+use crate::thumbnails::{ThumbnailSource, THUMBNAIL_EDGE};
 use crate::retouch::{
     apply_retouch, block_box, follow_strokes, Followed, LinearSource, RetouchPasses, RetouchPayload, RetouchedBlocks,
     StrokeJournal,
@@ -85,6 +85,8 @@ pub struct OriginalImage {
     pub metadata: ImageMetadata,
     /// Where the image was opened from.
     pub path: std::path::PathBuf,
+    /// What its library thumbnail is rendered from.
+    pub thumbnail: Arc<ThumbnailSource>,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -118,6 +120,8 @@ pub struct PreparedImage {
     /// Set when the profile had to be applied on the CPU, so the darkroom block
     /// runs in the working space rather than the source's own primaries.
     pub baked: bool,
+    /// Linear u16 pixels shrunk to thumbnail size, with their width and height.
+    pub thumbnail: (Vec<u16>, u32, u32),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -565,7 +569,15 @@ pub fn prepare_image(
         to_linear_u16(src, channels, &luts)
     });
 
-    let (preview_width, preview_height, preview_pixels) = match &linear {
+    // The thumbnail is shrunk once from the full frame, like any other image's.
+    let thumbnail = || match &linear {
+        Some(linear) => downscale_to_max_edge(linear, full_width, full_height, channels, THUMBNAIL_EDGE),
+        None => {
+            let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
+            downscale_to_max_edge(&to_linear_u16(src, channels, &luts), full_width, full_height, channels, THUMBNAIL_EDGE)
+        }
+    };
+    let preview = || match &linear {
         Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
             let (preview, w, h) =
                 downscale_to_max_edge(linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
@@ -576,6 +588,7 @@ pub fn prepare_image(
             (full_width, full_height, linearize_u16(src, channels, &luts))
         }
     };
+    let (thumbnail, (preview_width, preview_height, preview_pixels)) = rayon::join(thumbnail, preview);
 
     // The overview always comes off the full frame, never off the preview, so it
     // keeps describing the whole image once the preview becomes a crop tile.
@@ -606,6 +619,7 @@ pub fn prepare_image(
         histograms,
         to_working: space.to_working,
         baked: space.baked,
+        thumbnail,
     })
 }
 
@@ -701,13 +715,6 @@ fn decode_encoded(
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
-/// Error returned when the user dismisses the file picker.
-///
-/// Dismissal happens before the loaded image is released, so it is the one
-/// failure that leaves the current image intact — `openImage.ts` matches on this
-/// exact string to tell it apart from an open that got far enough to purge.
-pub const OPEN_CANCELLED: &str = "open:cancelled";
-
 /// The file's samples, channel count, dimensions and what those samples mean,
 /// whatever kind of file it is.
 pub fn decode_path(path: &std::path::Path) -> Result<(Vec<u16>, usize, u32, u32, SourceSpace), String> {
@@ -726,27 +733,6 @@ pub fn image_extensions() -> Vec<String> {
     let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
     extensions.extend(crate::raw::dialog_extensions());
     extensions
-}
-
-#[tauri::command]
-pub(crate) async fn open_image_file(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, ImageState>,
-    image_id: u32,
-) -> Result<Response, String> {
-    let extensions = image_extensions();
-    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
-
-    let path = app
-        .dialog()
-        .file()
-        .add_filter("Images", &extensions)
-        .blocking_pick_file()
-        .ok_or(OPEN_CANCELLED)?
-        .into_path()
-        .map_err(|e| e.to_string())?;
-
-    open_path(&state, path, image_id)
 }
 
 /// Opens a file the caller already knows the path of, such as one in the library.
@@ -774,7 +760,16 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
     let overall_start = Instant::now();
     let (samples, channels, full_width, full_height, space) = decode_path(&path)?;
 
-    let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let mut prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let (thumb_pixels, thumb_width, thumb_height) = std::mem::take(&mut prepared.thumbnail);
+    let thumbnail = Arc::new(ThumbnailSource::from_linear(
+        &path,
+        thumb_pixels,
+        (thumb_width, thumb_height),
+        (full_width, full_height),
+        channels,
+        space.to_working,
+    ));
     let metadata = crate::metadata::read(&path);
 
     // Store the original full-resolution image for export. This happens after
@@ -793,6 +788,7 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
             id: image_id,
             metadata,
             path,
+            thumbnail,
         });
     }
 
