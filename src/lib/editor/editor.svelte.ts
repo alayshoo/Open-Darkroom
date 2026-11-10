@@ -4,7 +4,6 @@
 // Held outside any component, so the editor keeps its state while out of view.
 
 import { untrack } from "svelte";
-import { listen } from "@tauri-apps/api/event";
 
 import { presets } from "$lib/presets/presets.svelte";
 import {
@@ -17,9 +16,7 @@ import {
 } from "$lib/presets/presetDocument";
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import { loupe } from "$lib/gpu/loupe.svelte";
-import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
 import { debugStats } from "$lib/gpu/debugStats.svelte";
-import { proofing } from "$lib/gpu/proofing.svelte";
 import { history } from "$lib/history/history.svelte";
 import { applyAction, undoAction, type StateAccessors } from "$lib/history/historyDispatch";
 import { actionMode, actionPage } from "$lib/history/actionControls";
@@ -54,12 +51,10 @@ import {
     cropAspect,
     cropWithAspect,
 } from "$lib/types/cropAspect";
-import { type ExportSettings, defaultExportSettings } from "$lib/types/exportSettings";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
 import { fetchImageMetadata, openImagePath } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
-import { exportImage } from "$lib/utils/exportImage";
 import { animateObject } from "$lib/utils/animateObject";
 
 // How long the control pagers take to slide across on a mode change.
@@ -155,13 +150,6 @@ class Editor {
     // The strokes both histograms bin. They are out of sight while a brush is
     // in hand, so they catch up once it is put down.
     histogramStrokes = $state.raw<Retouch[]>([]);
-
-    // ===== Export =====
-
-    isExportPending = $state(false);
-    showExportModal = $state(false);
-    exportMenuOpen = $state(false);
-    exportSettings = $state<ExportSettings>({ ...defaultExportSettings });
 
     // ===== Retouch =====
 
@@ -509,25 +497,6 @@ class Editor {
         }
     }
 
-    // ===== Export =====
-
-    export = async () => {
-        this.isExportPending = true;
-        // A focused control would otherwise keep taking keys under the overlay.
-        (document.activeElement as HTMLElement)?.blur();
-        const unlisten = await listen("export:started", () => {
-            this.showExportModal = true;
-        });
-        if (this.isCropping) this.applyCrop();
-        try {
-            await exportImage(this.edit, this.curveLut, colorSpaceDebug.toneMap, this.exportSettings);
-        } finally {
-            unlisten();
-            this.isExportPending = false;
-            this.showExportModal = false;
-        }
-    };
-
     // ===== Retouch =====
 
     toggleRetouch = (mode: RetouchMode) => {
@@ -791,17 +760,6 @@ class Editor {
         $effect.root(() => {
             $effect(() => this.#syncHistogramStrokes());
             $effect(() => this.#updateInputHistograms());
-
-            // What a soft proof proofs against is whatever the export is set to write.
-            $effect(() => {
-                proofing.target = this.exportSettings.outputSpace;
-            });
-
-            // An export menu left open when the footer goes inactive would stay up,
-            // dimmed and unreachable.
-            $effect(() => {
-                if (this.sidebarInactive) this.exportMenuOpen = false;
-            });
 
             $effect(() => {
                 if (!this.canRetouch) retouchTool.mode = null;

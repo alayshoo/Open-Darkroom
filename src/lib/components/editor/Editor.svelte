@@ -8,7 +8,10 @@
     import PresetsPanel from "$lib/components/presets/PresetsPanel.svelte";
     import InfoPanel from "./InfoPanel.svelte";
     import PresetModal from "$lib/components/presets/PresetModal.svelte";
-    import ExportModal from "$lib/components/ExportModal.svelte";
+    import ExportModal from "$lib/components/export/ExportModal.svelte";
+    import ExportProgress from "$lib/components/export/ExportProgress.svelte";
+    import { exportDialog } from "$lib/export/exportDialog.svelte";
+    import { shortcuts } from "$lib/settings/shortcuts.svelte";
     import CustomAspectModal from "$lib/components/CustomAspectModal.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
@@ -61,6 +64,7 @@
             changeMode: editor.toggleMode,
             openImage: library.openFile,
             showLibrary: library.toggleView,
+            exportImage: exportDialog.show,
             toggleInfo: editor.toggleInfo,
             copyAdjustments: editor.copyAdjustments,
             pasteAdjustments: editor.pasteAdjustments,
@@ -99,12 +103,23 @@
     });
 
     // Enter and Escape belong to the crop tool while it is open, unless a field
-    // or the export menu has the keyboard.
+    // has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
         if (!active) return;
-        // Nothing but the window itself answers while an export runs.
-        if (editor.isExportPending) {
+        // Nothing but the window itself answers while the save dialog is up or an
+        // export runs, bar Escape and Enter dismissing a failed export.
+        if (exportDialog.busy && !exportDialog.open) {
+            if (exportDialog.quickError && (e.key === "Escape" || e.key === "Enter")) exportDialog.dismissError();
             e.preventDefault();
+            return;
+        }
+        // The export modal takes the keyboard while it is up; Escape and its own
+        // shortcut close it, unless an export is running.
+        if (exportDialog.open) {
+            if (e.key === "Escape" || (!isTextField(e.target) && shortcuts.actionFor(e) === "exportImage")) {
+                exportDialog.close();
+                e.preventDefault();
+            }
             return;
         }
         // The preset dialog takes the keyboard while it is up.
@@ -130,7 +145,6 @@
         const ownsKey =
             editor.isCropping &&
             !settings.open &&
-            !editor.exportMenuOpen &&
             !isTextField(e.target);
         if (ownsKey && (e.key === "Enter" || e.key === "Escape")) {
             if (e.key === "Enter") editor.applyCrop();
@@ -216,7 +230,8 @@
     <EditorSideBar />
 </div>
 
-<ExportModal visible={editor.showExportModal}></ExportModal>
+<ExportModal />
+<ExportProgress />
 <CustomAspectModal
     bind:open={editor.customAspectOpen}
     initial={editor.aspectLock.custom ?? [1, 1]}

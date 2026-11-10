@@ -1,6 +1,7 @@
 <!-- lib/components/TitleBar.svelte -->
 <script lang="ts">
     import { getCurrentWindow } from "@tauri-apps/api/window";
+    import { openUrl } from "@tauri-apps/plugin-opener";
     import { onMount, onDestroy } from "svelte";
     import MenuButton from "./TitleBarMenuButton.svelte";
     import { settings } from "$lib/settings/settings.svelte";
@@ -9,6 +10,7 @@
     import "$lib/styles/palette.css";
 
     const appWindow = getCurrentWindow();
+    const REPO_URL = "https://github.com/alayshoo/Open-Darkroom";
 
     let {
         title = $bindable("Open Darkroom"),
@@ -20,6 +22,7 @@
         importFolder = () => {},
         toggleLibrary = () => {},
         editing = false,
+        exportImage = () => {},
         copyAdjustments = () => {},
         pasteAdjustments = () => {},
         resetAdjustments = () => {},
@@ -36,6 +39,7 @@
         toggleLibrary?: () => void;
         /** An image is open in the editor, rather than the library showing. */
         editing?: boolean;
+        exportImage?: () => void;
         copyAdjustments?: () => void;
         pasteAdjustments?: () => void;
         resetAdjustments?: () => void;
@@ -111,7 +115,11 @@
                         action: toggleLibrary,
                     },
                     { separator: true },
-                    { label: "Export…", shortcut: "Ctrl+Shift+E" },
+                    {
+                        label: "Export…",
+                        shortcut: shortcuts.display("exportImage"),
+                        action: exportImage,
+                    },
                     { separator: true },
                     {
                         label: "Settings",
@@ -154,14 +162,19 @@
             <MenuButton
                 label="Help"
                 items={[
-                    { label: "Documentation" },
                     {
                         label: "Keyboard Shortcuts",
                         action: () => openSettings("shortcuts"),
                     },
                     { separator: true },
-                    { label: "Report a Bug…" },
-                    { label: "About Open Darkroom" },
+                    {
+                        label: "Report a Bug…",
+                        action: () => openUrl(`${REPO_URL}/issues/new`),
+                    },
+                    {
+                        label: "About Open Darkroom",
+                        action: () => openUrl(REPO_URL),
+                    },
                 ]}
             />
         </div>

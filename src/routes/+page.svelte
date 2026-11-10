@@ -8,6 +8,7 @@
     import { editor } from "$lib/editor/editor.svelte";
     import { library } from "$lib/library/library.svelte";
     import { settings } from "$lib/settings/settings.svelte";
+    import { exportDialog } from "$lib/export/exportDialog.svelte";
 
     let editing = $derived(library.showing === "editor");
     const inEditor = (action: () => void) => () => {
@@ -33,12 +34,13 @@
     importFiles={library.importFiles}
     importFolder={library.importFolder}
     toggleLibrary={library.toggleView}
+    exportImage={inEditor(exportDialog.show)}
     {editing}
     copyAdjustments={inEditor(editor.copyAdjustments)}
     pasteAdjustments={inEditor(editor.pasteAdjustments)}
     resetAdjustments={inEditor(editor.resetAdjustments)}
     openSettings={(section) => settings.show(section)}
-    busy={editor.showExportModal}
+    busy={exportDialog.open || exportDialog.busy}
 ></TitleBar>
 <Library active={!editing} />
 <!-- Kept mounted while the library is up, so going back to the image is instant. -->

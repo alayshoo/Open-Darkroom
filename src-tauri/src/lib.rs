@@ -19,7 +19,9 @@ pub mod jxl_encoding;
 pub mod catalog;
 pub mod thumbnails;
 mod catalog_commands;
-mod export;
+pub mod exif_writing;
+pub mod export_size;
+pub mod export;
 mod presets;
 
 use image_opening::ImageState;
@@ -50,6 +52,11 @@ pub fn run() {
             image_opening::image_metadata,
             full_resolution::full_resolution_rows,
             export::export_image,
+            export::export_defaults,
+            export::pick_export_folder,
+            export::pick_export_file,
+            export::check_export_destination,
+            export::export_output_size,
             presets::export_preset,
             presets::import_presets,
             catalog_commands::catalog_load,
