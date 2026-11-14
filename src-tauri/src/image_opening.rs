@@ -54,6 +54,9 @@ pub const HIST_BINS: usize = 256;
 /// finer would cost more in carrying the 3 KB of counters around than it saves.
 const HIST_BLOCK_PIXELS: usize = 1 << 16;
 
+/// The fewest rows a crop's binning splits down to, on the same reasoning.
+const HIST_MIN_ROWS: usize = 16;
+
 /// Bytes preceding the pixel data in the frontend payload: the six dimensions
 /// as u32 LE, the source → working-space matrix as 9 f32 LE, then a flags word.
 /// The full dimensions are what anchors a slider specified in image pixels to a
@@ -258,29 +261,32 @@ pub fn compute_histograms(src: &[u16], channels: usize, bins: &[u8]) -> Histogra
         .into()
 }
 
-type Bins = ([u32; HIST_BINS], [u32; HIST_BINS], [u32; HIST_BINS]);
+/// R, G and B counters, on the heap: rayon carries partial counts by value
+/// through every split, and nested jobs pile those copies up on a worker's stack.
+type Bins = Box<[[u32; HIST_BINS]; 3]>;
 
 fn empty_bins() -> Bins {
-    ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS])
+    Box::new([[0u32; HIST_BINS]; 3])
 }
 
 fn bin_pixel(counts: &mut Bins, px: &[u16], bins: &[u8]) {
-    counts.0[bins[px[0] as usize] as usize] += 1;
-    counts.1[bins[px[1] as usize] as usize] += 1;
-    counts.2[bins[px[2] as usize] as usize] += 1;
+    for c in 0..3 {
+        counts[c][bins[px[c] as usize] as usize] += 1;
+    }
 }
 
 fn sum_bins(mut acc: Bins, part: Bins) -> Bins {
-    for i in 0..HIST_BINS {
-        acc.0[i] += part.0[i];
-        acc.1[i] += part.1[i];
-        acc.2[i] += part.2[i];
+    for (acc, part) in acc.iter_mut().zip(part.iter()) {
+        for (a, p) in acc.iter_mut().zip(part) {
+            *a += p;
+        }
     }
     acc
 }
 
 impl From<Bins> for Histograms {
-    fn from((r, g, b): Bins) -> Self {
+    fn from(bins: Bins) -> Self {
+        let [r, g, b] = *bins;
         Histograms { r, g, b }
     }
 }
@@ -303,6 +309,7 @@ pub fn compute_histograms_in(
 
     (y0..y1)
         .into_par_iter()
+        .with_min_len(HIST_MIN_ROWS)
         .fold(empty_bins, |mut counts, y| {
             for x in (x0..x1).filter(|&x| view.contains(x, y)) {
                 let at = (y as usize * width as usize + x as usize) * channels;
