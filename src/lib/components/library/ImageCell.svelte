@@ -51,12 +51,9 @@
     </div>
     <div class="caption flex items-baseline gap-1.5">
         {#if image.frame !== null}
-            <span class="frame-no">{image.frame}</span>
+            <span class="frame-no" class:edited={image.edited} title={image.edited ? "Edited" : undefined}>{image.frame}</span>
         {/if}
         <span class="file flex-1" title={image.fileName}>{withoutExtension(image.fileName)}</span>
-        {#if image.edited}
-            <span class="edited" title="Edited" aria-label="Edited"></span>
-        {/if}
     </div>
 </div>
 
@@ -120,15 +117,6 @@
         color: #ffb4a8;
     }
 
-    .edited {
-        align-self: center;
-        flex-shrink: 0;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--color2);
-    }
-
     .caption {
         min-width: 0;
         padding: 0 2px;
@@ -136,10 +124,15 @@
         line-height: 1.3;
     }
 
+    /* Grey like the file name until the image has been edited. */
     .frame-no {
-        color: var(--color1);
+        color: var(--color3);
         font-weight: 600;
         font-variant-numeric: tabular-nums;
+    }
+
+    .frame-no.edited {
+        color: var(--color1);
     }
 
     .file {

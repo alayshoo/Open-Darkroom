@@ -432,6 +432,8 @@ describe("opening an image", () => {
         expect(parseImageEdit(saved.edit)!.sliders).toMatchObject({ exposure: 1, contrast: 25 });
         expect(parseEditHistory(saved.history)).toMatchObject({ pointer: 0, steps: [{ key: "exposure" }] });
         await vi.waitFor(() => expect(library.images.find((i) => i.id === 2)!.edited).toBe(1234));
+        await vi.waitFor(() => expect(cell("frame01.tif")!.querySelector(".frame-no.edited")).not.toBeNull());
+        expect(cell("frame02.tif")!.querySelector(".frame-no.edited")).toBeNull();
     });
 
     it("saves the history as it is undone and redone", async () => {
