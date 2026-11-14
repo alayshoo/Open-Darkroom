@@ -377,9 +377,8 @@
         inset: 0;
         background: url("/grain.png") 0 0 / 64px 64px repeat;
         image-rendering: pixelated;
-        --grain-mask: linear-gradient(black 143px, transparent 191px),
-            linear-gradient(to right, black 179px, transparent 227px),
-            radial-gradient(310px 250px at 0 0, black 80%, transparent);
+        --grain-mask: linear-gradient(black 100px, transparent 124px),
+            linear-gradient(to right, black 112px, transparent 140px);
         -webkit-mask: var(--grain-mask);
         mask: var(--grain-mask);
     }
@@ -429,6 +428,13 @@
         --reach-x: 260px;
         --reach-y: 208px;
         opacity: calc(var(--scrimStrength) * 0.35);
+        /* Eased off before the image's edge, so the tail darkens the chrome rather than the picture. */
+        --tail-mask: linear-gradient(black 44px, rgba(0, 0, 0, 0.84) 58px, rgba(0, 0, 0, 0.5) 72px,
+                rgba(0, 0, 0, 0.16) 86px, transparent 100px),
+            linear-gradient(to right, black 48px, rgba(0, 0, 0, 0.84) 64px, rgba(0, 0, 0, 0.5) 80px,
+                rgba(0, 0, 0, 0.16) 96px, transparent 112px);
+        -webkit-mask: var(--tail-mask);
+        mask: var(--tail-mask);
     }
 
     .panel-column {
