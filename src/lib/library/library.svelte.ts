@@ -520,7 +520,7 @@ class Library {
         try {
             const imported = await api.importFiles(place, settings.importCopies);
             this.#added(imported);
-            this.selection = imported.images.map((i) => i.id);
+            if (imported.images.length > 0) this.selection = imported.images.map((i) => i.id);
         } catch (e) {
             this.#fail("The images could not be imported", e);
         }
@@ -547,7 +547,10 @@ class Library {
         try {
             const record = await api.openFile(place, settings.importCopies);
             if (!record) return;
-            this.#added({ roll: null, images: [record], skipped: [] });
+            const known = this.images.find((i) => i.id === record.id);
+            if (!known) this.#added({ roll: null, images: [record], skipped: [] });
+            else if (known.missing && !record.missing) this.#putBack([record]);
+            else this.#replace([record]);
             this.show(record.rollId ? { kind: "roll", id: record.rollId } : { kind: "library", id: record.libraryId });
             this.selection = [record.id];
             await this.openImage(record.id);
@@ -835,6 +838,8 @@ class Library {
             this.#lastSaved.set(id, saved);
             this.images = this.images.map((i) => (i.id === id ? { ...i, edited } : i));
         } catch (e) {
+            // An image removed while it was saving has nothing left to save to.
+            if (!this.images.some((i) => i.id === id)) return;
             // Tried again with the next flush, unless a newer edit has taken its place.
             this.#pendingSave ??= pending;
             this.#fail("The edit could not be saved", e);

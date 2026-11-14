@@ -123,8 +123,10 @@ impl Catalog {
         self.atomically(|| {
             for roll in self.rolls()?.into_iter().filter(|r| r.gear.uses(id)) {
                 let mut links = roll.gear;
-                let mut info = roll.info;
-                let Value::Object(fields) = &mut info else { continue };
+                let mut fields = match roll.info {
+                    Value::Object(fields) => fields,
+                    _ => Default::default(),
+                };
                 let text = |key: &str| fields.get(key).and_then(Value::as_str).unwrap_or("").trim().to_string();
                 if links.lenses.contains(&id) {
                     links.lenses.retain(|&l| l != id);
@@ -141,7 +143,7 @@ impl Catalog {
                 self.conn
                     .execute(
                         "UPDATE rolls SET info = ?1, gear = ?2 WHERE id = ?3",
-                        params![info.to_string(), serde_json::to_string(&links).map_err(err)?, roll.id],
+                        params![Value::Object(fields).to_string(), serde_json::to_string(&links).map_err(err)?, roll.id],
                     )
                     .map_err(err)?;
             }

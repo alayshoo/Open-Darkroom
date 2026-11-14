@@ -23,7 +23,7 @@ mod gear;
 mod moved_files;
 pub use film_stocks::{FilmStock, StockFields};
 pub use gear::{Gear, GearDetails, GearFields, RollGear};
-pub use moved_files::{find_moved, search_roots, MissingFile};
+pub use moved_files::{find_moved, only_missing, search_roots, Found, MissingFile};
 
 /// How many stocks a new catalog starts with.
 pub fn film_stocks_seeds_len() -> usize {
@@ -153,6 +153,20 @@ pub struct Snapshot {
     pub photo_folder: Option<String>,
 }
 
+impl ImageRecord {
+    /// Marks the image missing when its file is not there.
+    pub fn check_file(&mut self) {
+        self.missing = !Path::new(&self.path).is_file();
+    }
+}
+
+impl Snapshot {
+    /// Looks for every image's file. Needs no catalog, so it can run while the catalog is free.
+    pub fn check_files(&mut self) {
+        self.images.iter_mut().for_each(ImageRecord::check_file);
+    }
+}
+
 /// What an import added, and the files it skipped.
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,6 +217,7 @@ struct Prepared {
     in_photo_folder: bool,
     size: u64,
     print: String,
+    legacy: String,
     metadata: String,
     copy: Option<PathBuf>,
 }
@@ -250,8 +265,8 @@ fn prepare_file(
     known: &mut HashSet<String>,
     folder_made: &mut bool,
 ) -> Result<Option<Prepared>, Failure> {
-    let (size, print) = fingerprint(path).map_err(Failure::File)?;
-    if known.contains(&print) {
+    let Prints { size, print, legacy } = fingerprints(path).map_err(Failure::File)?;
+    if known.contains(&print) || known.contains(&legacy) {
         return Ok(None);
     }
     let metadata = serde_json::to_string(&metadata::read(path)).map_err(|e| Failure::Fatal(err(e)))?;
@@ -274,7 +289,7 @@ fn prepare_file(
         None => (absolute(path).to_string_lossy().into_owned(), false, None),
     };
     known.insert(print.clone());
-    Ok(Some(Prepared { stored, in_photo_folder, size, print, metadata, copy }))
+    Ok(Some(Prepared { stored, in_photo_folder, size, print, legacy, metadata, copy }))
 }
 
 pub struct Catalog {
@@ -290,9 +305,30 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// A file's size, its fingerprint, and the older kind of fingerprint that
+/// images catalogued by earlier builds may still have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prints {
+    pub size: u64,
+    pub print: String,
+    pub legacy: String,
+}
+
+impl Prints {
+    /// Whether `stored`, of either kind, is this file's.
+    pub fn matches(&self, stored: &str) -> bool {
+        stored == self.print || stored == self.legacy
+    }
+}
+
 /// A file's size and an FNV-1a hash of its start, middle and end: enough to
 /// know it again after it has moved, without reading all of it.
 pub fn fingerprint(path: &Path) -> Result<(u64, String), String> {
+    fingerprints(path).map(|p| (p.size, p.print))
+}
+
+/// Both kinds of fingerprint, from one read. The older kind hashed the start of the file alone.
+pub fn fingerprints(path: &Path) -> Result<Prints, String> {
     let mut file = fs::File::open(path).map_err(err)?;
     let size = file.metadata().map_err(err)?.len();
     let spans = if size <= 3 * FINGERPRINT_BYTES {
@@ -301,24 +337,18 @@ pub fn fingerprint(path: &Path) -> Result<(u64, String), String> {
         vec![(0, FINGERPRINT_BYTES), ((size - FINGERPRINT_BYTES) / 2, FINGERPRINT_BYTES), (size - FINGERPRINT_BYTES, FINGERPRINT_BYTES)]
     };
     let mut hash = FNV_OFFSET;
+    let mut legacy = None;
     for (start, len) in spans {
         file.seek(SeekFrom::Start(start)).map_err(err)?;
-        hash = fnv(hash, &read_span(&mut file, len)?);
+        let bytes = read_span(&mut file, len)?;
+        legacy.get_or_insert_with(|| fnv(FNV_OFFSET, &bytes[..bytes.len().min(FINGERPRINT_BYTES as usize)]));
+        hash = fnv(hash, &bytes);
     }
-    Ok((size, format!("{FINGERPRINT_PREFIX}{size:x}-{hash:016x}")))
-}
-
-/// The fingerprint earlier builds took, of the start of a file alone.
-fn legacy_fingerprint(path: &Path) -> Result<String, String> {
-    let mut file = fs::File::open(path).map_err(err)?;
-    let size = file.metadata().map_err(err)?.len();
-    let hash = fnv(FNV_OFFSET, &read_span(&mut file, FINGERPRINT_BYTES)?);
-    Ok(format!("{size:x}-{hash:016x}"))
-}
-
-/// The fingerprint of `path` of the same kind as `stored`, to compare with it.
-pub fn fingerprint_like(stored: &str, path: &Path) -> Result<String, String> {
-    if stored.starts_with(FINGERPRINT_PREFIX) { fingerprint(path).map(|(_, print)| print) } else { legacy_fingerprint(path) }
+    Ok(Prints {
+        size,
+        print: format!("{FINGERPRINT_PREFIX}{size:x}-{hash:016x}"),
+        legacy: format!("{size:x}-{:016x}", legacy.unwrap_or(FNV_OFFSET)),
+    })
 }
 
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
@@ -483,6 +513,7 @@ impl Catalog {
 
     // ── Reading ──────────────────────────────────────────────────────────────
 
+    /// Every record, without looking for their files: see [`Snapshot::check_files`].
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         let photo_folder = self.photo_folder()?;
         Ok(Snapshot {
@@ -562,7 +593,6 @@ impl Catalog {
             let (mut image, stored) = row.map_err(err)?;
             let path = resolve(&stored, image.in_photo_folder, photo_folder.as_deref());
             image.file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            image.missing = !path.is_file();
             image.path = path.to_string_lossy().into_owned();
             Ok(image)
         })
@@ -570,7 +600,9 @@ impl Catalog {
     }
 
     pub fn image(&self, id: i64) -> Result<ImageRecord, String> {
-        self.images("WHERE id = ?1", params![id])?.pop().ok_or_else(|| format!("No image {id} in the catalog"))
+        let mut image = self.images("WHERE id = ?1", params![id])?.pop().ok_or_else(|| format!("No image {id} in the catalog"))?;
+        image.check_file();
+        Ok(image)
     }
 
     // ── Libraries and rolls ──────────────────────────────────────────────────
@@ -700,7 +732,8 @@ impl Catalog {
 
     fn record_files(&self, prepared: &PreparedImport) -> Result<(Option<Roll>, Import), String> {
         let known = self.known_fingerprints()?;
-        let (fresh, taken): (Vec<&Prepared>, Vec<&Prepared>) = prepared.files.iter().partition(|f| !known.contains(&f.print));
+        let (fresh, taken): (Vec<&Prepared>, Vec<&Prepared>) =
+            prepared.files.iter().partition(|f| !known.contains(&f.print) && !known.contains(&f.legacy));
         for copy in taken.iter().filter_map(|f| f.copy.as_ref()) {
             let _ = fs::remove_file(copy);
         }
@@ -753,12 +786,17 @@ impl Catalog {
 
     /// The image already in the catalog for a file, if there is one.
     pub fn find_by_file(&self, path: &Path) -> Result<Option<i64>, String> {
-        self.find_by_fingerprint(&fingerprint(path)?.1)
+        self.find_by_prints(&fingerprints(path)?)
     }
 
-    pub fn find_by_fingerprint(&self, print: &str) -> Result<Option<i64>, String> {
+    /// The image with either kind of fingerprint of a file.
+    pub fn find_by_prints(&self, prints: &Prints) -> Result<Option<i64>, String> {
         self.conn
-            .query_row("SELECT id FROM images WHERE fingerprint = ?1", params![print], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM images WHERE fingerprint IN (?1, ?2) LIMIT 1",
+                params![prints.print, prints.legacy],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(err)
     }
@@ -851,10 +889,15 @@ impl Catalog {
             .conn
             .query_row("SELECT fingerprint FROM images WHERE id = ?1", params![id], |r| r.get(0))
             .map_err(err)?;
-        if fingerprint_like(&stored, path)? != stored {
+        let prints = fingerprints(path)?;
+        if !prints.matches(&stored) {
             return Err("That is not the same file".into());
         }
-        let (_, print) = fingerprint(path)?;
+        self.relink_to(id, path, &prints.print)
+    }
+
+    /// Points an image at a file already known to be its own, with the file's current fingerprint.
+    pub fn relink_to(&self, id: i64, path: &Path, print: &str) -> Result<ImageRecord, String> {
         let path = absolute(path);
         let root = self.photo_folder()?.map(|root| absolute(&root));
         let (stored, in_photo_folder) = match root {

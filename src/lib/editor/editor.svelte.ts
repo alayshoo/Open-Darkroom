@@ -312,23 +312,19 @@ class Editor {
             this.#loadMetadata(payload.imageId);
             return true;
         } catch (e) {
-            this.#clearImage();
+            this.closeImage();
             console.error("Failed to open image:", e);
             return false;
         }
     };
 
-    /** Lets go of the open image, as when its library record is removed. */
+    /** Lets go of the open image and its history, as when it fails to open or its library record is removed. */
     closeImage = () => {
-        this.#clearImage();
-        history.clear();
-    };
-
-    #clearImage() {
         this.imagePayload = null;
         this.metadata = null;
         this.libraryImageId = null;
-    }
+        history.clear();
+    };
 
     #loadMetadata(imageId: number) {
         this.metadata = null;

@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{err, fingerprint_like, resolve, Catalog, FINGERPRINT_PREFIX};
+use super::{err, fingerprints, resolve, Catalog};
 
 /// How deep a search goes below each folder it starts from.
 const SEARCH_DEPTH: usize = 4;
@@ -26,8 +26,21 @@ pub struct MissingFile {
     pub fingerprint: String,
 }
 
+/// A missing image's file found again, with the file's current fingerprint.
+#[derive(Debug, Clone)]
+pub struct Found {
+    pub id: i64,
+    pub path: PathBuf,
+    pub print: String,
+}
+
 impl Catalog {
     pub fn missing_files(&self) -> Result<Vec<MissingFile>, String> {
+        Ok(only_missing(self.stored_files()?))
+    }
+
+    /// Where every image's file was last seen, without looking for any of them.
+    pub fn stored_files(&self) -> Result<Vec<MissingFile>, String> {
         let photo_folder = self.photo_folder()?;
         let mut stmt = self
             .conn
@@ -45,9 +58,13 @@ impl Catalog {
                 })
             })
             .map_err(err)?;
-        let all: Vec<MissingFile> = rows.collect::<Result<_, _>>().map_err(err)?;
-        Ok(all.into_iter().filter(|m| !m.path.is_file()).collect())
+        rows.collect::<Result<_, _>>().map_err(err)
     }
+}
+
+/// The files of `stored` that are not where they were. Needs no catalog.
+pub fn only_missing(stored: Vec<MissingFile>) -> Vec<MissingFile> {
+    stored.into_iter().filter(|m| !m.path.is_file()).collect()
 }
 
 /// The folders to look in: the closest folders that are still there above
@@ -74,12 +91,12 @@ pub fn search_roots(missing: &[MissingFile], near: Option<&Path>, photo_folder: 
 
 /// Looks through `roots`, nearest folders first, for files with the same
 /// fingerprint as a missing one. Only files of a missing one's size are read.
-pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathBuf)> {
+pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<Found> {
     let mut by_size: HashMap<u64, Vec<&MissingFile>> = HashMap::new();
     for file in missing {
         by_size.entry(file.size).or_default().push(file);
     }
-    let mut found: Vec<(i64, PathBuf)> = Vec::new();
+    let mut found: Vec<Found> = Vec::new();
     let mut claimed = HashSet::new();
     let mut visited = HashSet::new();
     let mut entries = 0;
@@ -113,17 +130,14 @@ pub fn find_moved(missing: &[MissingFile], roots: &[PathBuf]) -> Vec<(i64, PathB
                 continue;
             }
             let Some(candidates) = entry.metadata().ok().and_then(|m| by_size.get(&m.len())) else { continue };
+            if candidates.iter().all(|f| claimed.contains(&f.id)) {
+                continue;
+            }
             let path = entry.path();
-            // Each kind of fingerprint is taken at most once per file, however many candidates there are.
-            let mut prints: HashMap<bool, Option<String>> = HashMap::new();
-            for file in candidates.iter().filter(|f| !claimed.contains(&f.id)) {
-                let kind = file.fingerprint.starts_with(FINGERPRINT_PREFIX);
-                let print = prints.entry(kind).or_insert_with(|| fingerprint_like(&file.fingerprint, &path).ok());
-                if print.as_deref() == Some(file.fingerprint.as_str()) {
-                    claimed.insert(file.id);
-                    found.push((file.id, path));
-                    break;
-                }
+            let Ok(prints) = fingerprints(&path) else { continue };
+            if let Some(file) = candidates.iter().find(|f| !claimed.contains(&f.id) && prints.matches(&f.fingerprint)) {
+                claimed.insert(file.id);
+                found.push(Found { id: file.id, path, print: prints.print });
             }
         }
     }

@@ -504,10 +504,10 @@ fn find_and_relink(c: &Catalog, near: Option<&Path>) -> Vec<i64> {
     let photo_folder = c.photo_folder().unwrap();
     let roots = search_roots(&missing, near, photo_folder.as_deref());
     let found = find_moved(&missing, &roots);
-    for (id, path) in &found {
-        c.relink(*id, path).unwrap();
+    for file in &found {
+        c.relink_to(file.id, &file.path, &file.print).unwrap();
     }
-    found.into_iter().map(|(id, _)| id).collect()
+    found.into_iter().map(|file| file.id).collect()
 }
 
 #[test]
@@ -673,4 +673,41 @@ fn deleting_gear_in_use_is_all_or_nothing() {
     let roll = c.rolls().unwrap().remove(0);
     assert_eq!(roll.gear.camera, Some(camera.id));
     assert_eq!(roll.info, json!({}));
+}
+
+#[test]
+fn a_missing_image_with_an_older_fingerprint_is_known_by_its_file() {
+    let scratch = Scratch::new();
+    let path = scratch.image("old/01.png", 1);
+    let id = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        c.import(&[path.clone()], loose(library.id), false).unwrap().images[0].id
+    };
+    set_stored_fingerprint(&scratch, id, &legacy_fingerprint(&path));
+    std::fs::create_dir_all(scratch.path("sorted")).unwrap();
+    std::fs::rename(&path, scratch.path("sorted/01.png")).unwrap();
+
+    let c = catalog(&scratch);
+    let moved = scratch.path("sorted/01.png");
+    assert_eq!(c.find_by_file(&moved).unwrap(), Some(id));
+    let library = c.libraries().unwrap()[0].id;
+    assert!(c.import(&[moved], loose(library), false).unwrap().images.is_empty());
+}
+
+#[test]
+fn deleting_gear_clears_it_from_a_roll_whose_information_is_not_an_object() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let roll = c.create_roll(library.id, "Roll 1").unwrap();
+    let camera = c
+        .create_gear(&GearFields { kind: "camera".into(), maker: "Hasselblad".into(), name: "500C/M".into(), details: GearDetails::default() })
+        .unwrap();
+    c.update_roll(roll.id, &roll.name, &json!(null), None, &RollGear { camera: Some(camera.id), ..RollGear::default() }).unwrap();
+
+    c.delete_gear(camera.id).unwrap();
+    let roll = c.rolls().unwrap().remove(0);
+    assert_eq!(roll.gear.camera, None);
+    assert_eq!(roll.info["camera"], "Hasselblad 500C/M");
 }
