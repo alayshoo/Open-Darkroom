@@ -4,6 +4,29 @@ All notable changes to Open Darkroom are listed here, newest first. Each release
 
 Versions follow [semantic versioning](https://semver.org): major for big or breaking changes, minor for new features, patch for fixes only.
 
+## [1.4.0] - 2026-11-14
+
+### Added
+- A library, which the app now opens on. Libraries and their rolls sit in the catalog down the side, with a roll's frames or a library's loose images in a grid and the roll's details beside it. Files can stay where they are or be copied into a photo folder.
+- Import files or whole folders in one go. A folder becomes a roll, and files already in the catalog are skipped.
+- Edits save as you make them and come back when you reopen an image, along with its undo history.
+- Moved or renamed files are found again on their own, and you can point a missing file at its new location by hand.
+- Rolls drawn as 35mm canisters in their film stock's colours.
+- Film stocks in Settings, grouped by maker and seeded with common Kodak, Fujifilm, CineStill, Ilford, Kentmere, Harman and Lomography stocks. A roll's film stock field searches them and fills in the box speed.
+- Gear in Settings: cameras, lenses, scanners, chemistry setups and labs. A roll picks its camera, lenses (those that fit the camera's mount), scanner and its lab or home development, and new gear can be set up straight from a roll.
+- Roll details for the shot date range, push or pull, dilution, time and temperature, and notes on each frame. A frame dated outside its roll's dates is pointed out.
+- Rename libraries, rolls and film makers by double-clicking them.
+- A setting to show a library as one grid of all its images, and a button to hide the details panel.
+- Opening an image fades the editor in over the library, and an arrow above the crop tool takes you back.
+- Settings > Debug > Logs shows the log file, copies diagnostics for a bug report and turns on verbose logging. Crash logs are kept.
+
+### Changed
+- Opening the app a second time brings the open window forward instead of starting another copy.
+- Closing the window saves any changes still waiting to be written.
+
+### Fixed
+- A rare crash while the histograms were being worked out.
+
 ## [1.3.0] - 2026-11-09
 
 ### Added
@@ -73,6 +96,7 @@ The first release.
 - Export to TIFF, PNG, JPEG and WebP in sRGB, Display P3, Adobe RGB or Rec. 2020, with the ICC profile embedded.
 - Windows `.msi` and universal macOS `.dmg` installers.
 
+[1.4.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/alayshoo/Open-Darkroom/compare/v1.0.1...v1.1.0

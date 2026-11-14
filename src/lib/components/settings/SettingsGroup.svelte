@@ -6,17 +6,22 @@
 
     let {
         title,
+        heading,
         note,
         children,
     }: {
         title?: string;
+        /** Drawn in the title's place, for a title that does more than read. */
+        heading?: Snippet;
         note?: string;
         children: Snippet;
     } = $props();
 </script>
 
 <section class="group flex flex-col">
-    {#if title}
+    {#if heading}
+        <h3 class="group-title m-0 mb-1">{@render heading()}</h3>
+    {:else if title}
         <h3 class="group-title m-0 mb-1">{title}</h3>
     {/if}
     <div class="rows flex flex-col rounded-[10px] overflow-hidden">

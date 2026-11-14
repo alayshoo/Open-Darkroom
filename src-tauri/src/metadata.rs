@@ -14,11 +14,11 @@ use rawler::formats::tiff::{GenericTiffReader, Rational, Value, IFD};
 use rawler::formats::tiff::reader::TiffReader;
 use rawler::rawsource::RawSource;
 use rawler::tags::TiffCommonTag;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Each field is None when the file does not say.
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct ImageMetadata {
     pub file_name: String,
     pub make: Option<String>,

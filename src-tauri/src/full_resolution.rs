@@ -104,6 +104,10 @@ impl FullResolution {
                 match held.as_ref().filter(|f| f.max_edge == max_edge) {
                     Some(f) => Arc::clone(f),
                     None => {
+                        log::warn!(
+                            "{width}×{height} is past the GPU's {max_edge}px texture limit, \
+                             served at {served_w}×{served_h}"
+                        );
                         let f = Arc::new(fit(src, width, height, channels, space, baker, max_edge)?);
                         *held = Some(Arc::clone(&f));
                         f

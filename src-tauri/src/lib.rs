@@ -16,25 +16,58 @@ pub mod shaders;
 pub mod export_encoding;
 pub mod export_progress;
 pub mod jxl_encoding;
+pub mod catalog;
+pub mod thumbnails;
+mod catalog_commands;
 pub mod exif_writing;
 pub mod export_size;
 pub mod export;
+mod logging;
 mod presets;
 
 use image_opening::ImageState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::install_panic_hook();
+    let mut context = tauri::generate_context!();
+    // Debug builds keep their own app data, apart from an installed copy's.
+    if cfg!(debug_assertions) {
+        context.config_mut().identifier.push_str(".dev");
+    }
+
     tauri::Builder::default()
+        // Registered first: a second launch hands over to the running copy
+        // before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("Another launch was handed to this window");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(ImageState::new(None))
+        .manage(catalog_commands::CatalogState::new(None))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .setup(|app| {
+            logging::init(app.handle());
+            app.manage(logging::begin_session(app.handle()));
+            // The editor still works without a catalog, so a failure is reported rather than fatal.
+            match catalog_commands::open_catalog(app.handle()) {
+                Ok(catalog) => *app.state::<catalog_commands::CatalogState>().lock().unwrap() = Some(catalog),
+                Err(e) => log::error!("The catalog could not be opened: {e}"),
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             wrap_cursor,
             grab_cursor,
-            image_opening::open_image_file,
+            image_opening::open_image_path,
             image_opening::crop_histograms,
             image_opening::image_metadata,
             full_resolution::full_resolution_rows,
@@ -46,9 +79,45 @@ pub fn run() {
             export::export_output_size,
             presets::export_preset,
             presets::import_presets,
+            catalog_commands::catalog_load,
+            catalog_commands::catalog_create_library,
+            catalog_commands::catalog_rename_library,
+            catalog_commands::catalog_delete_library,
+            catalog_commands::catalog_create_roll,
+            catalog_commands::catalog_update_roll,
+            catalog_commands::catalog_delete_roll,
+            catalog_commands::catalog_create_stock,
+            catalog_commands::catalog_update_stock,
+            catalog_commands::catalog_delete_stock,
+            catalog_commands::catalog_create_gear,
+            catalog_commands::catalog_update_gear,
+            catalog_commands::catalog_delete_gear,
+            catalog_commands::catalog_import_files,
+            catalog_commands::catalog_import_folder,
+            catalog_commands::catalog_open_file,
+            catalog_commands::catalog_move_images,
+            catalog_commands::catalog_remove_images,
+            catalog_commands::catalog_set_frame_info,
+            catalog_commands::catalog_locate,
+            catalog_commands::catalog_edit,
+            catalog_commands::catalog_edit_history,
+            catalog_commands::catalog_find_moved,
+            catalog_commands::catalog_save_edit,
+            catalog_commands::catalog_choose_photo_folder,
+            catalog_commands::catalog_thumbnail,
+            catalog_commands::catalog_render_thumbnail,
+            logging::logging_status,
+            logging::set_verbose_logging,
+            logging::reveal_log_file,
+            logging::diagnostics,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                logging::end_session(app);
+            }
+        });
 }
 
 

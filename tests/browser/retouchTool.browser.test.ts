@@ -17,6 +17,7 @@ import { initializeGPU } from "$lib/gpu/gpuInit";
 import { history } from "$lib/history/history.svelte";
 import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import type { GPUSession } from "$lib/types/gpuTypes";
+import { catalogCommand } from "./catalogStub";
 
 const SIZE = 256;
 const HIST_BYTES = 3 * 256 * 4;
@@ -43,7 +44,8 @@ function stubTauri() {
     let callback = 0;
     (window as any).__TAURI_INTERNALS__ = {
         invoke: async (cmd: string, args?: { retouch?: unknown[] }) => {
-            if (cmd === "open_image_file") return openPayload();
+            const catalog = catalogCommand(cmd, openPayload);
+            if (catalog !== undefined) return catalog;
             if (cmd === "crop_histograms") {
                 binned.push(args?.retouch?.length ?? 0);
                 return new ArrayBuffer(HIST_BYTES);

@@ -1,6 +1,6 @@
 [package]
 name = "open-darkroom"
-version = "1.3.0"
+version = "1.4.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -39,6 +39,12 @@ lcms2 = { version = "6.2.0", features = ["static"] }
 rawler = "0.8"
 jxl-sys = "0.1.12"
 png = "0.18"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tauri-plugin-log = "2"
+log = "0.4"
+os_info = "3"
+time = { version = "0.3", features = ["formatting", "macros"] }
+tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
 jxl-oxide = { version = "0.12.6", features = ["lcms2"] }

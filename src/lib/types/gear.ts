@@ -1,0 +1,76 @@
+// $lib/types/gear.ts
+//
+// Cameras, lenses, scanners, chemistry and labs as the catalog keeps them.
+// Must match GearFields and RollGear in catalog/gear.rs.
+
+import type { StockProcess } from "./filmStock";
+
+export type GearKind = "camera" | "lens" | "scanner" | "chemistry" | "lab";
+
+export interface GearFields {
+    kind: GearKind;
+    maker: string;
+    name: string;
+    /** Cameras and lenses: a roll on a camera is offered only the lenses that fit it. */
+    mount: string;
+    /** Cameras. */
+    formats: string[];
+    /** Chemistry. */
+    process: StockProcess | "";
+    /** Labs. */
+    location: string;
+}
+
+export interface Gear extends GearFields {
+    id: number;
+}
+
+/** The gear a roll was shot, developed and scanned with, by id. */
+export interface RollGear {
+    camera: number | null;
+    lenses: number[];
+    scanner: number | null;
+    chemistry: number | null;
+    lab: number | null;
+}
+
+export const NO_ROLL_GEAR: RollGear = { camera: null, lenses: [], scanner: null, chemistry: null, lab: null };
+
+/** A roll's gear that is one piece, by the roll field that names it when the catalog does not know it. */
+export const GEAR_SLOTS = { camera: "camera", scanner: "scanner", chemistry: "developer", lab: "lab" } as const;
+export type GearSlot = keyof typeof GEAR_SLOTS;
+
+export const GEAR_KINDS: { kind: GearKind; title: string; one: string; placeholder: string }[] = [
+    { kind: "camera", title: "Cameras", one: "camera", placeholder: "FM2" },
+    { kind: "lens", title: "Lenses", one: "lens", placeholder: "Nikkor 50mm f/1.8 AI-s" },
+    { kind: "scanner", title: "Scanners", one: "scanner", placeholder: "Flextight X1" },
+    { kind: "chemistry", title: "Chemistry setups", one: "chemistry setup", placeholder: "Rodinal" },
+    { kind: "lab", title: "Labs", one: "lab", placeholder: "Carmencita Film Lab" },
+];
+
+/** How a roll names it: the maker, then the model. Must match GearFields::label. */
+export function gearLabel(gear: Pick<GearFields, "maker" | "name">): string {
+    return gear.maker ? `${gear.maker} ${gear.name}` : gear.name;
+}
+
+/** Whether it matches what is typed into a picker, by maker and name. */
+export function matchesGear(gear: GearFields, query: string): boolean {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const label = gearLabel(gear).toLowerCase();
+    return words.every((w) => label.includes(w));
+}
+
+export function newGear(kind: GearKind, name = ""): GearFields {
+    return { kind, maker: "", name: name.trim(), mount: "", formats: [], process: "", location: "" };
+}
+
+/** One line under its name: what sets it apart from the others of its kind. */
+export function gearSummary(gear: GearFields): string {
+    const parts =
+        gear.kind === "chemistry"
+            ? [gear.process]
+            : gear.kind === "lab"
+              ? [gear.location]
+              : [gear.mount && `${gear.mount} mount`, gear.formats.join(", ")];
+    return parts.filter(Boolean).join(" · ");
+}

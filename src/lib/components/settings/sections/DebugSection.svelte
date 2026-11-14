@@ -3,18 +3,55 @@
     import SettingsGroup from "../SettingsGroup.svelte";
     import SettingsRow from "../SettingsRow.svelte";
     import SettingsToggle from "../SettingsToggle.svelte";
+    import GlassButton from "$lib/components/inputs/GlassButton.svelte";
 
-    import { getContext } from "svelte";
+    import { getContext, onMount } from "svelte";
     import { settings } from "$lib/settings/settings.svelte";
     import { debugStats } from "$lib/gpu/debugStats.svelte";
     import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
     import { WORKING_FORMAT, type GPUSession } from "$lib/types/gpuTypes";
+    import { createLogger } from "$lib/utils/log";
+    import {
+        copyDiagnostics,
+        loggingStatus,
+        revealLogFile,
+        type LoggingStatus,
+    } from "$lib/utils/diagnostics";
+
+    const log = createLogger("settings");
 
     // The layout shares a getter rather than the session itself, so reading it
     // through a derived keeps the panel right even when it is opened before the
     // device has finished initialising.
     const session = getContext<() => GPUSession | null>("gpu");
     let gpu = $derived(session());
+
+    let logs = $state<LoggingStatus | null>(null);
+    let copied = $state(false);
+    let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+    onMount(() => {
+        loggingStatus()
+            .then((status) => (logs = status))
+            .catch((e) => log.warn("Failed to read the logging status", e));
+        return () => clearTimeout(copiedTimer);
+    });
+
+    function showLogFile() {
+        revealLogFile().catch((e) => log.error("Failed to show the log file", e));
+    }
+
+    async function copyReport() {
+        try {
+            await copyDiagnostics(gpu);
+        } catch (e) {
+            log.error("Failed to copy the diagnostics", e);
+            return;
+        }
+        copied = true;
+        clearTimeout(copiedTimer);
+        copiedTimer = setTimeout(() => (copied = false), 1500);
+    }
 
     /* The master switch owns what it switches off: the overlays keep their own
        state, and the histogram's is invisible once the tools are hidden. */
@@ -85,6 +122,68 @@
                 checked={settings.debugTools}
                 label="Toggle debug tools"
                 onclick={toggleDebugTools}
+            />
+        </SettingsRow>
+    </SettingsGroup>
+
+    <SettingsGroup
+        title="Logs"
+        note={logs ? `Kept in ${logs.folder}` : undefined}
+    >
+        {#if logs?.previousSessionUnclean}
+            <SettingsRow
+                label="Last session"
+                description="It did not shut down cleanly. The diagnostics include its log."
+                value="ended unexpectedly"
+            />
+        {/if}
+        <SettingsRow
+            label="Log file"
+            description="Shows this session's log in the file manager."
+        >
+            <GlassButton label="Show log file" size={24} onclick={showLogFile}>
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path
+                        d="M5.5 8v8.5h13V9.8h-6.3L10.7 8z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                        stroke-linejoin="round"
+                    />
+                </svg>
+            </GlassButton>
+        </SettingsRow>
+        <SettingsRow
+            label="Copy diagnostics"
+            description="System details and the recent log, ready to paste into a bug report."
+        >
+            <GlassButton
+                label={copied ? "Diagnostics copied" : "Copy diagnostics"}
+                size={24}
+                onclick={copyReport}
+            >
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path
+                        d={copied
+                            ? "M8.3 12.4l2.5 2.5 4.9-5"
+                            : "M9.5 9.5h7v7h-7zM7.5 14.5v-7h7"}
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    />
+                </svg>
+            </GlassButton>
+        </SettingsRow>
+        <SettingsRow
+            label="Verbose logging"
+            description="Also records timings and step-by-step detail. Turn on when asked for a detailed log."
+        >
+            <SettingsToggle
+                checked={settings.verboseLogging}
+                label="Toggle verbose logging"
+                onclick={() => (settings.verboseLogging = !settings.verboseLogging)}
             />
         </SettingsRow>
     </SettingsGroup>

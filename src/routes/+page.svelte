@@ -1,21 +1,66 @@
 <!-- routes/+page.svelte -->
 <script lang="ts">
+    import { onMount } from "svelte";
+    import { getCurrentWindow } from "@tauri-apps/api/window";
     import TitleBar from "$lib/components/window/TitleBar.svelte";
     import Editor from "$lib/components/editor/Editor.svelte";
+    import Library from "$lib/components/library/Library.svelte";
     import { editor } from "$lib/editor/editor.svelte";
+    import { library } from "$lib/library/library.svelte";
     import { settings } from "$lib/settings/settings.svelte";
     import { exportDialog } from "$lib/export/exportDialog.svelte";
+
+    let editing = $derived(library.showing === "editor");
+    const inEditor = (action: () => void) => () => {
+        if (editing) action();
+    };
+
+    // How long closing the window waits for changes still to be saved.
+    const CLOSE_SAVE_WAIT_MS = 2000;
+
+    onMount(() => {
+        void library.load();
+        const closing = getCurrentWindow().onCloseRequested(async () => {
+            await Promise.race([library.flushAll(), new Promise((resolve) => setTimeout(resolve, CLOSE_SAVE_WAIT_MS))]);
+        });
+        return () => void closing.then((unlisten) => unlisten());
+    });
 </script>
 
 <TitleBar
-    undo={editor.undo}
-    redo={editor.redo}
-    open={editor.open}
-    exportImage={exportDialog.show}
-    copyAdjustments={editor.copyAdjustments}
-    pasteAdjustments={editor.pasteAdjustments}
-    resetAdjustments={editor.resetAdjustments}
+    undo={inEditor(editor.undo)}
+    redo={inEditor(editor.redo)}
+    open={library.openFile}
+    importFiles={library.importFiles}
+    importFolder={library.importFolder}
+    toggleLibrary={library.toggleView}
+    exportImage={inEditor(exportDialog.show)}
+    {editing}
+    copyAdjustments={inEditor(editor.copyAdjustments)}
+    pasteAdjustments={inEditor(editor.pasteAdjustments)}
+    resetAdjustments={inEditor(editor.resetAdjustments)}
     openSettings={(section) => settings.show(section)}
     busy={exportDialog.open || exportDialog.busy}
 ></TitleBar>
-<Editor />
+<Library active={!editing} />
+<!-- Kept mounted while the library is up, so going back to the image is instant. -->
+<div class="editor-layer" class:away={!editing}>
+    <Editor active={editing} canvasHidden={library.canvasHidden} />
+</div>
+
+<style>
+    /* The window's size, so the editor lays out as it would on its own. Clicks
+       fall through to the library wherever the editor does not take them. */
+    .editor-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+    }
+
+    /* Out of sight once the side bars have slid off and the image has faded. */
+    .editor-layer.away {
+        visibility: hidden;
+        transition: visibility 0s linear 0.4s;
+    }
+</style>
