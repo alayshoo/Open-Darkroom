@@ -25,6 +25,12 @@ use image_opening::ImageState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    // Debug builds keep their own app data, apart from an installed copy's.
+    if cfg!(debug_assertions) {
+        context.config_mut().identifier.push_str(".dev");
+    }
+
     tauri::Builder::default()
         .manage(ImageState::new(None))
         .plugin(tauri_plugin_opener::init())
@@ -47,7 +53,7 @@ pub fn run() {
             presets::export_preset,
             presets::import_presets,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 
