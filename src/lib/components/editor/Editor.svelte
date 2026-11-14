@@ -169,6 +169,7 @@
 <div class="app-shell flex absolute flex-row gap-3" class:away={!active} class:canvas-hidden={canvasHidden} inert={!active}>
     <div class="chrome-scrim" class:shifted={panelOpen}>
         <div class="scrim-fill"></div>
+        <div class="scrim-grain"></div>
     </div>
     <RetouchBar open={editor.isRetouching} ready={editor.retouchReady} strokes={editor.edit.retouch.length} onclear={editor.clearRetouch} />
     <div class="panel-column shrink-0" class:open={panelOpen} inert={!panelOpen}>
@@ -368,6 +369,19 @@
             var(--scrimStrength) * 1.35 - var(--scrimStrength) * var(--scrimStrength) * 0.35
         );
         transition: opacity 0.5s ease;
+    }
+
+    /* A level of noise either way over the bands, so their 8-bit steps do not show. */
+    .scrim-grain {
+        position: absolute;
+        inset: 0;
+        background: url("/grain.png") 0 0 / 64px 64px repeat;
+        image-rendering: pixelated;
+        --grain-mask: linear-gradient(black 143px, transparent 191px),
+            linear-gradient(to right, black 179px, transparent 227px),
+            radial-gradient(310px 250px at 0 0, black 80%, transparent);
+        -webkit-mask: var(--grain-mask);
+        mask: var(--grain-mask);
     }
 
     .chrome-scrim::before,

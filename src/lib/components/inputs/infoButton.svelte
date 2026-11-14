@@ -20,13 +20,13 @@
 		{disabled}
 		onclick={() => ontoggle?.()}
 	>
-		<!-- On the crop icon's padded view box, sized to the 1:1 label below it. -->
+		<!-- On the crop icon's padded view box, sized near the 1:1 label below it. -->
 		<svg width="40" height="40" viewBox="-3 -3 30 30">
 			<g fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round">
-				<circle cx="12" cy="12" r="4.15" />
-				<path d="M12 11.75V13.9" />
+				<circle cx="12" cy="12" r="5.5" />
+				<path d="M12 11.3V14.9" />
 			</g>
-			<circle cx="12" cy="9.95" r="0.55" fill="currentColor" />
+			<circle cx="12" cy="9.4" r="0.65" fill="currentColor" />
 		</svg>
 	</GlassButton>
 </div>
