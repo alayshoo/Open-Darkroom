@@ -14,6 +14,9 @@
  */
 
 import { load, type Store } from "@tauri-apps/plugin-store";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("settings");
 
 /** Sits next to the identifier's other per-user data. */
 export const SETTINGS_FILE = "settings.json";
@@ -24,6 +27,14 @@ export const SETTINGS_FILE = "settings.json";
  */
 export const DEFAULTS = {
     debugTools: import.meta.env.DEV,
+    /** Imports copy files into the photo folder rather than referencing them where they are. */
+    importCopies: false,
+    /** Whether the library shows its details panel on the right. */
+    libraryDetails: true,
+    /** A library shows its rolls as cards above its loose images, rather than every image in one grid. */
+    groupRolls: true,
+    /** Keeps debug lines in the log file of a release build. */
+    verboseLogging: false,
     /**
      * Rebound keyboard shortcuts, keyed by action id — only the actions the
      * user has actually changed. The reader below can vouch for the type and
@@ -53,7 +64,7 @@ function store() {
  * defaults rather than taking the app down with them.
  */
 function unavailable(error: unknown) {
-    console.warn(`Settings could not reach ${SETTINGS_FILE}:`, error);
+    log.warn(`Settings could not reach ${SETTINGS_FILE}`, error);
     opening = null;
 }
 

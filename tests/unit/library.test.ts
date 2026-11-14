@@ -1,0 +1,35 @@
+// tests/unit/library.test.ts
+//
+// The pure parts of the library: how a roll is summed up, what a frame field
+// offers before anything is logged.
+
+import { describe, expect, it } from "vitest";
+
+import { framePlaceholder, rollSummary } from "$lib/types/rollInfo";
+import type { ImageMetadata } from "$lib/types/imageMetadata";
+
+const meta: ImageMetadata = {
+    fileName: "a.tif", make: null, model: null, lens: null, focalLength: null,
+    aperture: 5.6, exposureTime: [1, 250], iso: null, exposureBias: null, dateTaken: null,
+};
+
+describe("rollSummary", () => {
+    it("names the stock and format, and the speed only when it was not shot at box", () => {
+        expect(rollSummary({})).toBe("");
+        expect(rollSummary({ filmStock: "Kodak Portra 400", format: "35mm", boxIso: "400", ratedIso: "400" })).toBe(
+            "Kodak Portra 400 · 35mm",
+        );
+        expect(rollSummary({ filmStock: "Ilford HP5 Plus", boxIso: "400", ratedIso: "1600", pushPull: "+2" })).toBe(
+            "Ilford HP5 Plus · @ 1600 · +2",
+        );
+    });
+});
+
+describe("framePlaceholder", () => {
+    it("offers what the file recorded, and falls back to an example", () => {
+        expect(framePlaceholder("aperture", meta)).toBe("f/5.6");
+        expect(framePlaceholder("shutter", meta)).toBe("1/250 s");
+        expect(framePlaceholder("aperture", null)).toBe("f/8");
+        expect(framePlaceholder("location", meta)).toBeUndefined();
+    });
+});

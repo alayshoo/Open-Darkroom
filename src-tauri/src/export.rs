@@ -63,11 +63,12 @@ pub(crate) async fn export_image(
     metadata: bool,
 ) -> Result<(), String> {
     let path = destination_path(&destination, settings.format)?;
-    println!(
-        "export_image: {:?}, {:?}, {:?} → {}",
-        settings.format,
-        settings.output_space,
+    log::info!(
+        "Exporting {:?} at {:?}, metadata {}, {} retouch strokes → {}",
+        settings,
         size,
+        if metadata { "kept" } else { "dropped" },
+        retouch.len(),
         path.display()
     );
 
@@ -133,10 +134,7 @@ pub(crate) async fn export_image(
     )
     .await?;
 
-    println!(
-        "export: GPU render done in {} ms, encoding…",
-        t.elapsed().as_millis()
-    );
+    log::debug!("GPU render done in {} ms, encoding", t.elapsed().as_millis());
 
     send(plan.encoding(measurable || resizing));
     // Resizing and encoding are CPU-bound and can run for minutes, so they
@@ -167,8 +165,8 @@ pub(crate) async fn export_image(
     .await
     .map_err(|e| e.to_string())??;
 
-    println!(
-        "export: saved {} × {} → {} in {} ms total",
+    log::info!(
+        "Exported {}×{} → {} in {} ms",
         output.0,
         output.1,
         path.display(),

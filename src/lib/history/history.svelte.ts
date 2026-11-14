@@ -36,6 +36,12 @@ class History {
     this.pointer -= removedBefore;
   }
 
+  /** Takes on a history read back with an edit. */
+  restore(stack: Action[], pointer: number) {
+    this.stack = [...stack];
+    this.pointer = pointer;
+  }
+
   clear() {
     this.stack = [];
     this.pointer = -1;

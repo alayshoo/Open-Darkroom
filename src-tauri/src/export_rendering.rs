@@ -522,9 +522,9 @@ pub async fn request_device(label: &'static str) -> Result<(wgpu::Device, wgpu::
         .map_err(|e| format!("No GPU adapter found: {e}"))?;
 
     let info = adapter.get_info();
-    println!("{label}: adapter = {} ({:?})", info.name, info.backend);
+    log::info!("{label}: adapter {} ({:?}, driver {} {})", info.name, info.backend, info.driver, info.driver_info);
 
-    adapter
+    let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some(label),
             required_features: wgpu::Features::empty(),
@@ -533,7 +533,12 @@ pub async fn request_device(label: &'static str) -> Result<(wgpu::Device, wgpu::
             trace: wgpu::Trace::Off,
         })
         .await
-        .map_err(|e| format!("GPU device creation failed: {e}"))
+        .map_err(|e| format!("GPU device creation failed: {e}"))?;
+    device.set_device_lost_callback(move |reason, message| match reason {
+        wgpu::DeviceLostReason::Destroyed => log::debug!("{label}: device destroyed"),
+        _ => log::error!("{label}: GPU device lost ({reason:?}): {message}"),
+    });
+    Ok((device, queue))
 }
 
 /// Run the GPU pipeline on the full image and return raw RGB bytes (no alpha).
@@ -669,6 +674,31 @@ pub async fn render_cropped_with_chunk_rows(
     output: OutputSpace,
     bit_depth: u8,
     chunk_rows: u32,
+    on_progress: impl Fn(f32) + Send + Sync,
+) -> Result<RenderedImage, String> {
+    let view = ViewPayload { render_scale: 1.0, full_width: width as f32, full_height: height as f32 };
+    render_cropped_in_view(
+        pixels_u16, width, height, channels, sliders, crop, retouch, space, output, bit_depth, chunk_rows, view, on_progress,
+    )
+    .await
+}
+
+/// [`render_cropped_with_chunk_rows`] of a source that stands for a larger
+/// image, such as a thumbnail's, so sliders measured in pixels keep their size.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_cropped_in_view(
+    pixels_u16: &[u16],
+    width: u32,
+    height: u32,
+    channels: usize,
+    sliders: &SlidersPayload,
+    crop: &CropPayload,
+    retouch: &[RetouchPayload],
+    space: &SourceSpace,
+    output: OutputSpace,
+    bit_depth: u8,
+    chunk_rows: u32,
+    view: ViewPayload,
     on_progress: impl Fn(f32) + Send + Sync,
 ) -> Result<RenderedImage, String> {
     let t = Instant::now();
@@ -831,15 +861,10 @@ pub async fn render_cropped_with_chunk_rows(
             cache: None,
         });
 
-    // Export renders at full resolution, so the scale is 1; the dimensions are
-    // the whole image, not the chunk.
+    // The dimensions are the whole image's, not the chunk's.
     let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("view_buf"),
-        contents: &view_to_bytes(&ViewPayload {
-            render_scale: 1.0,
-            full_width: width as f32,
-            full_height: height as f32,
-        }),
+        contents: &view_to_bytes(&view),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -1476,8 +1501,8 @@ pub async fn render_cropped_with_chunk_rows(
         let progress = row_end as f32 / out_height as f32;
         on_progress(progress);
 
-        println!(
-            "export: rendered rows {}-{} / {} ({:.0}%) in {} ms total",
+        log::debug!(
+            "Rendered rows {}-{} / {} ({:.0}%) in {} ms total",
             row_start - chunk_height,
             row_end,
             out_height,

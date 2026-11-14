@@ -14,6 +14,9 @@ import {
     parsePreset,
     serializePreset,
 } from "./presetDocument";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("presets");
 
 export const PRESETS_FILE = "presets.json";
 const PRESETS_KEY = "presets";
@@ -44,7 +47,7 @@ class Presets {
         try {
             documents = await (await store()).get(PRESETS_KEY);
         } catch (error) {
-            console.warn(`Presets could not reach ${PRESETS_FILE}:`, error);
+            log.warn(`Presets could not reach ${PRESETS_FILE}`, error);
             opening = null;
             return;
         }
@@ -56,7 +59,7 @@ class Presets {
             try {
                 loaded.push(withId(parsePreset(document)));
             } catch (error) {
-                console.warn("Skipped an unreadable preset:", error);
+                log.warn("Skipped an unreadable preset", error);
             }
         }
         // Anything added before the file was read stays, after what it held.
@@ -70,7 +73,7 @@ class Presets {
             await file.set(PRESETS_KEY, documents);
             await file.save();
         } catch (error) {
-            console.warn(`Presets could not be written to ${PRESETS_FILE}:`, error);
+            log.warn(`Presets could not be written to ${PRESETS_FILE}`, error);
             opening = null;
         }
     }
@@ -111,7 +114,7 @@ class Presets {
             try {
                 this.add(parsePreset(file.contents, file.name));
             } catch (error) {
-                console.warn(`Could not import ${file.name}:`, error);
+                log.warn(`Could not import ${file.name}`, error);
                 failed++;
             }
         }

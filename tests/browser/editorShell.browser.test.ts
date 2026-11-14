@@ -21,6 +21,7 @@ import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import { FULL_FRAME } from "$lib/types/crop";
 import type { GPUSession } from "$lib/types/gpuTypes";
 import type { ImageMetadata } from "$lib/types/imageMetadata";
+import { catalogCommand } from "./catalogStub";
 
 const SIZE = 8;
 const HIST_BYTES = 3 * 256 * 4;
@@ -83,7 +84,8 @@ function stubTauri() {
     let callback = 0;
     (window as any).__TAURI_INTERNALS__ = {
         invoke: async (cmd: string, args: any) => {
-            if (cmd === "open_image_file") return openPayload();
+            const catalog = catalogCommand(cmd, openPayload);
+            if (catalog !== undefined) return catalog;
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);
             if (cmd === "crop_histograms") return new ArrayBuffer(HIST_BYTES);
             if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
