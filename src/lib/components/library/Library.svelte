@@ -16,6 +16,9 @@
 
     let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
+    // The welcome screen has no details to show and no toggle for the panel.
+    let detailsOpen = $derived(!!library.view && settings.libraryDetails);
+
     let title = $derived(library.currentRoll?.name ?? library.currentLibrary?.name ?? "");
     let subtitle = $derived.by(() => {
         if (library.currentRoll) {
@@ -246,7 +249,7 @@
             {/if}
         </main>
 
-        <div class="details-column shrink-0" class:closed={!settings.libraryDetails} inert={!settings.libraryDetails}>
+        <div class="details-column shrink-0" class:closed={!detailsOpen} inert={!detailsOpen}>
             <div class="details-slide h-full">
                 <DetailsPanel />
             </div>
