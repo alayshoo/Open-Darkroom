@@ -6,6 +6,8 @@
     import PresetsButton from "$lib/components/inputs/presetsButton.svelte";
     import ZoomButton from "$lib/components/inputs/zoomButton.svelte";
     import InfoButton from "$lib/components/inputs/infoButton.svelte";
+    import BackButton from "$lib/components/inputs/backButton.svelte";
+    import { library } from "$lib/library/library.svelte";
     import { loupe } from "$lib/gpu/loupe.svelte";
     import { presets } from "$lib/presets/presets.svelte";
     import { isFullFrame } from "$lib/types/crop";
@@ -15,6 +17,9 @@
 <!-- The empty parts of the icon column drag the window; Tauri matches the
      attribute on the event target alone, so the buttons are unaffected. -->
 <div data-tauri-drag-region class="toolbar shrink-0">
+    <div data-tauri-drag-region class="toolbar-back flex flex-col items-center">
+        <BackButton disabled={!library.canLeave} onclick={library.showLibrary} />
+    </div>
     <div
         data-tauri-drag-region
         class="toolbar-tools relative flex flex-col items-center"
@@ -72,9 +77,15 @@
         pointer-events: auto;
     }
 
+    /* Apart from the tools below it: it leaves the image rather than acting on it. */
+    .toolbar-back {
+        padding-top: 50px;
+        padding-right: 6px;
+        padding-bottom: 10px;
+    }
+
     .toolbar-tools {
         transition: opacity 0.2s ease;
-        padding-top: 50px;
         padding-right: 6px;
         gap: 4px;
         z-index: 1;

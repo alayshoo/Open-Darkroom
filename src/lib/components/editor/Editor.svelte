@@ -25,9 +25,20 @@
     import { editor } from "$lib/editor/editor.svelte";
     import EditorToolbar from "./EditorToolbar.svelte";
     import EditorSideBar from "./EditorSideBar.svelte";
+    import { library } from "$lib/library/library.svelte";
+
+    let {
+        active = true,
+        canvasHidden = false,
+    }: {
+        /** On screen and taking the keyboard. Off, the side bars slide away to the window edges. */
+        active?: boolean;
+        /** Holds the image back, out of focus, until it has been drawn. */
+        canvasHidden?: boolean;
+    } = $props();
 
     $effect(() => {
-        document.documentElement.dataset.theme = editor.isDarkroom ? "darkroom" : "";
+        document.documentElement.dataset.theme = active && editor.isDarkroom ? "darkroom" : "";
     });
 
     $effect(() => holdPageZoom());
@@ -51,7 +62,8 @@
             undo: editor.undo,
             redo: editor.redo,
             changeMode: editor.toggleMode,
-            openImage: editor.open,
+            openImage: library.openFile,
+            showLibrary: library.toggleView,
             exportImage: exportDialog.show,
             toggleInfo: editor.toggleInfo,
             copyAdjustments: editor.copyAdjustments,
@@ -93,6 +105,8 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
+        // A key the library already answered, such as the one that opened the editor.
+        if (!active || e.defaultPrevented) return;
         // Nothing but the window itself answers while the save dialog is up or an
         // export runs, bar Escape and Enter dismissing a failed export.
         if (exportDialog.busy && !exportDialog.open) {
@@ -151,10 +165,11 @@
 <!-- Full-window canvas background. The image is centred on .canvas-slot but is
      free to spill out of it in every direction once zoomed; the toolbar and
      side bar sit on a higher layer and simply paint over the overflow. -->
-<div class="canvas-backdrop"></div>
-<div class="app-shell flex absolute flex-row gap-3">
+<div class="canvas-backdrop" class:away={!active}></div>
+<div class="app-shell flex absolute flex-row gap-3" class:away={!active} class:canvas-hidden={canvasHidden} inert={!active}>
     <div class="chrome-scrim" class:shifted={panelOpen}>
         <div class="scrim-fill"></div>
+        <div class="scrim-grain"></div>
     </div>
     <RetouchBar open={editor.isRetouching} ready={editor.retouchReady} strokes={editor.edit.retouch.length} onclear={editor.clearRetouch} />
     <div class="panel-column shrink-0" class:open={panelOpen} inert={!panelOpen}>
@@ -240,8 +255,52 @@
         position: fixed;
         inset: 0;
         background: var(--canvasBackdrop);
-        transition: background-color 0.12s ease;
+        transition:
+            background-color 0.12s ease,
+            opacity 0.35s ease;
         z-index: 0;
+    }
+
+    .canvas-backdrop.away {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* Away, the chrome slides off to the window edges, and back in on return. */
+    .app-shell :global(.toolbar) {
+        transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .app-shell.away :global(.toolbar),
+    .app-shell.away .panel-column {
+        transform: translateX(calc(-100% - var(--panel-width) - 48px));
+        transition: transform 0.35s cubic-bezier(0.4, 0, 1, 1);
+    }
+
+    .app-shell.away :global(.side-bar) {
+        transform: translateX(calc(100% + 52px));
+        transition: transform 0.35s cubic-bezier(0.4, 0, 1, 1);
+    }
+
+    .app-shell.away .chrome-scrim {
+        opacity: 0;
+        transition: opacity 0.25s ease;
+    }
+
+    /* The image fades and blurs out with the backdrop, and comes back into focus.
+       The blur sits on the canvas itself: a filter on an ancestor would move it, as it is fixed. */
+    .app-shell.away .canvas-center,
+    .app-shell.canvas-hidden .canvas-center {
+        opacity: 0;
+    }
+
+    .app-shell.away .canvas-center :global(canvas),
+    .app-shell.canvas-hidden .canvas-center :global(canvas) {
+        filter: blur(16px);
+    }
+
+    .canvas-center :global(canvas) {
+        transition: filter 0.35s ease;
     }
 
     .app-shell {
@@ -277,6 +336,7 @@
         inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
+        transition: opacity 0.35s ease;
     }
 
     /* The gradient under the toolbar and title bar, turning the corner on a
@@ -309,6 +369,18 @@
             var(--scrimStrength) * 1.35 - var(--scrimStrength) * var(--scrimStrength) * 0.35
         );
         transition: opacity 0.5s ease;
+    }
+
+    /* A level of noise either way over the bands, so their 8-bit steps do not show. */
+    .scrim-grain {
+        position: absolute;
+        inset: 0;
+        background: url("/grain.png") 0 0 / 64px 64px repeat;
+        image-rendering: pixelated;
+        --grain-mask: linear-gradient(black 100px, transparent 124px),
+            linear-gradient(to right, black 112px, transparent 140px);
+        -webkit-mask: var(--grain-mask);
+        mask: var(--grain-mask);
     }
 
     .chrome-scrim::before,
@@ -356,6 +428,13 @@
         --reach-x: 260px;
         --reach-y: 208px;
         opacity: calc(var(--scrimStrength) * 0.35);
+        /* Eased off before the image's edge, so the tail darkens the chrome rather than the picture. */
+        --tail-mask: linear-gradient(black 44px, rgba(0, 0, 0, 0.84) 58px, rgba(0, 0, 0, 0.5) 72px,
+                rgba(0, 0, 0, 0.16) 86px, transparent 100px),
+            linear-gradient(to right, black 48px, rgba(0, 0, 0, 0.84) 64px, rgba(0, 0, 0, 0.5) 80px,
+                rgba(0, 0, 0, 0.16) 96px, transparent 112px);
+        -webkit-mask: var(--tail-mask);
+        mask: var(--tail-mask);
     }
 
     .panel-column {
@@ -366,7 +445,8 @@
         pointer-events: auto;
         transition:
             width 0.35s cubic-bezier(0.2, 0, 0, 1),
-            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1);
+            margin-right 0.35s cubic-bezier(0.2, 0, 0, 1),
+            transform 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
 
     .panel-column.open {

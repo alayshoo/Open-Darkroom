@@ -12,8 +12,9 @@ group them the way film is actually shot: in rolls. Opening the app gives you
 all of it at once, and none of it is stuck on the computer it was made on.
 
 Backing out of the editor takes you to the library. The side bars slide off to
-the window edges and the image flies back into its place on a grid. Opening an
-image from the grid plays the same motion in reverse.
+the window edges while the image and the editor's backdrop fade and blur out,
+uncovering the grid, which never moves. Opening an image from the grid plays the
+same motion in reverse.
 
 ## Concepts
 
@@ -44,13 +45,20 @@ Catalog
 
 Roll level, all optional and free to fill in later:
 
-- film stock, box ISO and the ISO it was rated at, push or pull
-- camera and lens(es)
-- developer, dilution, time and temperature, home or lab development
-- date shot, date developed
+- film stock, format, box ISO and the ISO it was rated at
+- the dates it was shot over, and the date it was developed
+- camera and any number of lenses
+- home or lab development: the chemistry, dilution, time and temperature at
+  home, or the lab and its chemistry; push or pull either way
 - scanner, notes
 
-Frame level: frame number, aperture and shutter if logged, location, notes.
+Film stocks, cameras, lenses, scanners, chemistry setups and labs are kept in
+the catalog and managed in Settings. A roll picks from them; a scanner is added
+from what is typed, and the rest are set up in Settings from the roll. Deleting
+one leaves its name on the rolls that used it.
+
+Frame level: frame number, aperture and shutter if logged, the date and time it
+was taken, location, notes.
 
 The inversion is **not** shared across a roll. Every frame keeps its own black,
 white and gamma points, like any other edit.
@@ -66,9 +74,8 @@ It belongs to this computer, but nothing in it is tied to it:
 - the whole catalog exports and imports as one bundle (see Exporting)
 - any library or roll exports on its own and merges into another catalog; an
   imported roll goes into a library chosen on import
-- **Open**: whether the catalog's location can also be moved, for example to an
-  external drive. If it can, it is locked while open, so two computers sharing
-  it through a synced folder cannot both write to it.
+
+Where the catalog itself lives is not configurable for now (see Later).
 
 ### Where the image files are
 
@@ -80,11 +87,27 @@ Importing offers both:
 - **Reference in place.** The files stay where they are, such as on an archive
   drive, and the catalog only points at them.
 
+A file already in the catalog, or picked twice, is added once. A file that
+cannot be read or copied is skipped and named afterwards; the rest go in. Any
+other failure adds nothing, and a folder none of whose files could be read
+makes no roll.
+
 Files in the photo folder are recorded relative to it, so they survive the
 folder moving. Files outside it are recorded by path and by a fingerprint (their
-size plus a hash of their first bytes). A file that has moved, or a catalog
-imported on another computer, finds it again from the fingerprint, or the user
-is asked to point to it. Nothing is lost because a file went missing.
+size plus a hash of their first bytes). Nothing is lost because a file went
+missing:
+
+- When the catalog opens, when the window comes back into focus, and after a
+  file is located, the app looks for missing files on its own. It searches the
+  closest folders still there above where each file was, one level further up,
+  and the photo folder, a few levels deep, keeping to the drive each search
+  starts on. Coming back to the window looks again at most every 30 seconds.
+  Only files of a missing file's size are read, and a match is by fingerprint,
+  so a renamed file is found too.
+- What it finds, its images point at again, and it says how many it found.
+- What it does not find stays marked missing. Opening one, or "Locate file…"
+  from its menu, asks where it went; the file picked must be the same file.
+  The folders around it are then searched for the rest.
 **Open**: which of the two is the default.
 
 ## Edits
@@ -95,11 +118,12 @@ edit written by one build still opens in another.
 
 - Opening an image from the library restores its edit.
 - Changes are saved as they are made, so there is no save step and nothing is
-  lost on a crash.
+  lost on a crash. Closing the window writes whatever is still waiting.
 - `editFitsSource` guards against a file that changed size underneath its edit.
   Heal and clone strokes are placed in full-resolution pixels.
-- Undo history belongs to the session and is not stored. **Open**: whether it
-  should survive leaving an image.
+- Undo history is stored with the edit, so it is still there when the image is
+  opened again. A history with a step the build cannot read is dropped whole,
+  and only the latest 200 steps are kept.
 
 ## The editor and the library side by side
 
@@ -113,20 +137,15 @@ unmounted:
 
 Opening a different image replaces what the editor holds, as it does today.
 
-### The fly-back transition
+### The transition
 
-Done by hand with the FLIP technique (record first and last positions, then
-animate between them), not the View Transitions API:
+The editor lies over the library as one plate: its backdrop and the image. On
+entering, the plate fades in and the image comes into focus from a blur once the
+canvas has drawn, while the side bars slide in from the window edges. Leaving
+runs the same steps backwards, and the view fits to the crop once it is out of
+sight. The library underneath is left as it was.
 
-- View Transitions only exist on recent versions of macOS's WebKit, so the two
-  platforms would behave differently.
-- The preview is a WebGPU canvas that may be zoomed into part of the image. A
-  View Transition would snapshot exactly that.
-
-On leaving the editor, the view fits to the crop and the image's thumbnail takes
-the canvas's place. The thumbnail then animates from the editor's frame to its
-grid cell while the side bars slide away. Entering runs the same steps backwards
-and hands over to the live canvas once it has drawn.
+The way back is disabled while crop, heal or clone is on.
 
 ## Exporting
 
@@ -142,8 +161,8 @@ and hands over to the live canvas once it has drawn.
 
 These land together with the library:
 
-- **Open by path.** `open_image_file` currently shows the file picker itself. The
-  library needs to open a known path, with the picker kept for importing.
+- **Open by path.** `open_image_path` opens a known path. The picker is kept
+  for importing, and File > Open imports the file it picks before opening it.
 - **Thumbnails.** Rendered by the backend through the same WGSL as export
   (`export_rendering.rs`), with each image's edit applied. The grid then shows
   edited images without opening them. Kept with the catalog and redone when an
@@ -161,6 +180,25 @@ These land together with the library:
   come back unchanged (alayshoo/Open-Darkroom#62).
 - Camera metadata is read on open and shown in the info panel
   (alayshoo/Open-Darkroom#63).
+- The first prototype: the catalog (`catalog.rs`, SQLite), opening by path,
+  thumbnails rendered through the export WGSL, edits saved as they are made,
+  the library view with roll and frame information, the fade between the two, undo history
+  kept with the edit, and moved files found by fingerprint. Not yet: exporting,
+  albums.
+
+### What the prototype settled on
+
+To be revisited once it has been used:
+
+- Imports are referenced in place by default. Copying into the photo folder is
+  a setting, and puts each library and roll in a folder of its own.
+- An image has one home, loose in a library or on one roll. There is no inbox
+  at the top of the catalog: opening a file adds it to the library or roll being
+  looked at, making a first library if there is none. Someone who wants an inbox
+  makes a library called that.
+- Rolls are made both ways: a folder imported as a roll, or a new roll that
+  frames are added or moved to.
+- A roll and a library are renamed by double-clicking their name.
 
 ## Open questions
 
@@ -171,11 +209,8 @@ Settled by the prototype, not ahead of it:
   per file with no ambiguity. Rolls are not tied to the folders the files sit in,
   since scanner software often puts a whole session in one folder and folders get
   renamed. An image in several places at once is better served later by albums.
-  **Open**: whether images can also sit loose at the top of the catalog, as an
-  inbox not yet sorted into a library.
 - **How rolls are made.** Importing a folder as a roll, making an empty roll and
   dragging frames in, or both.
-- **Undo history.** Kept per session only, or stored with the edit.
 
 ## Later
 
@@ -190,3 +225,7 @@ above:
   exported file's metadata.
 - **Shooting log**: a roll's information as a spreadsheet.
 - **Sidecar files**: an optional copy of each edit next to its image.
+- **A shared catalog**: the catalog kept somewhere other than the app's data
+  directory, such as an external drive or a server, so several computers can
+  work in it. It needs a lock, or a way for more than one computer to write to
+  it at once.

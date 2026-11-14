@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 use tauri::ipc::Response;
-use tauri_plugin_dialog::DialogExt;
 
 use half::f16;
 use image::{ImageBuffer, ImageDecoder, Rgba};
@@ -18,6 +17,7 @@ use crate::color::{
 };
 use crate::crop::{crop_view, CropPayload, CropView};
 use crate::export_rendering::request_device;
+use crate::thumbnails::{ThumbnailSource, THUMBNAIL_EDGE};
 use crate::retouch::{
     apply_retouch, block_box, follow_strokes, Followed, LinearSource, RetouchPasses, RetouchPayload, RetouchedBlocks,
     StrokeJournal,
@@ -54,6 +54,9 @@ pub const HIST_BINS: usize = 256;
 /// finer would cost more in carrying the 3 KB of counters around than it saves.
 const HIST_BLOCK_PIXELS: usize = 1 << 16;
 
+/// The fewest rows a crop's binning splits down to, on the same reasoning.
+const HIST_MIN_ROWS: usize = 16;
+
 /// Bytes preceding the pixel data in the frontend payload: the six dimensions
 /// as u32 LE, the source → working-space matrix as 9 f32 LE, then a flags word.
 /// The full dimensions are what anchors a slider specified in image pixels to a
@@ -83,8 +86,10 @@ pub struct OriginalImage {
     pub id: u32,
     /// How the file says it was shot.
     pub metadata: ImageMetadata,
-    /// Where the file was opened from, which is where an export starts out.
+    /// Where the image was opened from.
     pub path: std::path::PathBuf,
+    /// What its library thumbnail is rendered from.
+    pub thumbnail: Arc<ThumbnailSource>,
 }
 
 pub type ImageState = Mutex<Option<OriginalImage>>;
@@ -118,6 +123,8 @@ pub struct PreparedImage {
     /// Set when the profile had to be applied on the CPU, so the darkroom block
     /// runs in the working space rather than the source's own primaries.
     pub baked: bool,
+    /// Linear u16 pixels shrunk to thumbnail size, with their width and height.
+    pub thumbnail: (Vec<u16>, u32, u32),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -254,29 +261,32 @@ pub fn compute_histograms(src: &[u16], channels: usize, bins: &[u8]) -> Histogra
         .into()
 }
 
-type Bins = ([u32; HIST_BINS], [u32; HIST_BINS], [u32; HIST_BINS]);
+/// R, G and B counters, on the heap: rayon carries partial counts by value
+/// through every split, and nested jobs pile those copies up on a worker's stack.
+type Bins = Box<[[u32; HIST_BINS]; 3]>;
 
 fn empty_bins() -> Bins {
-    ([0u32; HIST_BINS], [0u32; HIST_BINS], [0u32; HIST_BINS])
+    Box::new([[0u32; HIST_BINS]; 3])
 }
 
 fn bin_pixel(counts: &mut Bins, px: &[u16], bins: &[u8]) {
-    counts.0[bins[px[0] as usize] as usize] += 1;
-    counts.1[bins[px[1] as usize] as usize] += 1;
-    counts.2[bins[px[2] as usize] as usize] += 1;
+    for c in 0..3 {
+        counts[c][bins[px[c] as usize] as usize] += 1;
+    }
 }
 
 fn sum_bins(mut acc: Bins, part: Bins) -> Bins {
-    for i in 0..HIST_BINS {
-        acc.0[i] += part.0[i];
-        acc.1[i] += part.1[i];
-        acc.2[i] += part.2[i];
+    for (acc, part) in acc.iter_mut().zip(part.iter()) {
+        for (a, p) in acc.iter_mut().zip(part) {
+            *a += p;
+        }
     }
     acc
 }
 
 impl From<Bins> for Histograms {
-    fn from((r, g, b): Bins) -> Self {
+    fn from(bins: Bins) -> Self {
+        let [r, g, b] = *bins;
         Histograms { r, g, b }
     }
 }
@@ -299,6 +309,7 @@ pub fn compute_histograms_in(
 
     (y0..y1)
         .into_par_iter()
+        .with_min_len(HIST_MIN_ROWS)
         .fold(empty_bins, |mut counts, y| {
             for x in (x0..x1).filter(|&x| view.contains(x, y)) {
                 let at = (y as usize * width as usize + x as usize) * channels;
@@ -565,7 +576,15 @@ pub fn prepare_image(
         to_linear_u16(src, channels, &luts)
     });
 
-    let (preview_width, preview_height, preview_pixels) = match &linear {
+    // The thumbnail is shrunk once from the full frame, like any other image's.
+    let thumbnail = || match &linear {
+        Some(linear) => downscale_to_max_edge(linear, full_width, full_height, channels, THUMBNAIL_EDGE),
+        None => {
+            let luts = space.luts(|v| (v.clamp(0.0, 1.0) * (LUT_SIZE - 1) as f32).round() as u16);
+            downscale_to_max_edge(&to_linear_u16(src, channels, &luts), full_width, full_height, channels, THUMBNAIL_EDGE)
+        }
+    };
+    let preview = || match &linear {
         Some(linear) if long_edge > PREVIEW_MAX_EDGE => {
             let (preview, w, h) =
                 downscale_to_max_edge(linear, full_width, full_height, channels, PREVIEW_MAX_EDGE);
@@ -576,6 +595,7 @@ pub fn prepare_image(
             (full_width, full_height, linearize_u16(src, channels, &luts))
         }
     };
+    let (thumbnail, (preview_width, preview_height, preview_pixels)) = rayon::join(thumbnail, preview);
 
     // The overview always comes off the full frame, never off the preview, so it
     // keeps describing the whole image once the preview becomes a crop tile.
@@ -606,6 +626,7 @@ pub fn prepare_image(
         histograms,
         to_working: space.to_working,
         baked: space.baked,
+        thumbnail,
     })
 }
 
@@ -701,62 +722,61 @@ fn decode_encoded(
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
-/// Error returned when the user dismisses the file picker.
-///
-/// Dismissal happens before the loaded image is released, so it is the one
-/// failure that leaves the current image intact — `openImage.ts` matches on this
-/// exact string to tell it apart from an open that got far enough to purge.
-pub const OPEN_CANCELLED: &str = "open:cancelled";
+/// The file's samples, channel count, dimensions and what those samples mean,
+/// whatever kind of file it is.
+pub fn decode_path(path: &std::path::Path) -> Result<(Vec<u16>, usize, u32, u32, SourceSpace), String> {
+    // Sensor data takes its own decoder, and arrives already linear and in the
+    // camera's primaries rather than carrying a profile to be read.
+    if crate::raw::is_raw_extension(path) {
+        let decoded = crate::raw::decode(path)?;
+        Ok((decoded.pixels_u16, crate::raw::RAW_CHANNELS, decoded.width, decoded.height, decoded.space))
+    } else {
+        decode_encoded(path)
+    }
+}
 
-#[tauri::command]
-pub(crate) async fn open_image_file(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, ImageState>,
-    image_id: u32,
-) -> Result<Response, String> {
-    println!("open_image_file: started");
-
+/// The extensions the app opens, for file pickers and folder imports.
+pub fn image_extensions() -> Vec<String> {
     let mut extensions = vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()];
     extensions.extend(crate::raw::dialog_extensions());
-    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    extensions
+}
 
-    let path = app
-        .dialog()
-        .file()
-        .add_filter("Images", &extensions)
-        .blocking_pick_file()
-        .ok_or(OPEN_CANCELLED)?
-        .into_path()
-        .map_err(|e| e.to_string())?;
+/// Opens a file the caller already knows the path of, such as one in the library.
+#[tauri::command]
+pub(crate) async fn open_image_path(
+    state: tauri::State<'_, ImageState>,
+    path: std::path::PathBuf,
+    image_id: u32,
+) -> Result<Response, String> {
+    if !path.is_file() {
+        return Err(format!("{} could not be found", path.display()));
+    }
+    open_path(&state, path, image_id)
+}
 
+fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Result<Response, String> {
     // Release the previous image before decoding the next one. Held any longer
     // and two full-resolution buffers are resident at once, which for large
-    // files roughly doubles the peak. The dialog has already returned a path, so
-    // a cancelled open never reaches here and leaves the current image alone.
+    // files roughly doubles the peak.
     {
         let mut guard = state.lock().unwrap();
         *guard = None;
     }
 
     let overall_start = Instant::now();
+    let (samples, channels, full_width, full_height, space) = decode_path(&path)?;
 
-    // Sensor data takes its own decoder, and arrives already linear and in the
-    // camera's primaries rather than carrying a profile to be read.
-    let (samples, channels, full_width, full_height, space) = if crate::raw::is_raw_extension(&path)
-    {
-        let decoded = crate::raw::decode(&path)?;
-        (
-            decoded.pixels_u16,
-            crate::raw::RAW_CHANNELS,
-            decoded.width,
-            decoded.height,
-            decoded.space,
-        )
-    } else {
-        decode_encoded(&path)?
-    };
-
-    let prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let mut prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let (thumb_pixels, thumb_width, thumb_height) = std::mem::take(&mut prepared.thumbnail);
+    let thumbnail = Arc::new(ThumbnailSource::from_linear(
+        &path,
+        thumb_pixels,
+        (thumb_width, thumb_height),
+        (full_width, full_height),
+        channels,
+        space.to_working,
+    ));
     let metadata = crate::metadata::read(&path);
 
     // Store the original full-resolution image for export. This happens after
@@ -775,13 +795,14 @@ pub(crate) async fn open_image_file(
             id: image_id,
             metadata,
             path,
+            thumbnail,
         });
     }
 
     let payload = build_payload(&prepared);
 
     println!(
-        "open_image_file: total backend time = {} ms, payload size = {} bytes, \
+        "open_image: total backend time = {} ms, payload size = {} bytes, \
          colour converted on {}",
         overall_start.elapsed().as_millis(),
         payload.len(),

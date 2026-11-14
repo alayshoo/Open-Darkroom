@@ -21,6 +21,7 @@ import { history } from "$lib/history/history.svelte";
 import { applyAction, undoAction, type StateAccessors } from "$lib/history/historyDispatch";
 import { actionMode, actionPage } from "$lib/history/actionControls";
 import type { Action } from "$lib/types/historyActions";
+import type { EditHistory } from "$lib/types/editHistory";
 import { type Retouch, type RetouchMode, retouchEqual } from "$lib/types/retouch";
 import {
     type Sliders,
@@ -40,7 +41,7 @@ import {
 } from "$lib/types/curves";
 import { type ImagePayload } from "$lib/types/imagePayload";
 import { type ImageMetadata } from "$lib/types/imageMetadata";
-import { type ImageEdit, newImageEdit } from "$lib/types/imageEdit";
+import { type ImageEdit, editFitsSource, newImageEdit } from "$lib/types/imageEdit";
 import { type Crop, FULL_FRAME, cropsEqual, isFullFrame, turnCrop, flipCrop } from "$lib/types/crop";
 import {
     type AspectLock,
@@ -52,7 +53,7 @@ import {
 } from "$lib/types/cropAspect";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
-import { fetchImageMetadata, openImage } from "$lib/utils/openImage";
+import { fetchImageMetadata, openImagePath } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { animateObject } from "$lib/utils/animateObject";
 
@@ -79,6 +80,9 @@ class Editor {
 
     /** Whether the info panel is open. It shares its column with the presets. */
     infoOpen = $state(false);
+
+    /** The library's id for the open image, or null when it was opened from outside it. */
+    libraryImageId = $state<number | null>(null);
 
     // ===== Control modes and pages =====
 
@@ -287,23 +291,39 @@ class Editor {
 
     // ===== Opening =====
 
-    // A failed open has already cost the backend the image it was holding, so
-    // the view is cleared to match rather than left showing pixels that can no
-    // longer be exported. A dismissed picker returns null and changes nothing.
-    open = async () => {
+    // Opens an image from the library with the edit stored for it, unless that
+    // edit was made on a file of another size. Resolves false on failure.
+    openLibraryImage = async (
+        path: string,
+        libraryImageId: number,
+        stored: ImageEdit | null,
+        storedHistory: EditHistory | null = null,
+    ): Promise<boolean> => {
         try {
-            const payload = await openImage();
-            if (payload) {
-                this.imagePayload = payload;
-                this.zoom = null;
-                this.#resetEdit(payload.fullWidth, payload.fullHeight);
-                this.#loadMetadata(payload.imageId);
+            const payload = await openImagePath(path);
+            this.imagePayload = payload;
+            this.zoom = null;
+            this.#resetEdit(payload.fullWidth, payload.fullHeight);
+            if (stored && editFitsSource(stored, payload.fullWidth, payload.fullHeight)) {
+                this.edit = stored;
+                if (storedHistory) history.restore(storedHistory.steps, storedHistory.pointer);
             }
+            this.libraryImageId = libraryImageId;
+            this.#loadMetadata(payload.imageId);
+            return true;
         } catch (e) {
-            this.imagePayload = null;
-            this.metadata = null;
+            this.closeImage();
             console.error("Failed to open image:", e);
+            return false;
         }
+    };
+
+    /** Lets go of the open image and its history, as when it fails to open or its library record is removed. */
+    closeImage = () => {
+        this.imagePayload = null;
+        this.metadata = null;
+        this.libraryImageId = null;
+        history.clear();
     };
 
     #loadMetadata(imageId: number) {

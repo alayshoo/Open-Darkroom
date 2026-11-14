@@ -65,7 +65,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 
 // Keys this build does not know are dropped, and those it expects but cannot
 // read keep their defaults.
-function readSliderValues(value: unknown): Partial<Sliders> {
+export function readSliderValues(value: unknown): Partial<Sliders> {
     const out: Partial<Sliders> = {};
     if (!isRecord(value)) return out;
     for (const key of Object.keys(defaultSlidersRGB) as (keyof Sliders)[]) {
@@ -77,7 +77,7 @@ function readSliderValues(value: unknown): Partial<Sliders> {
     return out;
 }
 
-function readCurveValues(value: unknown): Curves {
+export function readCurveValues(value: unknown): Curves {
     const curves = defaultCurves();
     if (!isRecord(value)) return curves;
     for (const channel of CURVE_CHANNELS) {
@@ -98,7 +98,7 @@ function readCurveValues(value: unknown): Curves {
     return curves;
 }
 
-function readCrop(value: unknown): Crop {
+export function readCrop(value: unknown): Crop {
     if (!isRecord(value)) return { ...FULL_FRAME };
     const crop = { ...FULL_FRAME, ...value } as Crop;
     const turns = crop.quarterTurns;

@@ -27,21 +27,7 @@ use open_darkroom_lib::retouch::{MAX_BLUR_TAPS, RETOUCH_TILE, RETOUCH_UNIFORM_BY
 use open_darkroom_lib::shaders::RETOUCH_WGSL;
 use open_darkroom_lib::icc::SRGB_TO_WORKING;
 use open_darkroom_lib::output_space::{OutputSpace, Transfer};
-use open_darkroom_lib::image_opening::{OPEN_CANCELLED, PAYLOAD_HEADER_BYTES};
-
-/// The frontend has to tell a dismissed file picker apart from an open that
-/// failed after the loaded image was released — the first leaves the current
-/// image alone, the second means it is already gone. That distinction rides on
-/// one string matching across the two languages, and nothing else would catch it
-/// drifting: the mismatch turns a cancelled open into a cleared canvas.
-#[test]
-fn typescript_matches_the_cancelled_open_sentinel() {
-    let quoted = format!("\"{OPEN_CANCELLED}\"");
-    assert!(
-        OPEN_IMAGE_TS.contains(&format!("OPEN_CANCELLED = {quoted}")),
-        "openImage.ts does not declare OPEN_CANCELLED = {quoted}"
-    );
-}
+use open_darkroom_lib::image_opening::PAYLOAD_HEADER_BYTES;
 
 /// Tauri replaces the window list outright when it merges a platform config, so
 /// the Windows one repeats the whole window. Past the keys it exists to add, it

@@ -543,3 +543,24 @@ fn payload_header_carries_preview_not_source_dimensions() {
         )
     );
 }
+
+// ── Thumbnails ────────────────────────────────────────────────────────────────
+
+/// The open image's thumbnail is shrunk once from the full frame, exactly as a
+/// thumbnail decoded from its file is, so its detail and sharpening match.
+#[test]
+fn the_open_thumbnail_matches_one_made_from_the_file() {
+    use open_darkroom_lib::thumbnails::{ThumbnailSource, THUMBNAIL_EDGE};
+
+    for (w, h) in [(3000, 2000), (1000, 200)] {
+        let img = noise(w, h, 7);
+        let prepared = prepare(&img);
+        let (pixels, tw, th) = &prepared.thumbnail;
+        let from_file =
+            ThumbnailSource::from_pixels(std::path::Path::new("x"), img.as_raw(), w, h, 4, SourceSpace::default())
+                .expect("thumbnail");
+        assert_eq!((*tw, *th), (from_file.width, from_file.height));
+        assert_eq!(tw.max(th), &THUMBNAIL_EDGE.min(w.max(h)));
+        assert_eq!(pixels, &from_file.pixels);
+    }
+}

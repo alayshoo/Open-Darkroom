@@ -18,6 +18,10 @@
         undo = () => {},
         redo = () => {},
         open = () => {},
+        importFiles = () => {},
+        importFolder = () => {},
+        toggleLibrary = () => {},
+        editing = false,
         exportImage = () => {},
         copyAdjustments = () => {},
         pasteAdjustments = () => {},
@@ -30,6 +34,11 @@
         undo?: () => void;
         redo?: () => void;
         open?: () => void;
+        importFiles?: () => void;
+        importFolder?: () => void;
+        toggleLibrary?: () => void;
+        /** An image is open in the editor, rather than the library showing. */
+        editing?: boolean;
         exportImage?: () => void;
         copyAdjustments?: () => void;
         pasteAdjustments?: () => void;
@@ -96,6 +105,14 @@
                         label: "Open…",
                         shortcut: shortcuts.display("openImage"),
                         action: open,
+                    },
+                    { label: "Import Images…", action: importFiles },
+                    { label: "Import Folder as Roll…", action: importFolder },
+                    { separator: true },
+                    {
+                        label: editing ? "Back to Library" : "Back to Image",
+                        shortcut: shortcuts.display("showLibrary"),
+                        action: toggleLibrary,
                     },
                     { separator: true },
                     {
