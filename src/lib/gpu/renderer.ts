@@ -166,6 +166,8 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
     let inFlight = false;
     let frameHandle: number | null = null;
     let destroyed = false;
+    // Cleared while frames fail to drain, so a run of failures is logged once.
+    let draining = true;
 
     const frameTimer = createFrameTimer(gpu);
     debugStats.supportsPassTimings = frameTimer.available;
@@ -670,9 +672,10 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         // preview would stop drawing for good.
         inFlight = true;
         const drained = gpu.device.queue.onSubmittedWorkDone().then(
-            () => true,
+            () => (draining = true),
             (e) => {
-                log.warn("Preview frame did not drain", e);
+                if (draining) log.warn("Preview frames are not draining", e);
+                draining = false;
                 return false;
             },
         );

@@ -2,7 +2,7 @@
 // lib/gpu/gpu.ts
 
 import { type GPUSession } from "$lib/types/gpuTypes";
-import { createLogger } from "$lib/utils/log";
+import { createLogger, limitRepeats } from "$lib/utils/log";
 import type { OutputSpaceId } from "./outputSpace";
 
 const log = createLogger("gpu");
@@ -65,30 +65,15 @@ export function describeAdapter(info: GPUAdapterInfo | null | undefined): string
     return (parts.join(" / ") || "details withheld") + (info.isFallbackAdapter ? " (fallback)" : "");
 }
 
-/** Copies of one uncaptured error logged before the rest are only counted. */
-const REPEATS_LOGGED = 3;
-const DISTINCT_ERRORS_TRACKED = 100;
-
 /**
  * Validation and out-of-memory errors no error scope caught would otherwise
  * vanish outside devtools, and a lost device just leaves the canvas frozen.
  */
 function watchDevice(device: GPUDevice) {
-    const seen = new Map<string, number>();
-    let saturated = false;
+    const report = limitRepeats(log);
     device.addEventListener("uncapturederror", (event) => {
         const { error } = event as GPUUncapturedErrorEvent;
-        const key = `${error.constructor.name}: ${error.message}`;
-        if (!seen.has(key) && seen.size >= DISTINCT_ERRORS_TRACKED) {
-            if (!saturated) log.error("Too many distinct uncaptured errors, the rest are not logged");
-            saturated = true;
-            return;
-        }
-        const count = (seen.get(key) ?? 0) + 1;
-        seen.set(key, count);
-        if (count > REPEATS_LOGGED) return;
-        const more = count === REPEATS_LOGGED ? " (further repeats are not logged)" : "";
-        log.error(`Uncaptured ${key}${more}`);
+        report(`Uncaptured ${error.constructor.name}: ${error.message}`);
     });
 
     device.lost.then((info) => {

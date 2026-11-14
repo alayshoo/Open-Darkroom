@@ -38,6 +38,16 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Registered first: a second launch hands over to the running copy
+        // before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("Another launch was handed to this window");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(ImageState::new(None))
         .manage(catalog_commands::CatalogState::new(None))
         .plugin(tauri_plugin_opener::init())

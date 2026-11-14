@@ -18,13 +18,13 @@
   import "$lib/gpu/gpuInit";
   import { type GPUSession } from "$lib/types/gpuTypes";
   import { initializeGPU } from "$lib/gpu/gpuInit"
-  import { setContext } from "svelte";
+  import { onDestroy, setContext } from "svelte";
     import TitleBar from "$lib/components/window/TitleBar.svelte";
     import SettingsModal from "$lib/components/settings/SettingsModal.svelte";
 
   import { createLogger, installErrorHandlers } from "$lib/utils/log";
 
-  installErrorHandlers();
+  onDestroy(installErrorHandlers());
 
   let gpu = $state<GPUSession | null>(null);
   let gpuFailure = $state<string | null>(null);

@@ -27,8 +27,9 @@ const STACK_FRAMES = 12;
 export function describe(error: unknown): string {
     if (error instanceof Error) {
         const frames = (error.stack ?? "").split("\n").filter((line) => line.trim());
-        // V8 opens the stack with the message, WebKit does not.
-        if (frames[0]?.includes(error.message)) frames.shift();
+        // V8 opens the stack with the message, ahead of its "at" frames; WebKit does not.
+        const isFrame = (line: string) => line.trimStart().startsWith("at ");
+        if (frames.length > 1 && !isFrame(frames[0]) && frames.slice(1).some(isFrame)) frames.shift();
         const kept = frames.slice(0, STACK_FRAMES);
         if (frames.length > kept.length) kept.push(`… ${frames.length - kept.length} more frames`);
         return [`${error.name}: ${error.message}`, ...kept].join("\n");
@@ -69,15 +70,46 @@ export function createLogger(scope: string): Logger {
     };
 }
 
-const uncaught = createLogger("uncaught");
+/**
+ * Logs the first few copies of each distinct error and only counts the rest,
+ * so one repeated every frame cannot fill the log and rotate older files out.
+ */
+export function limitRepeats(logger: Logger, repeats = 3, distinct = 100) {
+    const seen = new Map<string, number>();
+    let saturated = false;
+    /** `key` tells copies apart when `message` alone does not. */
+    return (message: string, error?: unknown, key = message) => {
+        if (!seen.has(key) && seen.size >= distinct) {
+            if (!saturated) logger.error(`More than ${distinct} distinct errors, the rest are not logged`);
+            saturated = true;
+            return;
+        }
+        const count = (seen.get(key) ?? 0) + 1;
+        seen.set(key, count);
+        if (count > repeats) return;
+        logger.error(count === repeats ? `${message} (further repeats are not logged)` : message, error);
+    };
+}
 
-/** Records what nothing else caught: thrown errors and rejected promises. */
-export function installErrorHandlers() {
-    window.addEventListener("error", (event) => {
-        const where = event.filename ? ` at ${event.filename}:${event.lineno}:${event.colno}` : "";
-        uncaught.error(`${event.message}${where}`, event.error ?? undefined);
-    });
-    window.addEventListener("unhandledrejection", (event) => {
-        uncaught.error("Unhandled rejection", event.reason);
-    });
+/** Records what nothing else caught: thrown errors and rejected promises. Returns their removal. */
+export function installErrorHandlers(): () => void {
+    const report = limitRepeats(createLogger("uncaught"));
+    const controller = new AbortController();
+    window.addEventListener(
+        "error",
+        (event) => {
+            const where = event.filename ? ` at ${event.filename}:${event.lineno}:${event.colno}` : "";
+            report(`Uncaught error${where}`, event.error ?? event.message, `${event.message}${where}`);
+        },
+        { signal: controller.signal },
+    );
+    window.addEventListener(
+        "unhandledrejection",
+        (event) => {
+            const reason = describe(event.reason).split("\n")[0];
+            report("Unhandled rejection", event.reason, reason);
+        },
+        { signal: controller.signal },
+    );
+    return () => controller.abort();
 }
