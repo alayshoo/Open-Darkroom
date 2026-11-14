@@ -29,6 +29,12 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    // Debug builds keep their own app data, apart from an installed copy's.
+    if cfg!(debug_assertions) {
+        context.config_mut().identifier.push_str(".dev");
+    }
+
     tauri::Builder::default()
         .manage(ImageState::new(None))
         .manage(catalog_commands::CatalogState::new(None))
@@ -87,7 +93,7 @@ pub fn run() {
             catalog_commands::catalog_thumbnail,
             catalog_commands::catalog_render_thumbnail,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 
