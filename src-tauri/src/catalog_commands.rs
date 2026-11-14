@@ -31,7 +31,9 @@ const NO_THUMBNAIL: &str = "thumbnail:none";
 
 pub fn open_catalog(app: &tauri::AppHandle) -> Result<Catalog, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Catalog::open(&dir)
+    let catalog = Catalog::open(&dir)?;
+    log::info!("Catalog opened in {}", dir.display());
+    Ok(catalog)
 }
 
 fn with_catalog<T>(state: &CatalogState, f: impl FnOnce(&Catalog) -> Result<T, String>) -> Result<T, String> {
@@ -156,6 +158,12 @@ async fn import_paths(state: &CatalogState, paths: Vec<PathBuf>, target: Target,
         .await
         .map_err(|e| e.to_string())??;
     let (roll, import) = with_catalog(state, |c| c.record_import(prepared))?;
+    log::info!(
+        "Imported {} image(s){}, {} skipped",
+        import.images.len(),
+        if copy { " as copies" } else { "" },
+        import.skipped.len()
+    );
     Ok(Imported { roll, images: import.images, skipped: import.skipped })
 }
 
@@ -298,6 +306,7 @@ pub(crate) async fn catalog_find_moved(state: tauri::State<'_, CatalogState>, ne
     .map_err(|e| e.to_string())?;
     with_catalog(&state, |c| {
         let found: Vec<ImageRecord> = moved.iter().filter_map(|f| c.relink_to(f.id, &f.path, &f.print).ok()).collect();
+        log::info!("Looked for {} moved file(s), found {}", searched.len(), found.len());
         let unfound = searched.into_iter().filter(|id| !found.iter().any(|f| f.id == *id));
         NOT_FOUND.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).extend(unfound);
         let missing = missing.iter().map(|m| m.id).filter(|id| !found.iter().any(|f| f.id == *id)).collect();

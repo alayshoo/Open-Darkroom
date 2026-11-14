@@ -22,12 +22,23 @@
     import TitleBar from "$lib/components/window/TitleBar.svelte";
     import SettingsModal from "$lib/components/settings/SettingsModal.svelte";
 
+  import { createLogger, installErrorHandlers } from "$lib/utils/log";
+
+  installErrorHandlers();
+
   let gpu = $state<GPUSession | null>(null);
+  let gpuFailure = $state<string | null>(null);
   setContext("gpu", () => gpu);
 
-  initializeGPU().then((session) => {
-    gpu = session;
-  });
+  initializeGPU().then(
+    (session) => {
+      gpu = session;
+    },
+    (error) => {
+      createLogger("gpu").error("WebGPU could not start", error);
+      gpuFailure = error instanceof Error ? error.message : String(error);
+    },
+  );
   // ============================================
 
 
@@ -40,7 +51,7 @@
 {:else}
   <TitleBar></TitleBar>
   <div class="init-div flex w-full items-center justify-center">
-    <p>Initializing GPU…</p>
+    <p>{gpuFailure ? `WebGPU could not start: ${gpuFailure}` : "Initializing GPU…"}</p>
   </div>
 {/if}
 

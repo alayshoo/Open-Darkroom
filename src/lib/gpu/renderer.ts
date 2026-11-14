@@ -54,6 +54,9 @@ import {
     type ViewFrame,
 } from "$lib/utils/viewport";
 import type { Affine } from "$lib/types/crop";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("renderer");
 
 
 // Wherever the image is not drawn the canvas is left clear, so the backdrop
@@ -669,7 +672,7 @@ export function createRenderer(gpu: GPUSession, canvas: GPUCanvasLink): Renderer
         const drained = gpu.device.queue.onSubmittedWorkDone().then(
             () => true,
             (e) => {
-                console.warn("Preview frame did not drain:", e);
+                log.warn("Preview frame did not drain", e);
                 return false;
             },
         );

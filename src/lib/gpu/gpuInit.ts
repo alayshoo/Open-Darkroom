@@ -2,7 +2,10 @@
 // lib/gpu/gpu.ts
 
 import { type GPUSession } from "$lib/types/gpuTypes";
+import { createLogger } from "$lib/utils/log";
 import type { OutputSpaceId } from "./outputSpace";
+
+const log = createLogger("gpu");
 
 export async function initializeGPU(): Promise<GPUSession> {
     
@@ -34,15 +37,64 @@ export async function initializeGPU(): Promise<GPUSession> {
 
     // Format is the pixel format the display expects.
     const format = navigator.gpu.getPreferredCanvasFormat();
+    const displaySpace = detectDisplaySpace();
+
+    log.info(`Adapter: ${describeAdapter(adapter.info)}`);
+    log.info(
+        `Device: canvas ${format}, display ${displaySpace}, ` +
+            `max texture ${device.limits.maxTextureDimension2D}px, ` +
+            `max buffer ${Math.round(device.limits.maxBufferSize / 2 ** 20)} MiB, ` +
+            `timestamps ${canTimestamp ? "on" : "off"}`,
+    );
+    watchDevice(device);
 
     return {
         device,
         format,
-        displaySpace: detectDisplaySpace(),
+        displaySpace,
         canTimestamp,
         adapterInfo: adapter.info ?? null,
         adapterFeatures: [...adapter.features].sort(),
     };
+}
+
+/** One line naming the adapter, for the log and for bug reports. */
+export function describeAdapter(info: GPUAdapterInfo | null | undefined): string {
+    if (!info) return "no adapter info";
+    const parts = [info.vendor, info.architecture, info.device, info.description].filter(Boolean);
+    return (parts.join(" / ") || "details withheld") + (info.isFallbackAdapter ? " (fallback)" : "");
+}
+
+/** Copies of one uncaptured error logged before the rest are only counted. */
+const REPEATS_LOGGED = 3;
+const DISTINCT_ERRORS_TRACKED = 100;
+
+/**
+ * Validation and out-of-memory errors no error scope caught would otherwise
+ * vanish outside devtools, and a lost device just leaves the canvas frozen.
+ */
+function watchDevice(device: GPUDevice) {
+    const seen = new Map<string, number>();
+    let saturated = false;
+    device.addEventListener("uncapturederror", (event) => {
+        const { error } = event as GPUUncapturedErrorEvent;
+        const key = `${error.constructor.name}: ${error.message}`;
+        if (!seen.has(key) && seen.size >= DISTINCT_ERRORS_TRACKED) {
+            if (!saturated) log.error("Too many distinct uncaptured errors, the rest are not logged");
+            saturated = true;
+            return;
+        }
+        const count = (seen.get(key) ?? 0) + 1;
+        seen.set(key, count);
+        if (count > REPEATS_LOGGED) return;
+        const more = count === REPEATS_LOGGED ? " (further repeats are not logged)" : "";
+        log.error(`Uncaptured ${key}${more}`);
+    });
+
+    device.lost.then((info) => {
+        if (info.reason === "destroyed") log.info("Device destroyed");
+        else log.error(`Device lost (${info.reason}): ${info.message}`);
+    });
 }
 
 

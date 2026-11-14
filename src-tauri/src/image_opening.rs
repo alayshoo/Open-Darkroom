@@ -756,6 +756,7 @@ pub(crate) async fn open_image_path(
 }
 
 fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Result<Response, String> {
+    log::info!("Opening {}", path.display());
     // Release the previous image before decoding the next one. Held any longer
     // and two full-resolution buffers are resident at once, which for large
     // files roughly doubles the peak.
@@ -778,6 +779,12 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
         space.to_working,
     ));
     let metadata = crate::metadata::read(&path);
+    let camera = [metadata.make.as_deref(), metadata.model.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let raw = crate::raw::is_raw_extension(&path);
 
     // Store the original full-resolution image for export. This happens after
     // `prepare_image` so the buffer can be moved into the state rather than
@@ -801,9 +808,11 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
 
     let payload = build_payload(&prepared);
 
-    println!(
-        "open_image: total backend time = {} ms, payload size = {} bytes, \
-         colour converted on {}",
+    log::info!(
+        "Opened {full_width}×{full_height} {} with {channels} channels{} in {} ms, \
+         preview payload {} bytes, colour converted on the {}",
+        if raw { "raw" } else { "image" },
+        if camera.is_empty() { String::new() } else { format!(" from {camera}") },
         overall_start.elapsed().as_millis(),
         payload.len(),
         if prepared.baked { "CPU" } else { "GPU" }

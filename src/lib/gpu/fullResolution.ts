@@ -6,6 +6,9 @@
 
 import type { GPUImage } from "$lib/types/gpuTypes";
 import mipmapSource from "./shaders/mipmap.wgsl?raw";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("gpu");
 
 // Must match ROWS_HEADER_BYTES in full_resolution.rs.
 export const ROWS_HEADER_BYTES = 16;
@@ -117,7 +120,7 @@ async function createSourceTexture(device: GPUDevice, width: number, height: num
     const texture = sourceTexture(device, "Full Resolution Source", width, height);
     const error = await device.popErrorScope();
     if (error) {
-        console.error("Not enough GPU memory for the full-resolution image:", error.message);
+        log.warn(`Not enough GPU memory for the full-resolution image, the preview stays up: ${error.message}`);
         texture.destroy();
         return null;
     }
