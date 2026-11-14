@@ -1,12 +1,11 @@
 // tests/unit/library.test.ts
 //
 // The pure parts of the library: how a roll is summed up, what a frame field
-// offers before anything is logged, and where the flying image lands.
+// offers before anything is logged.
 
 import { describe, expect, it } from "vitest";
 
 import { framePlaceholder, rollSummary } from "$lib/types/rollInfo";
-import { fitRect } from "$lib/library/flight";
 import type { ImageMetadata } from "$lib/types/imageMetadata";
 
 const meta: ImageMetadata = {
@@ -32,17 +31,5 @@ describe("framePlaceholder", () => {
         expect(framePlaceholder("shutter", meta)).toBe("1/250 s");
         expect(framePlaceholder("aperture", null)).toBe("f/8");
         expect(framePlaceholder("location", meta)).toBeUndefined();
-    });
-});
-
-describe("fitRect", () => {
-    const box = { left: 100, top: 50, width: 800, height: 600 };
-
-    it("fills the width of a box taller than the image, centred", () => {
-        expect(fitRect(2, box)).toEqual({ left: 100, top: 150, width: 800, height: 400 });
-    });
-
-    it("fills the height of a box wider than the image, centred", () => {
-        expect(fitRect(0.5, box)).toEqual({ left: 350, top: 50, width: 300, height: 600 });
     });
 });

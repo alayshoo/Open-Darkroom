@@ -12,8 +12,9 @@ group them the way film is actually shot: in rolls. Opening the app gives you
 all of it at once, and none of it is stuck on the computer it was made on.
 
 Backing out of the editor takes you to the library. The side bars slide off to
-the window edges and the image flies back into its place on a grid. Opening an
-image from the grid plays the same motion in reverse.
+the window edges while the image and the editor's backdrop fade and blur out,
+uncovering the grid, which never moves. Opening an image from the grid plays the
+same motion in reverse.
 
 ## Concepts
 
@@ -136,20 +137,15 @@ unmounted:
 
 Opening a different image replaces what the editor holds, as it does today.
 
-### The fly-back transition
+### The transition
 
-Done by hand with the FLIP technique (record first and last positions, then
-animate between them), not the View Transitions API:
+The editor lies over the library as one plate: its backdrop and the image. On
+entering, the plate fades in and the image comes into focus from a blur once the
+canvas has drawn, while the side bars slide in from the window edges. Leaving
+runs the same steps backwards, and the view fits to the crop once it is out of
+sight. The library underneath is left as it was.
 
-- View Transitions only exist on recent versions of macOS's WebKit, so the two
-  platforms would behave differently.
-- The preview is a WebGPU canvas that may be zoomed into part of the image. A
-  View Transition would snapshot exactly that.
-
-On leaving the editor, the view fits to the crop and the image's thumbnail takes
-the canvas's place. The thumbnail then animates from the editor's frame to its
-grid cell while the side bars slide away. Entering runs the same steps backwards
-and hands over to the live canvas once it has drawn.
+The way back is disabled while crop, heal or clone is on.
 
 ## Exporting
 
@@ -186,7 +182,7 @@ These land together with the library:
   (alayshoo/Open-Darkroom#63).
 - The first prototype: the catalog (`catalog.rs`, SQLite), opening by path,
   thumbnails rendered through the export WGSL, edits saved as they are made,
-  the library view with roll and frame information, the fly-back, undo history
+  the library view with roll and frame information, the fade between the two, undo history
   kept with the edit, and moved files found by fingerprint. Not yet: exporting,
   albums.
 

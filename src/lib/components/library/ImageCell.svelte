@@ -6,15 +6,12 @@
     let {
         image,
         selected,
-        hidden,
         onselect,
         onopen,
         onmenu,
     }: {
         image: ImageRecord;
         selected: boolean;
-        /** While the image is in flight, its cell keeps its place but shows nothing. */
-        hidden: boolean;
         onselect: (e: MouseEvent) => void;
         onopen: () => void;
         onmenu: (e: MouseEvent) => void;
@@ -44,9 +41,9 @@
 >
     <div class="frame relative flex items-center justify-center">
         {#if src}
-            <img data-thumb-id={image.id} {src} alt="" draggable="false" class:hidden />
+            <img data-thumb-id={image.id} {src} alt="" draggable="false" />
         {:else}
-            <div class="placeholder" class:hidden data-thumb-id={image.id}></div>
+            <div class="placeholder" data-thumb-id={image.id}></div>
         {/if}
         {#if image.missing}
             <span class="missing-badge">{library.finding ? "Looking for it…" : "Missing"}</span>
@@ -107,10 +104,6 @@
         height: 60%;
         border-radius: 3px;
         background: var(--bg4);
-    }
-
-    .hidden {
-        visibility: hidden;
     }
 
     .missing img,

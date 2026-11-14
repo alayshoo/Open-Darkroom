@@ -18,7 +18,7 @@
      attribute on the event target alone, so the buttons are unaffected. -->
 <div data-tauri-drag-region class="toolbar shrink-0">
     <div data-tauri-drag-region class="toolbar-back flex flex-col items-center">
-        <BackButton onclick={library.showLibrary} />
+        <BackButton disabled={!library.canLeave} onclick={library.showLibrary} />
     </div>
     <div
         data-tauri-drag-region

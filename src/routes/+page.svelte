@@ -45,7 +45,7 @@
 <Library active={!editing} />
 <!-- Kept mounted while the library is up, so going back to the image is instant. -->
 <div class="editor-layer" class:away={!editing}>
-    <Editor active={editing} canvasHidden={library.canvasHidden || (!editing && !library.leaving)} />
+    <Editor active={editing} canvasHidden={library.canvasHidden} />
 </div>
 
 <style>
@@ -58,9 +58,9 @@
         pointer-events: none;
     }
 
-    /* Out of sight once the side bars have slid off and the image has flown. */
+    /* Out of sight once the side bars have slid off and the image has faded. */
     .editor-layer.away {
         visibility: hidden;
-        transition: visibility 0s linear 0.9s;
+        transition: visibility 0s linear 0.4s;
     }
 </style>

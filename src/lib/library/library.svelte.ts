@@ -8,7 +8,6 @@ import { tick, untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 
 import { editor } from "$lib/editor/editor.svelte";
-import { retouchTool } from "$lib/retouch/retouchTool.svelte";
 import { presets } from "$lib/presets/presets.svelte";
 import { colorSpaceDebug } from "$lib/gpu/colorSpaceDebug.svelte";
 import { settings } from "$lib/settings/settings.svelte";
@@ -20,7 +19,6 @@ import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/t
 import { history } from "$lib/history/history.svelte";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
-import { fitRect, fly, imageRect, land, nextFrame, rectOf, settle } from "./flight";
 
 export type LibraryView = { kind: "library"; id: number } | { kind: "roll"; id: number };
 export type MoveTarget = { label: string; place: Place; depth: number };
@@ -28,8 +26,8 @@ export type MoveTarget = { label: string; place: Place; depth: number };
 const SAVE_DELAY_MS = 400;
 // Long enough that a slider drag renders once, when it settles.
 const THUMBNAIL_DELAY_MS = 1200;
-// How long leaving the editor waits for a fresh thumbnail before flying the last one.
-const FRESH_THUMBNAIL_WAIT_MS = 350;
+// How long the editor's plate takes to fade and blur in or out; matches Editor.svelte.
+const PLATE_FADE_MS = 350;
 // The least time between two looks for moved files on coming back to the window.
 const FOCUS_SEARCH_GAP_MS = 30_000;
 
@@ -51,7 +49,7 @@ function touchDeep(value: unknown) {
     for (const key in value) touchDeep((value as Record<string, unknown>)[key]);
 }
 
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 /** `base`, or `base 2`, `base 3`… whichever is not taken yet. */
 function freeName(base: string, taken: string[]): string {
@@ -107,12 +105,10 @@ class Library {
 
     /** What fills the window. */
     showing = $state<"library" | "editor">("library");
-    /** The image whose cell is hidden while it is in flight. */
-    flyingId = $state<number | null>(null);
-    /** The editor's canvas is held back until the image is on it. */
+    /** The editor's image is held back until it has been drawn. */
     canvasHidden = $state(false);
-    /** On the way back to the library: the image stays on the canvas until it takes off. */
-    leaving = $state(false);
+    /** The editor can be left only while no tool holds the image. */
+    canLeave = $derived(!editor.isCropping && !editor.isRetouching);
     #moving = false;
 
     /** A library being named in place. */
@@ -699,7 +695,6 @@ class Library {
             this.thumbs.delete(id);
             this.#thumbsAsked.delete(id);
             this.#renderQueue.delete(id);
-            this.#resolveRendered(id);
             this.#lastSaved.delete(id);
         }
         if (this.#thumbPending && ids.includes(this.#thumbPending.id)) {
@@ -740,21 +735,6 @@ class Library {
         void this.#pumpRenders();
     }
 
-    #renderDone = new Map<number, (() => void)[]>();
-    /** The image whose thumbnail is rendering now. */
-    #renderingId: number | null = null;
-
-    /** Resolves once every thumbnail asked for `id` so far has rendered, or failed to. */
-    #rendered(id: number): Promise<void> {
-        if (!this.#renderQueue.has(id) && this.#renderingId !== id) return Promise.resolve();
-        return new Promise((resolve) => this.#renderDone.set(id, [...(this.#renderDone.get(id) ?? []), resolve]));
-    }
-
-    #resolveRendered(id: number) {
-        for (const resolve of this.#renderDone.get(id) ?? []) resolve();
-        this.#renderDone.delete(id);
-    }
-
     async #pumpRenders() {
         if (this.#rendering) return;
         this.#rendering = true;
@@ -763,20 +743,15 @@ class Library {
             while (this.#renderQueue.size > 0) {
                 const [id, given] = [...this.#renderQueue].at(-1)!;
                 this.#renderQueue.delete(id);
-                this.#renderingId = id;
                 try {
                     const edit = given ?? (await this.#storedEdit(id)) ?? newImageEdit(1, 1);
                     this.#setThumb(id, await api.renderThumbnail(id, edit, colorSpaceDebug.toneMap));
                 } catch (e) {
                     console.error(`Failed to render thumbnail ${id}:`, e);
                 }
-                this.#renderingId = null;
-                // Asked again meanwhile: those waiting want the newer render.
-                if (!this.#renderQueue.has(id)) this.#resolveRendered(id);
             }
         } finally {
             this.#rendering = false;
-            this.#renderingId = null;
         }
     }
 
@@ -864,10 +839,6 @@ class Library {
 
     // ===== Between the library and the editor =====
 
-    #cell(id: number) {
-        return document.querySelector<HTMLImageElement>(`[data-thumb-id="${id}"]`);
-    }
-
     async #openInEditor(image: ImageRecord): Promise<boolean> {
         await this.flushSave();
         let stored: ImageEdit | null = null;
@@ -884,7 +855,7 @@ class Library {
         return editor.openLibraryImage(image.path, image.id, stored, storedHistory);
     }
 
-    /** Opens an image, flying it from its cell into the editor. */
+    /** Opens an image, fading the editor in over the library. */
     openImage = async (id: number) => {
         const image = this.images.find((i) => i.id === id);
         if (!image || this.#moving) return;
@@ -898,48 +869,29 @@ class Library {
         this.#moving = true;
         try {
             const same = editor.libraryImageId === id && !!editor.imagePayload;
-            const src = this.thumbs.get(id);
-            const from = imageRect(this.#cell(id));
-
-            this.flyingId = id;
-            this.canvasHidden = true;
+            this.canvasHidden = !same;
             this.showing = "editor";
-            await tick();
+            if (same) return;
 
-            const opening = same ? Promise.resolve(true) : this.#openInEditor(image);
-            let flyer: HTMLImageElement | null = null;
-            const box = rectOf(document.querySelector(".canvas-center"));
-            if (src && from && box) flyer = await fly(src, from, fitRect(from.width / from.height, box));
-
-            if (!(await opening)) {
-                flyer?.remove();
+            if (!(await this.#openInEditor(image))) {
                 this.showing = "library";
                 this.#fail(`${image.fileName} could not be opened`);
                 void this.findMoved();
                 return;
             }
-            // Give the canvas its first frames before taking the flyer away.
-            if (!same) for (let i = 0; i < 4; i++) await nextFrame();
-            // The editor never fits an image past its own pixels, so a small one shows smaller than the slot.
-            const shown = rectOf(document.querySelector(".preview-frame"));
-            if (flyer && shown) await settle(flyer, shown);
-            this.canvasHidden = false;
-            if (flyer) await land(flyer);
+            // Give the canvas its first frames before bringing it into focus.
+            for (let i = 0; i < 4; i++) await nextFrame();
         } finally {
-            this.flyingId = null;
             this.canvasHidden = false;
             this.#moving = false;
         }
     };
 
-    /** Back to the library, flying the open image into its cell. */
+    /** Back to the library, fading the editor out over it. */
     showLibrary = async () => {
-        if (this.showing === "library" || this.#moving) return;
+        if (this.showing === "library" || this.#moving || !this.canLeave) return;
         this.#moving = true;
-        this.leaving = true;
         try {
-            if (editor.isCropping) editor.applyCrop();
-            retouchTool.mode = null;
             presets.open = false;
             const id = editor.libraryImageId;
             const image = id === null ? undefined : this.images.find((i) => i.id === id);
@@ -948,38 +900,20 @@ class Library {
                 return;
             }
 
-            // Only an edit that changed since its last render waits for a new one.
             void this.flushSave();
             if (this.#thumbPending?.id === image.id) this.#renderPendingThumb();
-            const fresh = this.#rendered(image.id);
-
-            editor.zoom = null;
             if (!this.shownImages.some((i) => i.id === image.id)) {
                 this.show(image.rollId !== null ? { kind: "roll", id: image.rollId } : { kind: "library", id: image.libraryId });
             }
             this.selection = [image.id];
-            this.flyingId = image.id;
-            this.showing = "library";
-            // The side bars slide off while the thumbnail catches up with the edit.
-            await Promise.race([fresh, wait(FRESH_THUMBNAIL_WAIT_MS)]);
             await tick();
-            await nextFrame();
-
-            const from = rectOf(document.querySelector(".preview-frame"));
-            const cell = this.#cell(image.id);
-            cell?.scrollIntoView({ block: "nearest" });
-            const src = this.thumbs.get(image.id);
-            this.canvasHidden = true;
-            if (src && from && cell) {
-                const flyer = await fly(src, from, imageRect(cell) ?? from);
-                this.flyingId = null;
-                await tick();
-                flyer.remove();
-            }
+            document.querySelector(`[data-thumb-id="${image.id}"]`)?.scrollIntoView({ block: "nearest" });
+            this.showing = "library";
+            // Fitted again once out of sight, so the image comes back whole.
+            setTimeout(() => {
+                if (this.showing === "library") editor.zoom = null;
+            }, PLATE_FADE_MS);
         } finally {
-            this.flyingId = null;
-            this.canvasHidden = false;
-            this.leaving = false;
             this.#moving = false;
         }
     };

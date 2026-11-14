@@ -33,7 +33,7 @@
     }: {
         /** On screen and taking the keyboard. Off, the side bars slide away to the window edges. */
         active?: boolean;
-        /** Holds the canvas back while the image flies to or from it. */
+        /** Holds the image back, out of focus, until it has been drawn. */
         canvasHidden?: boolean;
     } = $props();
 
@@ -105,7 +105,8 @@
     // Enter and Escape belong to the crop tool while it is open, unless a field
     // has the keyboard.
     function handleWindowKeydown(e: KeyboardEvent) {
-        if (!active) return;
+        // A key the library already answered, such as the one that opened the editor.
+        if (!active || e.defaultPrevented) return;
         // Nothing but the window itself answers while the save dialog is up or an
         // export runs, bar Escape and Enter dismissing a failed export.
         if (exportDialog.busy && !exportDialog.open) {
@@ -253,14 +254,15 @@
         position: fixed;
         inset: 0;
         background: var(--canvasBackdrop);
-        transition: background-color 0.12s ease;
+        transition:
+            background-color 0.12s ease,
+            opacity 0.35s ease;
         z-index: 0;
     }
 
     .canvas-backdrop.away {
         opacity: 0;
         pointer-events: none;
-        transition: opacity 0.35s ease;
     }
 
     /* Away, the chrome slides off to the window edges, and back in on return. */
@@ -284,8 +286,11 @@
         transition: opacity 0.25s ease;
     }
 
-    .app-shell.canvas-hidden :global(canvas) {
-        visibility: hidden;
+    /* The image fades and blurs out with the backdrop, and comes back into focus. */
+    .app-shell.away .canvas-center,
+    .app-shell.canvas-hidden .canvas-center {
+        opacity: 0;
+        filter: blur(16px);
     }
 
     .app-shell {
@@ -321,6 +326,9 @@
         inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
+        transition:
+            opacity 0.35s ease,
+            filter 0.35s ease;
     }
 
     /* The gradient under the toolbar and title bar, turning the corner on a

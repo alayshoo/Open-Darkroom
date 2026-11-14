@@ -105,7 +105,7 @@
     });
 
     function onKeydown(e: KeyboardEvent) {
-        if (!active || menu) return;
+        if (!active || menu || e.defaultPrevented) return;
         if (library.notice && !settings.open) {
             if (e.key === "Escape") library.notice = null;
             else if (e.key === "Enter" && library.notice.confirm) confirmNotice();
@@ -214,7 +214,6 @@
                                 <ImageCell
                                     {image}
                                     selected={library.selection.includes(image.id)}
-                                    hidden={library.flyingId === image.id}
                                     onselect={(e) => select(image, e)}
                                     onopen={() => library.openImage(image.id)}
                                     onmenu={(e) => imageMenu(image, e)}
@@ -298,15 +297,6 @@
         gap: 12px;
     }
 
-    /* The side columns slide in from the window edges and back out again, the
-       way the editor's do. */
-    .nav-column,
-    .details-column {
-        transition:
-            transform 0.35s cubic-bezier(0.2, 0, 0, 1),
-            opacity 0.35s ease;
-    }
-
     .nav-column {
         width: 240px;
     }
@@ -314,8 +304,6 @@
     .details-column {
         width: 300px;
         transition:
-            transform 0.35s cubic-bezier(0.2, 0, 0, 1),
-            opacity 0.35s ease,
             width 0.35s cubic-bezier(0.2, 0, 0, 1),
             margin-left 0.35s cubic-bezier(0.2, 0, 0, 1);
     }
@@ -363,26 +351,6 @@
 
     .panel-toggle.on .fill {
         opacity: 0.35;
-    }
-
-    .library-layer:not(.active) .nav-column {
-        transform: translateX(calc(-100% - 24px));
-        opacity: 0;
-        transition-timing-function: cubic-bezier(0.4, 0, 1, 1), ease;
-    }
-
-    .library-layer:not(.active) .details-column {
-        transform: translateX(calc(100% + 24px));
-        opacity: 0;
-        transition-timing-function: cubic-bezier(0.4, 0, 1, 1), ease;
-    }
-
-    .main {
-        transition: opacity 0.3s ease;
-    }
-
-    .library-layer:not(.active) .main {
-        opacity: 0;
     }
 
     .head {

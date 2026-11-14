@@ -414,8 +414,7 @@ describe("opening an image", () => {
         expect(editor.edit.sliders.exposure).toBe(1);
         expect(history.stack).toHaveLength(1);
         expect(history.canUndo).toBe(true);
-        await vi.waitFor(() => expect(library.flyingId).toBeNull(), { timeout: 5000 });
-        expect(document.querySelector(".library-flyer")).toBeNull();
+        await vi.waitFor(() => expect(library.canvasHidden).toBe(false), { timeout: 5000 });
     });
 
     it("does not save an edit only for opening the image", async () => {
@@ -447,6 +446,19 @@ describe("opening an image", () => {
         expect(editor.edit.sliders.exposure).toBe(1);
     });
 
+    it("keeps the arrow disabled while a tool holds the image", async () => {
+        const arrow = $<HTMLButtonElement>('.toolbar [aria-label="Back to library"]')!;
+        editor.toggleCrop();
+        await vi.waitFor(() => expect(arrow.disabled).toBe(true));
+        await library.showLibrary();
+        expect(editing()).toBe(true);
+        editor.cancelCrop();
+        editor.toggleRetouch("heal");
+        await vi.waitFor(() => expect(arrow.disabled).toBe(true));
+        editor.toggleRetouch("heal");
+        await vi.waitFor(() => expect(arrow.disabled).toBe(false));
+    });
+
     it("goes back with the arrow above the crop tool, and in again without reopening", async () => {
         const arrow = $<HTMLButtonElement>('.toolbar [aria-label="Back to library"]')!;
         const crop = $<HTMLButtonElement>('.toolbar [aria-label="Crop"]')!;
@@ -454,7 +466,7 @@ describe("opening an image", () => {
 
         arrow.click();
         await vi.waitFor(() => expect(editing()).toBe(false), { timeout: 5000 });
-        await vi.waitFor(() => expect(library.flyingId).toBeNull(), { timeout: 5000 });
+        await vi.waitFor(() => expect(library.canvasHidden).toBe(false), { timeout: 5000 });
         expect(library.view).toEqual({ kind: "roll", id: 10 });
         expect(library.selection).toEqual([2]);
         // Leaving renders the thumbnail with the edit as it stands.
@@ -465,7 +477,7 @@ describe("opening an image", () => {
         const opens = called("open_image_path").length;
         await userEvent.keyboard("g");
         await vi.waitFor(() => expect(editing()).toBe(true), { timeout: 5000 });
-        await vi.waitFor(() => expect(library.flyingId).toBeNull(), { timeout: 5000 });
+        await vi.waitFor(() => expect(library.canvasHidden).toBe(false), { timeout: 5000 });
         expect(called("open_image_path")).toHaveLength(opens);
         expect(editor.edit.sliders.contrast).toBe(25);
 
@@ -476,7 +488,7 @@ describe("opening an image", () => {
 
 describe("moving and removing", () => {
     it("moves the selected frames to another library from the context menu", async () => {
-        await vi.waitFor(() => expect(library.flyingId).toBeNull(), { timeout: 5000 });
+        await vi.waitFor(() => expect(library.canvasHidden).toBe(false), { timeout: 5000 });
         library.selection = [2, 3];
         cell("frame02.tif")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 400, clientY: 300 }));
         const target = await vi.waitFor(() => {
