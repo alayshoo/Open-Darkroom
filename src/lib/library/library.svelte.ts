@@ -215,8 +215,7 @@ class Library {
 
     show = (view: LibraryView) => {
         this.view = view;
-        this.selection = [];
-        this.#anchor = null;
+        this.deselect();
     };
 
     // ===== Libraries and rolls =====
@@ -573,6 +572,11 @@ class Library {
             this.selection = [id];
         }
         this.#anchor = id;
+    };
+
+    deselect = () => {
+        this.selection = [];
+        this.#anchor = null;
     };
 
     selectAll = () => {

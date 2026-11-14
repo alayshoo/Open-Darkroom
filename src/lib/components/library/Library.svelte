@@ -46,6 +46,13 @@
         library.select(image.id, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey });
     }
 
+    // A click anywhere in the main area that lands on no image or control clears the selection.
+    const KEEPS_SELECTION = "[role=option], button, input, textarea, select, label, a, [contenteditable]";
+    function clickMain(e: MouseEvent) {
+        if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey) return;
+        if (!(e.target as Element).closest(KEEPS_SELECTION)) library.deselect();
+    }
+
     function imageMenu(image: ImageRecord, e: MouseEvent) {
         e.preventDefault();
         if (!library.selection.includes(image.id)) library.select(image.id);
@@ -155,7 +162,8 @@
             <LibraryNav />
         </div>
 
-        <main class="main flex flex-col flex-1 min-w-0">
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+        <main class="main flex flex-col flex-1 min-w-0" onclick={clickMain}>
             {#if library.view}
                 <header class="head flex items-end">
                     <div class="flex flex-col flex-1 min-w-0">
@@ -189,13 +197,7 @@
                     </div>
                 </header>
 
-                <div
-                    class="scroll flex flex-col flex-1 min-h-0"
-                    role="presentation"
-                    onclick={(e) => {
-                        if (e.target === e.currentTarget) library.selection = [];
-                    }}
-                >
+                <div class="scroll flex flex-col flex-1 min-h-0">
                     {#if library.shownRolls.length > 0}
                         <h2>Rolls</h2>
                         <div class="rolls">

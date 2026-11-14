@@ -185,6 +185,21 @@ describe("the library", () => {
         expect(aperture).not.toBeNull();
     });
 
+    it("clears the selection on a click anywhere in the grid area but an image or a control", async () => {
+        const click = (el: Element) => el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        for (const target of [$(".grid")!, $(".head")!, $(".scroll")!]) {
+            cell("frame02.tif")!.click();
+            expect(library.selection).toEqual([3]);
+            click(target);
+            expect(library.selection).toEqual([]);
+        }
+        cell("frame02.tif")!.click();
+        click($(".panel-toggle")!.querySelector("svg")!);
+        expect(library.selection).toEqual([3]);
+        settings.libraryDetails = true;
+        await vi.waitFor(() => expect($(".details h2")?.textContent).toBe("Frame 2"));
+    });
+
     it("saves what is typed into the roll's information", async () => {
         const format = [...document.querySelectorAll<HTMLLabelElement>(".details .field")].find(
             (f) => f.querySelector(".label")?.textContent === "Format",
