@@ -19,6 +19,9 @@ import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/t
 import { history } from "$lib/history/history.svelte";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("library");
 
 export type LibraryView = { kind: "library"; id: number } | { kind: "roll"; id: number };
 export type MoveTarget = { label: string; place: Place; depth: number };
@@ -208,7 +211,7 @@ class Library {
     };
 
     #fail(text: string, e?: unknown) {
-        if (e !== undefined) console.error(`${text}:`, e);
+        if (e !== undefined) log.error(text, e);
         const detail = typeof e === "string" ? e : e instanceof Error ? e.message : "";
         this.notice = { text: detail ? `${text}: ${detail}` : text };
     }
@@ -505,7 +508,7 @@ class Library {
         const listed = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
         const reasons = new Set(skipped.map((s) => s.reason));
         const reason = reasons.size === 1 ? `: ${skipped[0].reason}` : "";
-        console.error("Files not imported:", skipped);
+        log.warn(`Skipped ${skipped.length} file(s) on import: ${skipped.map((s) => `${s.path} (${s.reason})`).join(", ")}`);
         this.notice = { text: `Could not import ${listed}${reason}` };
     }
 
@@ -651,7 +654,7 @@ class Library {
                 this.notice = { text: `Found ${found.length} ${near ? "more " : ""}${files} that had moved.` };
             }
         } catch (e) {
-            console.error("Failed to look for moved files:", e);
+            log.error("Failed to look for moved files", e);
         } finally {
             this.finding = false;
             const next = this.#findNear;
@@ -721,7 +724,7 @@ class Library {
             if (bytes) this.#setThumb(image.id, bytes);
             else if (!image.missing) this.#queueRender(image.id, null);
         } catch (e) {
-            console.error("Failed to read thumbnail:", e);
+            log.warn("Failed to read a thumbnail", e);
         }
     };
 
@@ -751,7 +754,7 @@ class Library {
                     const edit = given ?? (await this.#storedEdit(id)) ?? newImageEdit(1, 1);
                     this.#setThumb(id, await api.renderThumbnail(id, edit, colorSpaceDebug.toneMap));
                 } catch (e) {
-                    console.error(`Failed to render thumbnail ${id}:`, e);
+                    log.warn(`Failed to render the thumbnail of image ${id}`, e);
                 }
             }
         } finally {
@@ -853,7 +856,7 @@ class Library {
                 api.fetchEditHistory(image.id).then(parseEditHistory),
             ]);
         } catch (e) {
-            console.error("Failed to read the stored edit:", e);
+            log.error("Failed to read the stored edit", e);
         }
         this.#lastSaved.delete(image.id);
         return editor.openLibraryImage(image.path, image.id, stored, storedHistory);

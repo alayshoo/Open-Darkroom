@@ -13,6 +13,7 @@
  */
 
 import { DEFAULTS, loadSettings, saveSetting } from "./persistence";
+import { applyVerboseLogging } from "$lib/utils/diagnostics";
 
 class Settings {
     /** Whether the modal is up. */
@@ -73,6 +74,18 @@ class Settings {
         void saveSetting("groupRolls", value);
     }
 
+    #verboseLogging = $state(DEFAULTS.verboseLogging);
+
+    get verboseLogging() {
+        return this.#verboseLogging;
+    }
+
+    set verboseLogging(value: boolean) {
+        this.#verboseLogging = value;
+        void saveSetting("verboseLogging", value);
+        void applyVerboseLogging(value).catch(() => {});
+    }
+
     /**
      * Settles once the stored file has been applied. Reading is a round trip
      * through the backend, so the defaults are what show until it lands — and
@@ -84,6 +97,10 @@ class Settings {
         if (stored.importCopies !== undefined) this.#importCopies = stored.importCopies;
         if (stored.libraryDetails !== undefined) this.#libraryDetails = stored.libraryDetails;
         if (stored.groupRolls !== undefined) this.#groupRolls = stored.groupRolls;
+        if (stored.verboseLogging) {
+            this.#verboseLogging = true;
+            void applyVerboseLogging(true).catch(() => {});
+        }
     });
 
     show(section?: string) {

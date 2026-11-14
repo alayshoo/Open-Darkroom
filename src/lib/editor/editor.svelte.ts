@@ -56,6 +56,9 @@ import { autoLevels } from "$lib/utils/autoLevels";
 import { fetchImageMetadata, openImagePath } from "$lib/utils/openImage";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { animateObject } from "$lib/utils/animateObject";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("editor");
 
 // How long the control pagers take to slide across on a mode change.
 export const MODE_SLIDE_MS = 500;
@@ -313,7 +316,7 @@ class Editor {
             return true;
         } catch (e) {
             this.closeImage();
-            console.error("Failed to open image:", e);
+            log.error("Failed to open an image", e);
             return false;
         }
     };
@@ -332,7 +335,7 @@ class Editor {
             .then((metadata) => {
                 if (this.imagePayload?.imageId === imageId) this.metadata = metadata;
             })
-            .catch((e) => console.error("Failed to read image metadata:", e));
+            .catch((e) => log.error("Failed to read image metadata", e));
     }
 
     toggleInfo = () => {
@@ -458,7 +461,7 @@ class Editor {
             .then((h) => {
                 if (request === this.#histogramRequest) this.inputHistograms = h;
             })
-            .catch((e) => console.error("Failed to bin the crop:", e))
+            .catch((e) => log.error("Failed to bin the crop", e))
             .finally(() => {
                 this.#histogramBinning = false;
                 const next = this.#histogramPending;
@@ -633,7 +636,7 @@ class Editor {
                 this.isDarkroom ? undefined : ($state.snapshot(this.edit.curves) as Curves),
             );
         } catch (e) {
-            console.error("Failed to copy adjustments:", e);
+            log.error("Failed to copy adjustments", e);
         }
     };
 
@@ -645,7 +648,7 @@ class Editor {
             const pasted = await readAdjustments(this.activeKeys, !this.isDarkroom);
             this.#applySliderSet(pasted.sliders, pasted.curves);
         } catch (e) {
-            console.error("Failed to paste adjustments:", e);
+            log.error("Failed to paste adjustments", e);
         }
     };
 
@@ -729,16 +732,16 @@ class Editor {
         try {
             await presets.exportFile(preset);
         } catch (e) {
-            console.error("Failed to export preset:", e);
+            log.error("Failed to export a preset", e);
         }
     };
 
     importPresets = async () => {
         try {
             const failed = await presets.importFiles();
-            if (failed > 0) console.warn(`${failed} preset file(s) could not be read`);
+            if (failed > 0) log.warn(`${failed} preset file(s) could not be read`);
         } catch (e) {
-            console.error("Failed to import presets:", e);
+            log.error("Failed to import presets", e);
         }
     };
 

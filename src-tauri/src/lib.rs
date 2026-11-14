@@ -22,6 +22,7 @@ mod catalog_commands;
 pub mod exif_writing;
 pub mod export_size;
 pub mod export;
+mod logging;
 mod presets;
 
 use image_opening::ImageState;
@@ -29,6 +30,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::install_panic_hook();
     let mut context = tauri::generate_context!();
     // Debug builds keep their own app data, apart from an installed copy's.
     if cfg!(debug_assertions) {
@@ -36,20 +38,32 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Registered first: a second launch hands over to the running copy
+        // before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("Another launch was handed to this window");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(ImageState::new(None))
         .manage(catalog_commands::CatalogState::new(None))
-        .setup(|app| {
-            // The editor still works without a catalog, so a failure is reported rather than fatal.
-            match catalog_commands::open_catalog(app.handle()) {
-                Ok(catalog) => *app.state::<catalog_commands::CatalogState>().lock().unwrap() = Some(catalog),
-                Err(e) => eprintln!("catalog: could not open: {e}"),
-            }
-            Ok(())
-        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .setup(|app| {
+            logging::init(app.handle());
+            app.manage(logging::begin_session(app.handle()));
+            // The editor still works without a catalog, so a failure is reported rather than fatal.
+            match catalog_commands::open_catalog(app.handle()) {
+                Ok(catalog) => *app.state::<catalog_commands::CatalogState>().lock().unwrap() = Some(catalog),
+                Err(e) => log::error!("The catalog could not be opened: {e}"),
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             wrap_cursor,
             grab_cursor,
@@ -92,9 +106,18 @@ pub fn run() {
             catalog_commands::catalog_choose_photo_folder,
             catalog_commands::catalog_thumbnail,
             catalog_commands::catalog_render_thumbnail,
+            logging::logging_status,
+            logging::set_verbose_logging,
+            logging::reveal_log_file,
+            logging::diagnostics,
         ])
-        .run(context)
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                logging::end_session(app);
+            }
+        });
 }
 
 

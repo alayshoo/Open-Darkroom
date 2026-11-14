@@ -15,6 +15,17 @@ Comments should be generic, not based on your reasoning when solving a specific 
 
 Never use ALL CAPS in the UI, whether typed that way or through `text-transform: uppercase`. Headings and labels are written in sentence case.
 
+## Logging
+
+The backend and the webview write to one log file per session in the OS log folder (`logging.rs`). The last ten files are kept, and the logs of the last three sessions that crashed are set aside where rotation cannot remove them. Only one copy of the app runs at a time. Never use `println!` or `console.*`: use the `log` macros in Rust and `createLogger("<scope>")` from `$lib/utils/log` in the frontend.
+
+- `error`: a failure the user will notice, such as a failed open or export, a lost GPU device or a panic.
+- `warn`: something that recovered or degraded, such as an image resized to the texture limit or a skipped preset.
+- `info`: one line per lifecycle event, with the numbers needed to reproduce it: app start, GPU adapter, image opened (size, format, camera, time), full resolution ready, export (settings, size, time).
+- `debug`: timings and per-step detail. Dropped unless Verbose logging is on in Settings, or in a debug build.
+
+Never log per frame, per slider tick or per band at `info` or above. Log an error once, where it is handled: a command's `Err` is logged by the frontend code that catches it, with what the user was doing. Uncaught errors, rejections, panics, WebGPU uncaptured errors and device loss are already caught globally. Wrap anything that can repeat in `limitRepeats`. Paths may be logged as they are, since the home folder is replaced with `~`.
+
 ## Branches and releases
 
 `main` is the default branch and the nightly build. All work branches off it and merges back into it. The `release` branch only receives `main` through the `release` skill, and every push to `release` builds the Windows `.msi` and a universal macOS `.dmg` and publishes them as a GitHub release. Never merge or push anything else into `release`.

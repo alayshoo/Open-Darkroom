@@ -16,6 +16,9 @@ import {
     pickExportFolder,
     type ExportDestination,
 } from "$lib/utils/exportImage";
+import { createLogger } from "$lib/utils/log";
+
+const log = createLogger("export");
 
 export type ExportPhase = "preparing" | "rendering" | "encoding";
 
@@ -79,7 +82,10 @@ class ExportDialog {
             const image = editor.imagePayload;
             if (!image || this.busy) return;
             if (this.#namedFor !== image.imageId) {
-                const defaults = await exportDefaults().catch(() => null);
+                const defaults = await exportDefaults().catch((e) => {
+                    log.warn("Failed to read the export defaults", e);
+                    return null;
+                });
                 this.#namedFor = image.imageId;
                 this.fileName = defaults?.fileName ?? "Untitled";
                 if (!this.folder && defaults) this.folder = defaults.folder;
@@ -99,7 +105,10 @@ class ExportDialog {
     };
 
     chooseFolder = async () => {
-        const folder = await pickExportFolder(this.folder || null).catch(() => null);
+        const folder = await pickExportFolder(this.folder || null).catch((e) => {
+            log.error("Failed to open the folder dialog", e);
+            return null;
+        });
         if (folder) this.folder = folder;
     };
 
@@ -113,7 +122,7 @@ class ExportDialog {
             if (editor.isCropping) editor.applyCrop();
             (document.activeElement as HTMLElement)?.blur();
             destination = await pickExportFile(this.settings.format, this.folder || null).catch((e) => {
-                console.error("Failed to open the save dialog:", e);
+                log.error("Failed to open the save dialog", e);
                 return null;
             });
         } finally {
@@ -124,6 +133,7 @@ class ExportDialog {
         try {
             await this.#export(destination);
         } catch (e) {
+            log.error("Export failed", e);
             this.quickError = String(e);
         } finally {
             this.quick = false;
@@ -137,6 +147,7 @@ class ExportDialog {
             await this.#export({ folder: this.folder, fileName: this.fileName });
             this.close();
         } catch (e) {
+            log.error("Export failed", e);
             this.error = String(e);
         }
     };

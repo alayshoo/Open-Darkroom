@@ -25,6 +25,7 @@
     import { retouchTool } from "$lib/retouch/retouchTool.svelte";
     import { isTextField } from "$lib/config/keyboardShortcuts";
     import RetouchBrush from "./RetouchBrush.svelte";
+    import { createLogger } from "$lib/utils/log";
     import {
         MAX_ZOOM,
         apply,
@@ -81,6 +82,7 @@
 
     // Get the shared GPU session from layout context
     const gpu = getGPU()!;
+    const log = createLogger("preview");
 
     let canvas: HTMLCanvasElement;
     let frame: HTMLDivElement;
@@ -240,7 +242,7 @@
                     full.texture.destroy();
                     return;
                 }
-                console.log(
+                log.info(
                     `Full resolution ${full.width}×${full.height} on the GPU in ${Math.round(performance.now() - started)} ms`,
                 );
                 localRenderer.setSource(full);
@@ -251,7 +253,7 @@
                 retouchReady = true;
             })
             .catch((e) => {
-                if (load === loading) console.error("Failed to load the full-resolution image:", e);
+                if (load === loading) log.error("Failed to load the full-resolution image", e);
             });
     });
 
@@ -682,7 +684,7 @@
                 }
                 emit(finished);
             } catch (e) {
-                console.error("Failed to find a source for the stroke:", e);
+                log.error("Failed to find a source for the stroke", e);
             } finally {
                 pending = pending.filter((p) => p.id !== id);
             }

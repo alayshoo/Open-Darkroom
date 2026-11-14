@@ -2,7 +2,10 @@
 // lib/gpu/gpu.ts
 
 import { type GPUSession } from "$lib/types/gpuTypes";
+import { createLogger, limitRepeats } from "$lib/utils/log";
 import type { OutputSpaceId } from "./outputSpace";
+
+const log = createLogger("gpu");
 
 export async function initializeGPU(): Promise<GPUSession> {
     
@@ -34,15 +37,49 @@ export async function initializeGPU(): Promise<GPUSession> {
 
     // Format is the pixel format the display expects.
     const format = navigator.gpu.getPreferredCanvasFormat();
+    const displaySpace = detectDisplaySpace();
+
+    log.info(`Adapter: ${describeAdapter(adapter.info)}`);
+    log.info(
+        `Device: canvas ${format}, display ${displaySpace}, ` +
+            `max texture ${device.limits.maxTextureDimension2D}px, ` +
+            `max buffer ${Math.round(device.limits.maxBufferSize / 2 ** 20)} MiB, ` +
+            `timestamps ${canTimestamp ? "on" : "off"}`,
+    );
+    watchDevice(device);
 
     return {
         device,
         format,
-        displaySpace: detectDisplaySpace(),
+        displaySpace,
         canTimestamp,
         adapterInfo: adapter.info ?? null,
         adapterFeatures: [...adapter.features].sort(),
     };
+}
+
+/** One line naming the adapter, for the log and for bug reports. */
+export function describeAdapter(info: GPUAdapterInfo | null | undefined): string {
+    if (!info) return "no adapter info";
+    const parts = [info.vendor, info.architecture, info.device, info.description].filter(Boolean);
+    return (parts.join(" / ") || "details withheld") + (info.isFallbackAdapter ? " (fallback)" : "");
+}
+
+/**
+ * Validation and out-of-memory errors no error scope caught would otherwise
+ * vanish outside devtools, and a lost device just leaves the canvas frozen.
+ */
+function watchDevice(device: GPUDevice) {
+    const report = limitRepeats(log);
+    device.addEventListener("uncapturederror", (event) => {
+        const { error } = event as GPUUncapturedErrorEvent;
+        report(`Uncaptured ${error.constructor.name}: ${error.message}`);
+    });
+
+    device.lost.then((info) => {
+        if (info.reason === "destroyed") log.info("Device destroyed");
+        else log.error(`Device lost (${info.reason}): ${info.message}`);
+    });
 }
 
 
