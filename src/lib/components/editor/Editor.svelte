@@ -286,11 +286,20 @@
         transition: opacity 0.25s ease;
     }
 
-    /* The image fades and blurs out with the backdrop, and comes back into focus. */
+    /* The image fades and blurs out with the backdrop, and comes back into focus.
+       The blur sits on the canvas itself: a filter on an ancestor would move it, as it is fixed. */
     .app-shell.away .canvas-center,
     .app-shell.canvas-hidden .canvas-center {
         opacity: 0;
+    }
+
+    .app-shell.away .canvas-center :global(canvas),
+    .app-shell.canvas-hidden .canvas-center :global(canvas) {
         filter: blur(16px);
+    }
+
+    .canvas-center :global(canvas) {
+        transition: filter 0.35s ease;
     }
 
     .app-shell {
@@ -326,9 +335,7 @@
         inset: 36px 36px 36px 29px;
         overflow: visible;
         pointer-events: auto;
-        transition:
-            opacity 0.35s ease,
-            filter 0.35s ease;
+        transition: opacity 0.35s ease;
     }
 
     /* The gradient under the toolbar and title bar, turning the corner on a

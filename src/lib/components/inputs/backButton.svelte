@@ -6,10 +6,10 @@
 
 <div class="back-button">
 	<GlassButton label="Back to library" size={40} {disabled} onclick={() => onclick?.()}>
-		<!-- On the crop icon's padded view box, like the other tools. -->
+		<!-- On the crop icon's padded view box, nudged towards its tip so it reads as centred. -->
 		<svg width="40" height="40" viewBox="-3 -3 30 30">
 			<path
-				d="M14.75 6.5L10.7 10.55Q9.25 12 10.7 13.45L14.75 17.5"
+				d="M13.5 6.5L9.45 10.55Q8 12 9.45 13.45L13.5 17.5"
 				fill="none"
 				stroke="currentColor"
 				stroke-width="1.05"
