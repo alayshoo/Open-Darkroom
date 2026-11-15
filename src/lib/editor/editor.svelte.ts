@@ -53,7 +53,8 @@ import {
 } from "$lib/types/cropAspect";
 import { cropHistograms, type ChannelHistograms } from "$lib/utils/cropHistograms";
 import { autoLevels } from "$lib/utils/autoLevels";
-import { fetchImageMetadata, openImagePath } from "$lib/utils/openImage";
+import { openImagePath } from "$lib/utils/openImage";
+import type { ImageRecord } from "$lib/library/catalogApi";
 import { copyAdjustments, readAdjustments } from "$lib/utils/adjustmentsClipboard";
 import { animateObject } from "$lib/utils/animateObject";
 import { createLogger } from "$lib/utils/log";
@@ -295,24 +296,26 @@ class Editor {
     // ===== Opening =====
 
     // Opens an image from the library with the edit stored for it, unless that
-    // edit was made on a file of another size. Resolves false on failure.
+    // edit was made on a file of another size. The file is decoded while the
+    // stored edit is read. Resolves false on failure.
     openLibraryImage = async (
-        path: string,
-        libraryImageId: number,
-        stored: ImageEdit | null,
-        storedHistory: EditHistory | null = null,
+        image: ImageRecord,
+        stored: Promise<[ImageEdit | null, EditHistory | null]>,
     ): Promise<boolean> => {
         try {
-            const payload = await openImagePath(path);
+            const [payload, [edit, storedHistory]] = await Promise.all([
+                openImagePath(image.path, image.metadata),
+                stored,
+            ]);
             this.imagePayload = payload;
             this.zoom = null;
             this.#resetEdit(payload.fullWidth, payload.fullHeight);
-            if (stored && editFitsSource(stored, payload.fullWidth, payload.fullHeight)) {
-                this.edit = stored;
+            if (edit && editFitsSource(edit, payload.fullWidth, payload.fullHeight)) {
+                this.edit = edit;
                 if (storedHistory) history.restore(storedHistory.steps, storedHistory.pointer);
             }
-            this.libraryImageId = libraryImageId;
-            this.#loadMetadata(payload.imageId);
+            this.libraryImageId = image.id;
+            this.metadata = { ...image.metadata, fileName: image.fileName };
             return true;
         } catch (e) {
             this.closeImage();
@@ -328,15 +331,6 @@ class Editor {
         this.libraryImageId = null;
         history.clear();
     };
-
-    #loadMetadata(imageId: number) {
-        this.metadata = null;
-        fetchImageMetadata(imageId)
-            .then((metadata) => {
-                if (this.imagePayload?.imageId === imageId) this.metadata = metadata;
-            })
-            .catch((e) => log.error("Failed to read image metadata", e));
-    }
 
     toggleInfo = () => {
         if (!this.infoOpen) {

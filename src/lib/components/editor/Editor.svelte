@@ -43,6 +43,15 @@
 
     $effect(() => holdPageZoom());
 
+    // The library thumbnail, blurred where the image will be, until the image has been drawn.
+    let placeholder = $derived(library.placeholder);
+    // A fitted image is never shown past 1:1, so neither is its stand-in.
+    let placeholderSize = $derived.by(() => {
+        if (!placeholder?.width || !placeholder.height) return "";
+        const dpr = window.devicePixelRatio || 1;
+        return `max-width: ${placeholder.width / dpr}px; max-height: ${placeholder.height / dpr}px;`;
+    });
+
     // The presets and the info panel take turns in one column. The last one
     // shown stays in it while the column slides shut.
     let panelOpen = $derived(presets.open || editor.infoOpen);
@@ -199,7 +208,10 @@
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
-        <div class="canvas-center absolute flex items-center justify-center">
+        <div class="canvas-center absolute flex items-center justify-center" class:placeholding={!!placeholder}>
+            {#if placeholder}
+                <img class="placeholder" src={placeholder.src} alt="" draggable="false" style={placeholderSize} />
+            {/if}
             <PreviewImageCanvas
                 sliders={editor.shownSliders}
                 curveLut={editor.shownCurveLut}
@@ -290,8 +302,37 @@
     /* The image fades and blurs out with the backdrop, and comes back into focus.
        The blur sits on the canvas itself: a filter on an ancestor would move it, as it is fixed. */
     .app-shell.away .canvas-center,
-    .app-shell.canvas-hidden .canvas-center {
+    .app-shell.canvas-hidden .canvas-center:not(.placeholding) {
         opacity: 0;
+    }
+
+    /* With a thumbnail standing in, only the image is held back, and comes into focus over it. */
+    .app-shell.canvas-hidden .placeholding :global(.preview-frame) {
+        opacity: 0;
+        transition: none;
+    }
+
+    .canvas-center :global(.preview-frame) {
+        transition: opacity 0.35s ease;
+    }
+
+    /* Fitted to the slot as the image is. Its blur reaches past the image, so it fades only once the image is nearly in. */
+    .placeholder {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        filter: blur(16px);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease 0.25s;
+    }
+
+    .app-shell.canvas-hidden .placeholder {
+        opacity: 1;
+        transition: none;
     }
 
     .app-shell.away .canvas-center :global(canvas),
