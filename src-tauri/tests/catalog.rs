@@ -745,3 +745,42 @@ fn a_roll_and_a_library_keep_their_own_order() {
     assert_eq!(c.libraries().unwrap()[0].sort, "name");
     assert_eq!(c.rolls().unwrap()[0].sort, "-date");
 }
+
+fn set_schema(scratch: &Scratch, version: &str) {
+    let db = rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap();
+    db.execute("UPDATE meta SET value = ?1 WHERE key = 'schema'", [version]).unwrap();
+}
+
+fn frames_by_name(c: &Catalog, roll_id: i64) -> Vec<(String, Option<i64>)> {
+    let snapshot = c.snapshot().unwrap();
+    let mut frames: Vec<_> = snapshot.images.into_iter().filter(|i| i.roll_id == Some(roll_id)).collect();
+    frames.sort_by_key(|i| i.frame);
+    frames.into_iter().map(|i| (i.file_name, i.frame)).collect()
+}
+
+#[test]
+fn a_roll_numbered_in_text_order_by_an_older_build_is_renumbered_once() {
+    let scratch = Scratch::new();
+    let (text_ordered, by_hand) = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        let (a, _) = c.import_roll(library.id, "Old", &paths, false).unwrap();
+        let paths: Vec<_> = ["2.png", "1.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("b/{n}"), 10 + i as u8)).collect();
+        let (b, _) = c.import_roll(library.id, "By hand", &paths, false).unwrap();
+        (a.unwrap().id, b.unwrap().id)
+    };
+    set_schema(&scratch, "5");
+    let c = catalog(&scratch);
+    let renumbered = [("1.png".to_string(), Some(1)), ("2.png".to_string(), Some(2)), ("10.png".to_string(), Some(3))];
+    assert_eq!(frames_by_name(&c, text_ordered), renumbered);
+    assert_eq!(frames_by_name(&c, by_hand), [("2.png".to_string(), Some(1)), ("1.png".to_string(), Some(2))]);
+    drop(c);
+
+    // Only once: a roll put back in text order afterwards stays that way.
+    let db = rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap();
+    db.execute("UPDATE images SET frame = CASE frame WHEN 2 THEN 3 WHEN 3 THEN 2 ELSE frame END WHERE roll_id = ?1", [text_ordered]).unwrap();
+    drop(db);
+    let c = catalog(&scratch);
+    assert_eq!(frames_by_name(&c, text_ordered)[1].0, "10.png");
+}

@@ -477,6 +477,12 @@ impl Catalog {
 
     /// Brings a catalog written by an older build up to this one's schema.
     fn migrate(&self) -> Result<(), String> {
+        let stored: Option<i64> = self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get::<_, String>(0))
+            .optional()
+            .map_err(err)?
+            .and_then(|v| v.parse().ok());
         let columns = [
             ("film_stocks", "colour3", "TEXT"),
             ("rolls", "gear", "TEXT NOT NULL DEFAULT '{}'"),
@@ -497,6 +503,9 @@ impl Catalog {
             }
         }
         self.refingerprint()?;
+        if stored.is_some_and(|v| v < 6) {
+            self.renumber_name_ordered_rolls()?;
+        }
         self.conn
             .execute(
                 "INSERT INTO meta (key, value) VALUES ('schema', ?1)
@@ -505,6 +514,49 @@ impl Catalog {
             )
             .map(|_| ())
             .map_err(err)
+    }
+
+    /// Builds before schema 6 numbered folders by plain text order, so `10` came
+    /// before `2`. A roll still numbered that way is renumbered by [`natural_cmp`],
+    /// keeping its frame numbers; one numbered any other way is left as it is.
+    fn renumber_name_ordered_rolls(&self) -> Result<(), String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT roll_id, id, frame, path FROM images WHERE roll_id IS NOT NULL AND frame IS NOT NULL ORDER BY roll_id, frame, id")
+            .map_err(err)?;
+        let rows: Vec<(i64, i64, i64, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)?;
+        let mut changes: Vec<(i64, i64)> = Vec::new();
+        let mut renumbered = 0;
+        for roll in rows.chunk_by(|a, b| a.0 == b.0) {
+            let name = |path: &str| Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let names: Vec<String> = roll.iter().map(|f| name(&f.3)).collect();
+            let as_text_order = names.windows(2).all(|w| w[0].to_lowercase() <= w[1].to_lowercase());
+            let mut natural: Vec<usize> = (0..roll.len()).collect();
+            natural.sort_by(|&a, &b| natural_cmp(&names[a], &names[b]));
+            if !as_text_order || natural.iter().enumerate().all(|(i, &j)| i == j) {
+                continue;
+            }
+            renumbered += 1;
+            for (slot, &j) in natural.iter().enumerate() {
+                changes.push((roll[j].1, roll[slot].2));
+            }
+        }
+        drop(stmt);
+        if changes.is_empty() {
+            return Ok(());
+        }
+        self.atomically(|| {
+            for (id, frame) in &changes {
+                self.conn.execute("UPDATE images SET frame = ?1 WHERE id = ?2", params![frame, id]).map_err(err)?;
+            }
+            Ok(())
+        })?;
+        log::info!("Renumbered the frames of {renumbered} roll(s) imported in text order");
+        Ok(())
     }
 
     /// Takes fingerprints of the current kind for images that still have the
