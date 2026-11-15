@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use image::{ImageBuffer, Rgb};
 use serde_json::json;
 
-use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
+use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, natural_cmp, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
 use open_darkroom_lib::thumbnails::ThumbnailSource;
 
 struct Scratch(PathBuf);
@@ -710,4 +710,38 @@ fn deleting_gear_clears_it_from_a_roll_whose_information_is_not_an_object() {
     let roll = c.rolls().unwrap().remove(0);
     assert_eq!(roll.gear.camera, None);
     assert_eq!(roll.info["camera"], "Hasselblad 500C/M");
+}
+
+#[test]
+fn names_are_ordered_by_the_numbers_in_them() {
+    let mut names = ["IMG_10.tif", "img_2.tif", "IMG_1.tif", "IMG_02b.tif", "IMG_100.tif", "IMG_9.tif"];
+    names.sort_by(|a, b| natural_cmp(a, b));
+    assert_eq!(names, ["IMG_1.tif", "img_2.tif", "IMG_02b.tif", "IMG_9.tif", "IMG_10.tif", "IMG_100.tif"]);
+}
+
+#[test]
+fn a_folder_is_numbered_in_the_order_its_names_read() {
+    let scratch = Scratch::new();
+    for (i, name) in ["10.png", "2.png", "1.png"].iter().enumerate() {
+        scratch.image(&format!("roll/{name}"), i as u8);
+    }
+    let listed = folder_images(&scratch.path("roll"), &["png".to_string()]).unwrap();
+    let names: Vec<_> = listed.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["1.png", "2.png", "10.png"]);
+}
+
+#[test]
+fn a_roll_and_a_library_keep_their_own_order() {
+    let scratch = Scratch::new();
+    {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let roll = c.create_roll(library.id, "HP5").unwrap();
+        c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id) }, "-date").unwrap();
+        c.set_sort(loose(library.id), "name").unwrap();
+        assert!(c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id + 1) }, "name").is_err());
+    }
+    let c = catalog(&scratch);
+    assert_eq!(c.libraries().unwrap()[0].sort, "name");
+    assert_eq!(c.rolls().unwrap()[0].sort, "-date");
 }

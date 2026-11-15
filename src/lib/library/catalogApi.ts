@@ -21,6 +21,8 @@ export interface LibraryRecord {
     id: number;
     name: string;
     created: number;
+    /** How its images are ordered (imageOrder.ts); empty for the default. */
+    sort: string;
 }
 
 export interface RollRecord {
@@ -32,6 +34,8 @@ export interface RollRecord {
     /** The stock it was shot on, when it is one the catalog knows. */
     stockId: number | null;
     gear: RollGear;
+    /** How its frames are ordered (imageOrder.ts); empty for the default. */
+    sort: string;
 }
 
 export interface ImageRecord {
@@ -82,6 +86,8 @@ export const createRoll = (libraryId: number, name: string) =>
 export const updateRoll = (id: number, name: string, info: RollInfo, stockId: number | null, gear: RollGear) =>
     invoke<void>("catalog_update_roll", { id, name, info, stockId, gear });
 export const deleteRoll = (id: number) => invoke<void>("catalog_delete_roll", { id });
+/** How a roll's frames, or a library's images when `rollId` is null, are ordered. */
+export const setSort = (place: Place, sort: string) => invoke<void>("catalog_set_sort", { place, sort });
 
 export const createStock = (stock: StockFields) => invoke<FilmStock>("catalog_create_stock", { stock });
 export const updateStock = (id: number, stock: StockFields) => invoke<void>("catalog_update_stock", { id, stock });

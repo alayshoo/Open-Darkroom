@@ -6,6 +6,7 @@
 // Free of Tauri, so the tests can drive it against a temporary directory; the
 // commands that expose it are in catalog_commands.rs.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -39,7 +40,7 @@ const FINGERPRINT_BYTES: u64 = 64 * 1024;
 /// Starts every fingerprint, telling it from the older kind read off the start of a file alone.
 const FINGERPRINT_PREFIX: &str = "s2-";
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS libraries (
     id      INTEGER PRIMARY KEY,
     name    TEXT NOT NULL,
-    created INTEGER NOT NULL
+    created INTEGER NOT NULL,
+    sort    TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS film_stocks (
     id        INTEGER PRIMARY KEY,
@@ -77,7 +79,8 @@ CREATE TABLE IF NOT EXISTS rolls (
     info       TEXT NOT NULL DEFAULT '{}',
     created    INTEGER NOT NULL,
     stock_id   INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL,
-    gear       TEXT NOT NULL DEFAULT '{}'
+    gear       TEXT NOT NULL DEFAULT '{}',
+    sort       TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS images (
     id              INTEGER PRIMARY KEY,
@@ -105,6 +108,8 @@ pub struct Library {
     pub id: i64,
     pub name: String,
     pub created: i64,
+    /// How its images are ordered, as the frontend writes it; empty for the default.
+    pub sort: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -120,6 +125,8 @@ pub struct Roll {
     pub stock_id: Option<i64>,
     /// The gear it was shot, developed and scanned with, of what the catalog knows.
     pub gear: RollGear,
+    /// How its frames are ordered, as the frontend writes it; empty for the default.
+    pub sort: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -376,6 +383,47 @@ pub fn is_image_file(path: &Path, extensions: &[String]) -> bool {
             .is_some_and(|e| extensions.iter().any(|x| *x == e))
 }
 
+/// Compares names as people read them: case aside, and runs of digits by their value, so `2` comes before `10`.
+pub fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut digits = String::new();
+                    while let Some(c) = it.next_if(char::is_ascii_digit) {
+                        digits.push(c);
+                    }
+                    digits
+                };
+                let (da, db) = (take(&mut a), take(&mut b));
+                let (ta, tb) = (da.trim_start_matches('0'), db.trim_start_matches('0'));
+                let order = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb)).then_with(|| da.len().cmp(&db.len()));
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
+            (Some(x), Some(y)) => {
+                let order = x.to_lowercase().cmp(y.to_lowercase());
+                if order != Ordering::Equal {
+                    return order;
+                }
+                a.next();
+                b.next();
+            }
+        }
+    }
+}
+
+/// Paths in [`natural_cmp`] order of their file names.
+pub fn sort_by_file_name(paths: &mut [PathBuf]) {
+    let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    paths.sort_by(|a, b| natural_cmp(&name(a), &name(b)));
+}
+
 /// The images directly inside a folder, by name.
 pub fn folder_images(folder: &Path, extensions: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut paths: Vec<PathBuf> = fs::read_dir(folder)
@@ -383,7 +431,7 @@ pub fn folder_images(folder: &Path, extensions: &[String]) -> Result<Vec<PathBuf
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| is_image_file(p, extensions))
         .collect();
-    paths.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    sort_by_file_name(&mut paths);
     Ok(paths)
 }
 
@@ -434,6 +482,8 @@ impl Catalog {
             ("rolls", "gear", "TEXT NOT NULL DEFAULT '{}'"),
             ("rolls", "stock_id", "INTEGER REFERENCES film_stocks(id) ON DELETE SET NULL"),
             ("images", "history", "TEXT"),
+            ("libraries", "sort", "TEXT NOT NULL DEFAULT ''"),
+            ("rolls", "sort", "TEXT NOT NULL DEFAULT ''"),
         ];
         for (table, column, definition) in columns {
             let has: i64 = self
@@ -527,9 +577,9 @@ impl Catalog {
     }
 
     pub fn libraries(&self) -> Result<Vec<Library>, String> {
-        let mut stmt = self.conn.prepare("SELECT id, name, created FROM libraries ORDER BY created, id").map_err(err)?;
+        let mut stmt = self.conn.prepare("SELECT id, name, created, sort FROM libraries ORDER BY created, id").map_err(err)?;
         let rows = stmt
-            .query_map([], |r| Ok(Library { id: r.get(0)?, name: r.get(1)?, created: r.get(2)? }))
+            .query_map([], |r| Ok(Library { id: r.get(0)?, name: r.get(1)?, created: r.get(2)?, sort: r.get(3)? }))
             .map_err(err)?;
         rows.collect::<Result<_, _>>().map_err(err)
     }
@@ -537,7 +587,7 @@ impl Catalog {
     pub fn rolls(&self) -> Result<Vec<Roll>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, library_id, name, info, created, stock_id, gear FROM rolls ORDER BY created, id")
+            .prepare("SELECT id, library_id, name, info, created, stock_id, gear, sort FROM rolls ORDER BY created, id")
             .map_err(err)?;
         let rows = stmt
             .query_map([], |r| {
@@ -551,6 +601,7 @@ impl Catalog {
                     created: r.get(4)?,
                     stock_id: r.get(5)?,
                     gear: serde_json::from_str(&gear).unwrap_or_default(),
+                    sort: r.get(7)?,
                 })
             })
             .map_err(err)?;
@@ -610,7 +661,7 @@ impl Catalog {
     pub fn create_library(&self, name: &str) -> Result<Library, String> {
         let created = now();
         self.conn.execute("INSERT INTO libraries (name, created) VALUES (?1, ?2)", params![name, created]).map_err(err)?;
-        Ok(Library { id: self.conn.last_insert_rowid(), name: name.into(), created })
+        Ok(Library { id: self.conn.last_insert_rowid(), name: name.into(), created, sort: String::new() })
     }
 
     pub fn rename_library(&self, id: i64, name: &str) -> Result<(), String> {
@@ -641,7 +692,21 @@ impl Catalog {
             created,
             stock_id: None,
             gear: RollGear::default(),
+            sort: String::new(),
         })
+    }
+
+    /// Sets how a roll's frames, or a library's images, are ordered.
+    pub fn set_sort(&self, place: Place, sort: &str) -> Result<(), String> {
+        let (sql, id) = match place.roll_id {
+            Some(roll_id) => ("UPDATE rolls SET sort = ?1 WHERE id = ?2", roll_id),
+            None => ("UPDATE libraries SET sort = ?1 WHERE id = ?2", place.library_id),
+        };
+        let changed = self.conn.execute(sql, params![sort, id]).map_err(err)?;
+        if changed == 0 {
+            return Err(format!("No {} {id} in the catalog", if place.roll_id.is_some() { "roll" } else { "library" }));
+        }
+        Ok(())
     }
 
     pub fn update_roll(&self, id: i64, name: &str, info: &Value, stock_id: Option<i64>, gear: &RollGear) -> Result<(), String> {

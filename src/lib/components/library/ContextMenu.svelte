@@ -2,7 +2,7 @@
 <script lang="ts" module>
     export type MenuItem =
         | { separator: true }
-        | { label: string; action: () => void; disabled?: boolean; indent?: number; danger?: boolean }
+        | { label: string; action: () => void; disabled?: boolean; indent?: number; danger?: boolean; checked?: boolean }
         | { heading: string };
 </script>
 
@@ -66,13 +66,19 @@
                 class="item flex items-center w-full h-7.5 px-2.5 border-0 rounded-[8px]"
                 class:danger={item.danger}
                 style="padding-left: {10 + (item.indent ?? 0) * 14}px"
-                role="menuitem"
+                role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={item.checked}
                 disabled={item.disabled}
                 onclick={() => {
                     onclose();
                     item.action();
                 }}
             >
+                {#if item.checked !== undefined}
+                    <svg class="check shrink-0" class:on={item.checked} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                        <path d="M3 7.5l2.5 2.5L11 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                {/if}
                 {item.label}
             </button>
         {/if}
@@ -120,6 +126,15 @@
 
     .item.danger:hover {
         color: #ff8a80;
+    }
+
+    .check {
+        margin-right: 8px;
+        opacity: 0;
+    }
+
+    .check.on {
+        opacity: 1;
     }
 
     .heading {

@@ -11,6 +11,7 @@
     import DetailsPanel from "./DetailsPanel.svelte";
     import EditableName from "./EditableName.svelte";
     import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
+    import { ORDER_KEYS, directionLabels, orderLabel } from "$lib/library/imageOrder";
 
     let { active = true }: { active?: boolean } = $props();
 
@@ -101,6 +102,31 @@
         };
     }
 
+    function orderMenu(e: MouseEvent) {
+        const shown = library.shownOrder;
+        if (!shown) return;
+        const { order, forRoll } = shown;
+        const anchor = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        menu = {
+            x: anchor.left,
+            y: anchor.bottom + 4,
+            items: [
+                { heading: forRoll ? "Order frames by" : "Order images by" },
+                ...ORDER_KEYS.filter((k) => forRoll || !k.rollsOnly).map((k) => ({
+                    label: k.label,
+                    checked: order.key === k.key,
+                    action: () => void library.setOrder({ ...order, key: k.key }),
+                })),
+                { separator: true },
+                ...directionLabels(order.key).map((label, i) => ({
+                    label,
+                    checked: order.descending === (i === 1),
+                    action: () => void library.setOrder({ ...order, descending: i === 1 }),
+                })),
+            ],
+        };
+    }
+
     const handleShortcut = createKeydownHandler({
         handlers: {
             openImage: library.openFile,
@@ -171,6 +197,25 @@
                         <p class="subtitle">{subtitle}</p>
                     </div>
                     <div class="actions flex">
+                        {#if library.shownOrder}
+                            <button
+                                class="action order flex items-center"
+                                aria-haspopup="menu"
+                                title="Order: {orderLabel(library.shownOrder.order)}"
+                                onclick={orderMenu}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                                    <path
+                                        d={library.shownOrder.order.descending ? "M2 3.5h10M2 7h7M2 10.5h4" : "M2 3.5h4M2 7h7M2 10.5h10"}
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.4"
+                                        stroke-linecap="round"
+                                    />
+                                </svg>
+                                {ORDER_KEYS.find((k) => k.key === library.shownOrder!.order.key)?.label}
+                            </button>
+                        {/if}
                         {#if library.view.kind === "library"}
                             <button class="action" onclick={() => library.createRoll(library.view!.id)}>New roll</button>
                             <button class="action" onclick={library.importFolder}>Import folder as roll</button>
@@ -401,6 +446,11 @@
 
     .action:hover {
         background: var(--bg5);
+    }
+
+    .action.order {
+        gap: 6px;
+        color: var(--color2);
     }
 
     .action.primary {

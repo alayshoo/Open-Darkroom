@@ -86,6 +86,7 @@ pub fn run() {
             catalog_commands::catalog_create_roll,
             catalog_commands::catalog_update_roll,
             catalog_commands::catalog_delete_roll,
+            catalog_commands::catalog_set_sort,
             catalog_commands::catalog_create_stock,
             catalog_commands::catalog_update_stock,
             catalog_commands::catalog_delete_stock,
