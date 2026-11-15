@@ -10,6 +10,7 @@ use image::{ImageBuffer, Rgb};
 use serde_json::json;
 
 use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
+use open_darkroom_lib::metadata::ImageMetadata;
 use open_darkroom_lib::thumbnails::ThumbnailSource;
 
 struct Scratch(PathBuf);
@@ -220,6 +221,19 @@ fn edits_are_stored_and_read_back() {
 
     c.save_edit(image.id, r#"{"version":1}"#, None).unwrap();
     assert_eq!(c.edit_history(image.id).unwrap(), None);
+}
+
+#[test]
+fn shooting_info_read_again_replaces_what_was_stored_at_import() {
+    let scratch = Scratch::new();
+    let c = catalog(&scratch);
+    let library = c.create_library("Personal").unwrap();
+    let image = c.import(&[scratch.image("a.png", 1)], loose(library.id), false).unwrap().images.remove(0);
+    assert_eq!(image.metadata.make, None);
+
+    let rescanned = ImageMetadata { make: Some("Hasselblad".into()), iso: Some(100), ..image.metadata.clone() };
+    c.set_metadata(image.id, &rescanned).unwrap();
+    assert_eq!(c.image(image.id).unwrap().metadata, rescanned);
 }
 
 #[test]

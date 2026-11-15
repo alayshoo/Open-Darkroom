@@ -84,7 +84,9 @@ function stubTauri() {
     let callback = 0;
     (window as any).__TAURI_INTERNALS__ = {
         invoke: async (cmd: string, args: any) => {
-            if (cmd === "catalog_open_file") return { ...PICKED, fileName: SHOT.fileName, metadata: SHOT };
+            // The catalog read nothing at import; the file, read again on open, says how it was shot.
+            if (cmd === "catalog_open_file") return { ...PICKED, fileName: SHOT.fileName };
+            if (cmd === "image_metadata") return args.imageId === editor.imagePayload?.imageId ? SHOT : null;
             const catalog = catalogCommand(cmd, openPayload);
             if (catalog !== undefined) return catalog;
             if (cmd === "full_resolution_rows") return rowsBand(args.y, args.rows);

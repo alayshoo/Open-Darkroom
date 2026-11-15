@@ -36,7 +36,7 @@ pub fn open_catalog(app: &tauri::AppHandle) -> Result<Catalog, String> {
     Ok(catalog)
 }
 
-fn with_catalog<T>(state: &CatalogState, f: impl FnOnce(&Catalog) -> Result<T, String>) -> Result<T, String> {
+pub(crate) fn with_catalog<T>(state: &CatalogState, f: impl FnOnce(&Catalog) -> Result<T, String>) -> Result<T, String> {
     let guard = state.lock().unwrap_or_else(|e| e.into_inner());
     f(guard.as_ref().ok_or("The catalog could not be opened")?)
 }

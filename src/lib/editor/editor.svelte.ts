@@ -304,7 +304,7 @@ class Editor {
     ): Promise<boolean> => {
         try {
             const [payload, [edit, storedHistory]] = await Promise.all([
-                openImagePath(image.path, image.metadata),
+                openImagePath(image.path, image.id),
                 stored,
             ]);
             this.imagePayload = payload;

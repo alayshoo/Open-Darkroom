@@ -18,7 +18,7 @@ import { type Gear, type GearFields, type GearKind, type GearSlot, type RollGear
 import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
 import { history } from "$lib/history/history.svelte";
 import { cropView } from "$lib/types/crop";
-import { prefetchImage } from "$lib/utils/openImage";
+import { fetchImageMetadata, prefetchImage } from "$lib/utils/openImage";
 import * as api from "./catalogApi";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
 import { createLogger } from "$lib/utils/log";
@@ -852,7 +852,7 @@ class Library {
 
     // ===== Between the library and the editor =====
 
-    #openInEditor(image: ImageRecord): Promise<boolean> {
+    async #openInEditor(image: ImageRecord): Promise<boolean> {
         // Read once the open image's edit is saved, in case it is the one being opened.
         const stored = this.flushSave()
             .then(() => {
@@ -871,7 +871,22 @@ class Library {
                 this.placeholder = { ...this.placeholder, size: { width, height } };
             }
         });
-        return editor.openLibraryImage(image, stored);
+        const opened = await editor.openLibraryImage(image, stored);
+        if (opened && editor.imagePayload) void this.#refreshMetadata(image.id, editor.imagePayload.imageId);
+        return opened;
+    }
+
+    /** Shows the shooting info as the file now reads, when it has changed since the catalog stored it. */
+    async #refreshMetadata(id: number, openId: number) {
+        try {
+            const fresh = await fetchImageMetadata(openId);
+            const record = this.images.find((i) => i.id === id);
+            if (!fresh || !record || JSON.stringify(fresh) === JSON.stringify(record.metadata)) return;
+            this.images = this.images.map((i) => (i.id === id ? { ...i, metadata: fresh } : i));
+            if (editor.imagePayload?.imageId === openId) editor.metadata = { ...fresh, fileName: record.fileName };
+        } catch (e) {
+            log.warn("Failed to read the open image's shooting info", e);
+        }
     }
 
     /** Opens an image, fading the editor in over the library. */

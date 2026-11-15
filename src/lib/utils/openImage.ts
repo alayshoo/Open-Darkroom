@@ -73,11 +73,15 @@ export function fetchFullResolutionRows(
     return invoke<ArrayBuffer>("full_resolution_rows", { imageId, maxEdge, y, rows });
 }
 
-// Open a library image, with how the catalog says it was shot.
-// A rejection means the backend has released the image it held.
-export async function openImagePath(path: string, metadata: ImageMetadata): Promise<ImagePayload> {
+// How the open image was shot, as read from its file, or null once another image has replaced it.
+export function fetchImageMetadata(imageId: number): Promise<ImageMetadata | null> {
+    return invoke<ImageMetadata | null>("image_metadata", { imageId });
+}
+
+// Open a library image. A rejection means the backend has released the image it held.
+export async function openImagePath(path: string, libraryImageId: number): Promise<ImagePayload> {
     const imageId = ++lastImageId;
-    return parseImagePayload(await invoke<ArrayBuffer>("open_image_path", { path, imageId, metadata }), imageId);
+    return parseImagePayload(await invoke<ArrayBuffer>("open_image_path", { path, imageId, libraryImageId }), imageId);
 }
 
 // Decodes a library image in the background before it is opened, or with null, lets go of it.

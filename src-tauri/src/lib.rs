@@ -70,6 +70,7 @@ pub fn run() {
             grab_cursor,
             image_opening::open_image_path,
             image_opening::crop_histograms,
+            image_opening::image_metadata,
             image_prefetch::prefetch_image,
             full_resolution::full_resolution_rows,
             export::export_image,
