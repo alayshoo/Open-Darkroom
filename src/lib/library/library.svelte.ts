@@ -17,6 +17,8 @@ import { type FilmStock, type StockFields, stockLabel } from "$lib/types/filmSto
 import { type Gear, type GearFields, type GearKind, type GearSlot, type RollGear, GEAR_SLOTS, NO_ROLL_GEAR, gearLabel } from "$lib/types/gear";
 import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
 import { history } from "$lib/history/history.svelte";
+import { cropView } from "$lib/types/crop";
+import { fetchImageMetadata, prefetchImage } from "$lib/utils/openImage";
 import * as api from "./catalogApi";
 import { type ImageOrder, LIBRARY_DEFAULT, ROLL_DEFAULT, naturalCompare, parseOrder, serializeOrder, sortImages } from "./imageOrder";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
@@ -32,6 +34,8 @@ const SAVE_DELAY_MS = 400;
 const THUMBNAIL_DELAY_MS = 1200;
 // How long the editor's plate takes to fade and blur in or out; matches Editor.svelte.
 const PLATE_FADE_MS = 350;
+// How long the editor's thumbnail stand-in takes to fade once the image is in; matches Editor.svelte.
+const PLACEHOLDER_FADE_MS = 450;
 // The least time between two looks for moved files on coming back to the window.
 const FOCUS_SEARCH_GAP_MS = 30_000;
 
@@ -111,6 +115,8 @@ class Library {
     showing = $state<"library" | "editor">("library");
     /** The editor's image is held back until it has been drawn. */
     canvasHidden = $state(false);
+    /** The thumbnail shown in the editor until the image has been drawn, with what is known of its size. */
+    placeholder = $state.raw<{ id: number; src: string; size: { width: number; height: number } | null; unedited: boolean } | null>(null);
     /** The editor can be left only while no tool holds the image. */
     canLeave = $derived(!editor.isCropping && !editor.isRetouching);
     #moving = false;
@@ -900,19 +906,40 @@ class Library {
     // ===== Between the library and the editor =====
 
     async #openInEditor(image: ImageRecord): Promise<boolean> {
-        await this.flushSave();
-        let stored: ImageEdit | null = null;
-        let storedHistory: EditHistory | null = null;
+        // Read once the open image's edit is saved, in case it is the one being opened.
+        const stored = this.flushSave()
+            .then(() => {
+                this.#lastSaved.delete(image.id);
+                return Promise.all([this.#storedEdit(image.id), api.fetchEditHistory(image.id).then(parseEditHistory)]);
+            })
+            .catch((e): [null, null] => {
+                log.error("Failed to read the stored edit", e);
+                return [null, null];
+            });
+        void stored.then(([edit]) => {
+            if (this.placeholder?.id !== image.id) return;
+            if (!edit) this.placeholder = { ...this.placeholder, unedited: true };
+            else {
+                const { width, height } = cropView(edit.crop, edit.source.width, edit.source.height);
+                this.placeholder = { ...this.placeholder, size: { width, height } };
+            }
+        });
+        const opened = await editor.openLibraryImage(image, stored);
+        if (opened && editor.imagePayload) void this.#refreshMetadata(image.id, editor.imagePayload.imageId);
+        return opened;
+    }
+
+    /** Shows the shooting info as the file now reads, when it has changed since the catalog stored it. */
+    async #refreshMetadata(id: number, openId: number) {
         try {
-            [stored, storedHistory] = await Promise.all([
-                this.#storedEdit(image.id),
-                api.fetchEditHistory(image.id).then(parseEditHistory),
-            ]);
+            const fresh = await fetchImageMetadata(openId);
+            const record = this.images.find((i) => i.id === id);
+            if (!fresh || !record || JSON.stringify(fresh) === JSON.stringify(record.metadata)) return;
+            this.images = this.images.map((i) => (i.id === id ? { ...i, metadata: fresh } : i));
+            if (editor.imagePayload?.imageId === openId) editor.metadata = { ...fresh, fileName: record.fileName };
         } catch (e) {
-            log.error("Failed to read the stored edit", e);
+            log.warn("Failed to read the open image's shooting info", e);
         }
-        this.#lastSaved.delete(image.id);
-        return editor.openLibraryImage(image.path, image.id, stored, storedHistory);
     }
 
     /** Opens an image, fading the editor in over the library. */
@@ -929,9 +956,12 @@ class Library {
         this.#moving = true;
         try {
             const same = editor.libraryImageId === id && !!editor.imagePayload;
+            const thumb = this.thumbs.get(id);
+            this.placeholder = !same && thumb ? { id, src: thumb, size: null, unedited: false } : null;
             this.canvasHidden = !same;
             this.showing = "editor";
-            if (same) return;
+            // Nothing is opened, so nothing takes the image decoded ahead.
+            if (same) return this.#prefetch(null);
 
             if (!(await this.#openInEditor(image))) {
                 this.showing = "library";
@@ -944,6 +974,12 @@ class Library {
         } finally {
             this.canvasHidden = false;
             this.#moving = false;
+            const shown = this.placeholder;
+            if (shown) {
+                setTimeout(() => {
+                    if (this.placeholder === shown) this.placeholder = null;
+                }, PLACEHOLDER_FADE_MS);
+            }
         }
     };
 
@@ -995,7 +1031,24 @@ class Library {
                 void history.stack.length;
                 untrack(() => this.#openChanged(id));
             });
+
+            // A single image selected in the library is decoded ahead of it being opened.
+            $effect(() => {
+                if (this.showing !== "library") return;
+                const image = this.selection.length === 1 ? this.images.find((i) => i.id === this.selection[0]) : undefined;
+                const open = !!image && editor.libraryImageId === image.id && !!editor.imagePayload;
+                const path = image && !image.missing && !open ? image.path : null;
+                untrack(() => this.#prefetch(path));
+            });
         });
+    }
+
+    #prefetched: string | null = null;
+
+    #prefetch(path: string | null) {
+        if (path === this.#prefetched) return;
+        this.#prefetched = path;
+        prefetchImage(path).catch((e) => log.debug(`Failed to decode an image ahead: ${e}`));
     }
 }
 

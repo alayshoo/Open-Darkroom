@@ -17,9 +17,10 @@ const HIST_BINS = 256;
 const HEADER = 64;
 
 const PATH = "/photos/frame.tif";
+const LIBRARY_IMAGE_ID = 7;
 
 function open(): Promise<ImagePayload> {
-  return openImagePath(PATH);
+  return openImagePath(PATH, LIBRARY_IMAGE_ID);
 }
 
 /** Column-major, as the backend sends it for a file already in the working space. */
@@ -79,7 +80,7 @@ describe("openImagePath", () => {
 
     const image = await open();
 
-    expect(invoke).toHaveBeenCalledWith("open_image_path", { path: PATH, imageId: image.imageId });
+    expect(invoke).toHaveBeenCalledWith("open_image_path", { path: PATH, imageId: image.imageId, libraryImageId: LIBRARY_IMAGE_ID });
     expect(image.width).toBe(9);
     expect(image.height).toBe(5);
   });
@@ -91,7 +92,7 @@ describe("openImagePath", () => {
     const second = await open();
 
     expect(second.imageId).not.toBe(first.imageId);
-    expect(invoke).toHaveBeenLastCalledWith("open_image_path", { path: PATH, imageId: second.imageId });
+    expect(invoke).toHaveBeenLastCalledWith("open_image_path", { path: PATH, imageId: second.imageId, libraryImageId: LIBRARY_IMAGE_ID });
   });
 
   it("reads the full resolution the preview was downscaled from", async () => {

@@ -15,6 +15,7 @@ use crate::color::{
     linear_u16_to_f16_bytes, linearize_u16, to_linear_u16, LINEAR_BYTES_PER_PIXEL, LINEAR_F32_BYTES_PER_PIXEL,
     LUT_SIZE,
 };
+use crate::catalog_commands::{with_catalog, CatalogState};
 use crate::crop::{crop_view, CropPayload, CropView};
 use crate::export_rendering::request_device;
 use crate::thumbnails::{ThumbnailSource, THUMBNAIL_EDGE};
@@ -742,33 +743,97 @@ pub fn image_extensions() -> Vec<String> {
     extensions
 }
 
-/// Opens a file the caller already knows the path of, such as one in the library.
+/// A file decoded and made ready to open: its samples and what the frontend is sent first.
+pub struct DecodedImage {
+    /// Read alongside the pixels, so a file changed since it was imported is described as it is now.
+    pub metadata: ImageMetadata,
+    pub samples: Vec<u16>,
+    pub channels: usize,
+    pub width: u32,
+    pub height: u32,
+    pub space: SourceSpace,
+    pub prepared: PreparedImage,
+}
+
+/// Decodes the file and prepares it, unless `wanted` says between the two that it is no longer needed.
+pub fn decode_and_prepare_while(
+    path: &std::path::Path,
+    wanted: impl Fn() -> bool,
+) -> Result<Option<DecodedImage>, String> {
+    let start = Instant::now();
+    let (decoded, metadata) = rayon::join(|| decode_path(path), || crate::metadata::read(path));
+    let (samples, channels, width, height, space) = decoded?;
+    let decoded_ms = start.elapsed().as_millis();
+    if !wanted() {
+        return Ok(None);
+    }
+    let prepared = prepare_image(&samples, width, height, channels, &space)?;
+    log::debug!(
+        "Decoded {} in {decoded_ms} ms, prepared in {} ms",
+        path.display(),
+        start.elapsed().as_millis() - decoded_ms
+    );
+    Ok(Some(DecodedImage { metadata, samples, channels, width, height, space, prepared }))
+}
+
+pub fn decode_and_prepare(path: &std::path::Path) -> Result<DecodedImage, String> {
+    decode_and_prepare_while(path, || true)?.ok_or_else(|| "Decoding stopped".to_string())
+}
+
+/// Opens a library image. Its shooting info is stored again when the file no longer matches the catalog.
 #[tauri::command]
 pub(crate) async fn open_image_path(
     state: tauri::State<'_, ImageState>,
+    catalog: tauri::State<'_, CatalogState>,
     path: std::path::PathBuf,
     image_id: u32,
+    library_image_id: i64,
 ) -> Result<Response, String> {
     if !path.is_file() {
+        crate::image_prefetch::cancel();
         return Err(format!("{} could not be found", path.display()));
     }
-    open_path(&state, path, image_id)
+    let (payload, metadata) = open_path(&state, path, image_id)?;
+    let stored = with_catalog(&catalog, |c| c.image(library_image_id)).map(|r| r.metadata);
+    if stored.as_ref().is_ok_and(|stored| *stored != metadata) {
+        log::info!("Image {library_image_id} reads differently from when it was imported, so its shooting info is stored again");
+        if let Err(e) = with_catalog(&catalog, |c| c.set_metadata(library_image_id, &metadata)) {
+            log::warn!("The shooting info of image {library_image_id} could not be stored: {e}");
+        }
+    }
+    Ok(payload)
 }
 
-fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Result<Response, String> {
+/// How the open image was shot, or None once another image has replaced it.
+#[tauri::command]
+pub(crate) fn image_metadata(state: tauri::State<'_, ImageState>, image_id: u32) -> Option<ImageMetadata> {
+    let guard = state.lock().unwrap();
+    guard.as_ref().filter(|img| img.id == image_id).map(|img| img.metadata.clone())
+}
+
+fn open_path(
+    state: &ImageState,
+    path: std::path::PathBuf,
+    image_id: u32,
+) -> Result<(Response, ImageMetadata), String> {
     log::info!("Opening {}", path.display());
-    // Release the previous image before decoding the next one. Held any longer
-    // and two full-resolution buffers are resident at once, which for large
-    // files roughly doubles the peak.
-    {
-        let mut guard = state.lock().unwrap();
-        *guard = None;
+    let overall_start = Instant::now();
+    let prefetched = crate::image_prefetch::take(&path);
+    let was_prefetched = prefetched.is_some();
+
+    // Release the previous image before decoding the next one, so two
+    // full-resolution buffers are not resident at once. Its thumbnail source
+    // is kept, since its thumbnail may still be rendering.
+    let previous = state.lock().unwrap().take();
+    if let Some(previous) = previous {
+        crate::thumbnails::keep_previous_open(previous.thumbnail);
     }
 
-    let overall_start = Instant::now();
-    let (samples, channels, full_width, full_height, space) = decode_path(&path)?;
-
-    let mut prepared = prepare_image(&samples, full_width, full_height, channels, &space)?;
+    let DecodedImage { metadata, samples, channels, width: full_width, height: full_height, space, mut prepared } =
+        match prefetched {
+            Some(decoded) => decoded,
+            None => decode_and_prepare(&path)?,
+        };
     let (thumb_pixels, thumb_width, thumb_height) = std::mem::take(&mut prepared.thumbnail);
     let thumbnail = Arc::new(ThumbnailSource::from_linear(
         &path,
@@ -778,7 +843,6 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
         channels,
         space.to_working,
     ));
-    let metadata = crate::metadata::read(&path);
     let camera = [metadata.make.as_deref(), metadata.model.as_deref()]
         .into_iter()
         .flatten()
@@ -800,7 +864,7 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
             space,
             full_resolution: Arc::default(),
             id: image_id,
-            metadata,
+            metadata: metadata.clone(),
             path,
             thumbnail,
         });
@@ -809,23 +873,17 @@ fn open_path(state: &ImageState, path: std::path::PathBuf, image_id: u32) -> Res
     let payload = build_payload(&prepared);
 
     log::info!(
-        "Opened {full_width}×{full_height} {} with {channels} channels{} in {} ms, \
+        "Opened {full_width}×{full_height} {} with {channels} channels{} in {} ms{}, \
          preview payload {} bytes, colour converted on the {}",
         if raw { "raw" } else { "image" },
         if camera.is_empty() { String::new() } else { format!(" from {camera}") },
         overall_start.elapsed().as_millis(),
+        if was_prefetched { " after decoding ahead" } else { "" },
         payload.len(),
         if prepared.baked { "CPU" } else { "GPU" }
     );
 
-    Ok(Response::new(payload))
-}
-
-/// How the open image was shot, or None once another image has replaced it.
-#[tauri::command]
-pub(crate) fn image_metadata(state: tauri::State<'_, ImageState>, image_id: u32) -> Option<ImageMetadata> {
-    let guard = state.lock().unwrap();
-    guard.as_ref().filter(|img| img.id == image_id).map(|img| img.metadata.clone())
+    Ok((Response::new(payload), metadata))
 }
 
 /// The open image's per-channel histograms, binned over only what a crop

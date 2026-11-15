@@ -1019,6 +1019,15 @@ impl Catalog {
             .map_err(err)
     }
 
+    /// Stores how the file says it was shot, as when it has changed since it was imported.
+    pub fn set_metadata(&self, id: i64, metadata: &ImageMetadata) -> Result<(), String> {
+        let text = serde_json::to_string(metadata).map_err(err)?;
+        self.conn
+            .execute("UPDATE images SET metadata = ?1 WHERE id = ?2", params![text, id])
+            .map(|_| ())
+            .map_err(err)
+    }
+
     /// Points a missing image at a file, as long as it is the same file.
     pub fn relink(&self, id: i64, path: &Path) -> Result<ImageRecord, String> {
         let stored: String = self

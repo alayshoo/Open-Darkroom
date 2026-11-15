@@ -84,8 +84,18 @@ impl ThumbnailSource {
 /// does not shrink it again each time.
 static LAST_SOURCE: Mutex<Option<Arc<ThumbnailSource>>> = Mutex::new(None);
 
+/// The image open before the current one, whose thumbnail may still be rendering.
+static PREVIOUS_OPEN: Mutex<Option<Arc<ThumbnailSource>>> = Mutex::new(None);
+
 pub fn cached_source(path: &Path) -> Option<Arc<ThumbnailSource>> {
-    LAST_SOURCE.lock().unwrap_or_else(|e| e.into_inner()).clone().filter(|s| s.path == path)
+    let held = |slot: &Mutex<Option<Arc<ThumbnailSource>>>| {
+        slot.lock().unwrap_or_else(|e| e.into_inner()).clone().filter(|s| s.path == path)
+    };
+    held(&LAST_SOURCE).or_else(|| held(&PREVIOUS_OPEN))
+}
+
+pub fn keep_previous_open(source: Arc<ThumbnailSource>) {
+    *PREVIOUS_OPEN.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
 }
 
 pub fn keep_source(source: Arc<ThumbnailSource>) {
