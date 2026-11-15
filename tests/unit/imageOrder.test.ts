@@ -5,7 +5,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ImageRecord } from "$lib/library/catalogApi";
-import { LIBRARY_DEFAULT, ROLL_DEFAULT, parseOrder, serializeOrder, sortImages } from "$lib/library/imageOrder";
+import { LIBRARY_DEFAULT, ROLL_DEFAULT, naturalCompare, parseOrder, serializeOrder, sortImages } from "$lib/library/imageOrder";
+import naturalOrder from "../fixtures/naturalOrder.json";
 
 let nextId = 1;
 function image(fileName: string, fields: { frame?: number; dateTaken?: string; added?: number } = {}): ImageRecord {
@@ -29,6 +30,13 @@ function image(fileName: string, fields: { frame?: number; dateTaken?: string; a
 }
 
 const names = (images: ImageRecord[]) => images.map((i) => i.fileName);
+
+describe("naturalCompare", () => {
+    it("orders names the way the backend numbers frames on import", () => {
+        // The same list src-tauri/tests/catalog.rs checks natural_cmp against.
+        expect([...naturalOrder].reverse().sort(naturalCompare)).toEqual(naturalOrder);
+    });
+});
 
 describe("sortImages", () => {
     it("orders file names by the numbers in them", () => {

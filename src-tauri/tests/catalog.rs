@@ -713,6 +713,16 @@ fn deleting_gear_clears_it_from_a_roll_whose_information_is_not_an_object() {
 }
 
 #[test]
+fn names_are_ordered_the_same_way_the_grid_orders_them() {
+    // The same list tests/unit/imageOrder.test.ts checks naturalCompare against.
+    let sorted: Vec<String> = serde_json::from_str(include_str!("../../tests/fixtures/naturalOrder.json")).unwrap();
+    let mut names = sorted.clone();
+    names.reverse();
+    names.sort_by(|a, b| natural_cmp(a, b));
+    assert_eq!(names, sorted);
+}
+
+#[test]
 fn names_are_ordered_by_the_numbers_in_them() {
     let mut names = ["IMG_10.tif", "img_2.tif", "IMG_1.tif", "IMG_02b.tif", "IMG_100.tif", "IMG_9.tif"];
     names.sort_by(|a, b| natural_cmp(a, b));
@@ -740,6 +750,8 @@ fn a_roll_and_a_library_keep_their_own_order() {
         c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id) }, "-date").unwrap();
         c.set_sort(loose(library.id), "name").unwrap();
         assert!(c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id + 1) }, "name").is_err());
+        let other = c.create_library("Other").unwrap();
+        assert!(c.set_sort(Place { library_id: other.id, roll_id: Some(roll.id) }, "name").is_err());
     }
     let c = catalog(&scratch);
     assert_eq!(c.libraries().unwrap()[0].sort, "name");
@@ -783,4 +795,47 @@ fn a_roll_numbered_in_text_order_by_an_older_build_is_renumbered_once() {
     drop(db);
     let c = catalog(&scratch);
     assert_eq!(frames_by_name(&c, text_ordered)[1].0, "10.png");
+}
+
+fn sql(scratch: &Scratch, statement: &str) {
+    rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap().execute_batch(statement).unwrap();
+}
+
+#[test]
+fn a_roll_is_renumbered_by_the_names_its_files_were_imported_under() {
+    let scratch = Scratch::new();
+    let roll = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        c.import_roll(library.id, "Copied", &paths, false).unwrap().0.unwrap().id
+    };
+    // Stored under other names since, as a copy into a taken folder would be.
+    sql(&scratch, "UPDATE images SET path = REPLACE(path, '10.png', 'z (2).png'); UPDATE meta SET value = '5' WHERE key = 'schema';");
+    let c = catalog(&scratch);
+    let frames: Vec<_> = frames_by_name(&c, roll).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(frames, ["1.png", "2.png", "z (2).png"]);
+}
+
+#[test]
+fn a_renumbering_that_fails_leaves_the_catalog_open_and_is_tried_again() {
+    let scratch = Scratch::new();
+    let roll = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        c.import_roll(library.id, "Old", &paths, false).unwrap().0.unwrap().id
+    };
+    sql(
+        &scratch,
+        "UPDATE meta SET value = '5' WHERE key = 'schema';
+         CREATE TRIGGER no_frames BEFORE UPDATE OF frame ON images BEGIN SELECT RAISE(ABORT, 'read only'); END;",
+    );
+    {
+        let c = catalog(&scratch);
+        assert_eq!(frames_by_name(&c, roll)[1].0, "10.png");
+    }
+    sql(&scratch, "DROP TRIGGER no_frames;");
+    let c = catalog(&scratch);
+    assert_eq!(frames_by_name(&c, roll)[1].0, "2.png");
 }

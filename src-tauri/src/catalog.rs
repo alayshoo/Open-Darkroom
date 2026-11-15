@@ -383,12 +383,15 @@ pub fn is_image_file(path: &Path, extensions: &[String]) -> bool {
             .is_some_and(|e| extensions.iter().any(|x| *x == e))
 }
 
-/// Compares names as people read them: case aside, and runs of digits by their value, so `2` comes before `10`.
+/// Compares names as people read them: case aside, and runs of digits by their
+/// value, so `2` comes before `10`; leading zeros only settle a tie. Must match
+/// naturalCompare in library/imageOrder.ts, which orders the grid by name.
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    let mut zeros = Ordering::Equal;
     loop {
         match (a.peek().copied(), b.peek().copied()) {
-            (None, None) => return Ordering::Equal,
+            (None, None) => return zeros,
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
@@ -401,10 +404,11 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 };
                 let (da, db) = (take(&mut a), take(&mut b));
                 let (ta, tb) = (da.trim_start_matches('0'), db.trim_start_matches('0'));
-                let order = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb)).then_with(|| da.len().cmp(&db.len()));
+                let order = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
                 if order != Ordering::Equal {
                     return order;
                 }
+                zeros = zeros.then(da.len().cmp(&db.len()));
             }
             (Some(x), Some(y)) => {
                 let order = x.to_lowercase().cmp(y.to_lowercase());
@@ -503,8 +507,12 @@ impl Catalog {
             }
         }
         self.refingerprint()?;
+        // Left for the next open when it fails, rather than keeping the catalog shut.
         if stored.is_some_and(|v| v < 6) {
-            self.renumber_name_ordered_rolls()?;
+            if let Err(e) = self.renumber_name_ordered_rolls() {
+                log::warn!("Could not renumber the rolls imported in text order, will try again on the next open: {e}");
+                return Ok(());
+            }
         }
         self.conn
             .execute(
@@ -516,24 +524,30 @@ impl Catalog {
             .map_err(err)
     }
 
-    /// Builds before schema 6 numbered folders by plain text order, so `10` came
-    /// before `2`. A roll still numbered that way is renumbered by [`natural_cmp`],
-    /// keeping its frame numbers; one numbered any other way is left as it is.
+    /// Builds before schema 6 numbered folders by plain text order of the original
+    /// file names, so `10` came before `2`. A roll still numbered that way is
+    /// renumbered by [`natural_cmp`], keeping its frame numbers; any other is left as it is.
     fn renumber_name_ordered_rolls(&self) -> Result<(), String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT roll_id, id, frame, path FROM images WHERE roll_id IS NOT NULL AND frame IS NOT NULL ORDER BY roll_id, frame, id")
+            .prepare("SELECT roll_id, id, frame, path, metadata FROM images WHERE roll_id IS NOT NULL AND frame IS NOT NULL ORDER BY roll_id, frame, id")
             .map_err(err)?;
-        let rows: Vec<(i64, i64, i64, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        let rows: Vec<(i64, i64, i64, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
             .map_err(err)?
             .collect::<Result<_, _>>()
             .map_err(err)?;
         let mut changes: Vec<(i64, i64)> = Vec::new();
         let mut renumbered = 0;
         for roll in rows.chunk_by(|a, b| a.0 == b.0) {
-            let name = |path: &str| Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let names: Vec<String> = roll.iter().map(|f| name(&f.3)).collect();
+            // The name it was imported under: a copy may have been stored under another.
+            let name = |(_, _, _, path, metadata): &(i64, i64, i64, String, String)| {
+                serde_json::from_str::<Value>(metadata)
+                    .ok()
+                    .and_then(|m| m.get("fileName").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_owned))
+                    .unwrap_or_else(|| Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+            };
+            let names: Vec<String> = roll.iter().map(name).collect();
             let as_text_order = names.windows(2).all(|w| w[0].to_lowercase() <= w[1].to_lowercase());
             let mut natural: Vec<usize> = (0..roll.len()).collect();
             natural.sort_by(|&a, &b| natural_cmp(&names[a], &names[b]));
@@ -751,7 +765,12 @@ impl Catalog {
     /// Sets how a roll's frames, or a library's images, are ordered.
     pub fn set_sort(&self, place: Place, sort: &str) -> Result<(), String> {
         let (sql, id) = match place.roll_id {
-            Some(roll_id) => ("UPDATE rolls SET sort = ?1 WHERE id = ?2", roll_id),
+            Some(roll_id) => {
+                if self.roll_library(roll_id)? != place.library_id {
+                    return Err(format!("Roll {roll_id} is not in library {}", place.library_id));
+                }
+                ("UPDATE rolls SET sort = ?1 WHERE id = ?2", roll_id)
+            }
             None => ("UPDATE libraries SET sort = ?1 WHERE id = ?2", place.library_id),
         };
         let changed = self.conn.execute(sql, params![sort, id]).map_err(err)?;

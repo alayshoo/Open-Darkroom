@@ -41,8 +41,44 @@ export function directionLabels(key: OrderKey): [string, string] {
     return ["A to Z", "Z to A"];
 }
 
-/** Compares names as people read them, so `2` comes before `10`. */
-export const naturalCompare = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }).compare;
+const isDigit = (c: string) => c >= "0" && c <= "9";
+
+function compareCodePoints(a: string, b: string): number {
+    const [x, y] = [Array.from(a), Array.from(b)];
+    for (let i = 0; i < Math.min(x.length, y.length); i++) {
+        const order = x[i].codePointAt(0)! - y[i].codePointAt(0)!;
+        if (order) return Math.sign(order);
+    }
+    return Math.sign(x.length - y.length);
+}
+
+/**
+ * Compares names as people read them: case aside, and runs of digits by their
+ * value, so `2` comes before `10`; leading zeros only settle a tie. Must match
+ * natural_cmp in catalog.rs, which numbers frames on import.
+ */
+export function naturalCompare(a: string, b: string): number {
+    const [x, y] = [Array.from(a), Array.from(b)];
+    let [i, j, zeros] = [0, 0, 0];
+    while (i < x.length && j < y.length) {
+        if (isDigit(x[i]) && isDigit(y[j])) {
+            const [si, sj] = [i, j];
+            while (i < x.length && isDigit(x[i])) i++;
+            while (j < y.length && isDigit(y[j])) j++;
+            const [da, db] = [x.slice(si, i).join(""), y.slice(sj, j).join("")];
+            const [ta, tb] = [da.replace(/^0+/, ""), db.replace(/^0+/, "")];
+            const order = ta.length - tb.length || compareCodePoints(ta, tb);
+            if (order) return Math.sign(order);
+            zeros ||= Math.sign(da.length - db.length);
+        } else {
+            const order = compareCodePoints(x[i].toLowerCase(), y[j].toLowerCase());
+            if (order) return order;
+            i++;
+            j++;
+        }
+    }
+    return Number(i < x.length) - Number(j < y.length) || zeros;
+}
 
 /** When an image was taken, as EXIF has it, or else when it was added. */
 function timeOf(image: ImageRecord): number {
@@ -53,18 +89,22 @@ function timeOf(image: ImageRecord): number {
     return Number.isNaN(time) ? image.added : time;
 }
 
-function compareBy(key: OrderKey): (a: ImageRecord, b: ImageRecord) => number {
-    if (key === "frame") return (a, b) => (a.frame ?? Infinity) - (b.frame ?? Infinity);
-    if (key === "date") return (a, b) => timeOf(a) - timeOf(b);
-    return (a, b) => naturalCompare(a.fileName, b.fileName);
-}
-
 /** A sorted copy. Ties fall back to the file name, then to when each was added. */
 export function sortImages(images: ImageRecord[], order: ImageOrder): ImageRecord[] {
-    const primary = compareBy(order.key);
     const sign = order.descending ? -1 : 1;
-    const byName = compareBy("name");
-    return [...images].sort(
-        (a, b) => sign * primary(a, b) || sign * byName(a, b) || a.added - b.added || a.id - b.id,
-    );
+    // Each image's key is worked out once, not on every comparison.
+    const keyed = images.map((image) => ({
+        image,
+        value: order.key === "date" ? timeOf(image) : order.key === "frame" ? (image.frame ?? Number.MAX_SAFE_INTEGER) : 0,
+    }));
+    const byName = (a: ImageRecord, b: ImageRecord) => naturalCompare(a.fileName, b.fileName);
+    return keyed
+        .sort(
+            (a, b) =>
+                sign * (a.value - b.value) ||
+                sign * byName(a.image, b.image) ||
+                a.image.added - b.image.added ||
+                a.image.id - b.image.id,
+        )
+        .map((k) => k.image);
 }
