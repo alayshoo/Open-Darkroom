@@ -40,6 +40,11 @@ Catalog
 - A roll holds images the way a library does, and always sits inside a library.
   Rolls do not nest either.
 - An image is either loose in a library or a frame on a roll.
+- Each roll and each library keeps its own order: by frame number (rolls only),
+  file name or date taken, either way round. Names with numbers in them read as
+  numbers, so `2` comes before `10`, and frames are numbered in that order on import.
+  With rolls not grouped, a library still shows each roll's frames together, the
+  rolls in the library's order and the frames in each roll's own.
 
 ### Roll information
 

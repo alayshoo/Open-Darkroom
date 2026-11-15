@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use image::{ImageBuffer, Rgb};
 use serde_json::json;
 
-use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
+use open_darkroom_lib::catalog::{find_moved, fingerprint, folder_images, natural_cmp, search_roots, Catalog, GearDetails, GearFields, Place, RollGear};
 use open_darkroom_lib::metadata::ImageMetadata;
 use open_darkroom_lib::thumbnails::ThumbnailSource;
 
@@ -724,4 +724,132 @@ fn deleting_gear_clears_it_from_a_roll_whose_information_is_not_an_object() {
     let roll = c.rolls().unwrap().remove(0);
     assert_eq!(roll.gear.camera, None);
     assert_eq!(roll.info["camera"], "Hasselblad 500C/M");
+}
+
+#[test]
+fn names_are_ordered_the_same_way_the_grid_orders_them() {
+    // The same list tests/unit/imageOrder.test.ts checks naturalCompare against.
+    let sorted: Vec<String> = serde_json::from_str(include_str!("../../tests/fixtures/naturalOrder.json")).unwrap();
+    let mut names = sorted.clone();
+    names.reverse();
+    names.sort_by(|a, b| natural_cmp(a, b));
+    assert_eq!(names, sorted);
+}
+
+#[test]
+fn names_are_ordered_by_the_numbers_in_them() {
+    let mut names = ["IMG_10.tif", "img_2.tif", "IMG_1.tif", "IMG_02b.tif", "IMG_100.tif", "IMG_9.tif"];
+    names.sort_by(|a, b| natural_cmp(a, b));
+    assert_eq!(names, ["IMG_1.tif", "img_2.tif", "IMG_02b.tif", "IMG_9.tif", "IMG_10.tif", "IMG_100.tif"]);
+}
+
+#[test]
+fn a_folder_is_numbered_in_the_order_its_names_read() {
+    let scratch = Scratch::new();
+    for (i, name) in ["10.png", "2.png", "1.png"].iter().enumerate() {
+        scratch.image(&format!("roll/{name}"), i as u8);
+    }
+    let listed = folder_images(&scratch.path("roll"), &["png".to_string()]).unwrap();
+    let names: Vec<_> = listed.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["1.png", "2.png", "10.png"]);
+}
+
+#[test]
+fn a_roll_and_a_library_keep_their_own_order() {
+    let scratch = Scratch::new();
+    {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let roll = c.create_roll(library.id, "HP5").unwrap();
+        c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id) }, "-date").unwrap();
+        c.set_sort(loose(library.id), "name").unwrap();
+        assert!(c.set_sort(Place { library_id: library.id, roll_id: Some(roll.id + 1) }, "name").is_err());
+        let other = c.create_library("Other").unwrap();
+        assert!(c.set_sort(Place { library_id: other.id, roll_id: Some(roll.id) }, "name").is_err());
+    }
+    let c = catalog(&scratch);
+    assert_eq!(c.libraries().unwrap()[0].sort, "name");
+    assert_eq!(c.rolls().unwrap()[0].sort, "-date");
+}
+
+fn set_schema(scratch: &Scratch, version: &str) {
+    let db = rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap();
+    db.execute("UPDATE meta SET value = ?1 WHERE key = 'schema'", [version]).unwrap();
+}
+
+fn frames_by_name(c: &Catalog, roll_id: i64) -> Vec<(String, Option<i64>)> {
+    let snapshot = c.snapshot().unwrap();
+    let mut frames: Vec<_> = snapshot.images.into_iter().filter(|i| i.roll_id == Some(roll_id)).collect();
+    frames.sort_by_key(|i| i.frame);
+    frames.into_iter().map(|i| (i.file_name, i.frame)).collect()
+}
+
+#[test]
+fn a_roll_numbered_in_text_order_by_an_older_build_is_renumbered_once() {
+    let scratch = Scratch::new();
+    let (text_ordered, by_hand) = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        let (a, _) = c.import_roll(library.id, "Old", &paths, false).unwrap();
+        let paths: Vec<_> = ["2.png", "1.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("b/{n}"), 10 + i as u8)).collect();
+        let (b, _) = c.import_roll(library.id, "By hand", &paths, false).unwrap();
+        (a.unwrap().id, b.unwrap().id)
+    };
+    set_schema(&scratch, "5");
+    let c = catalog(&scratch);
+    let renumbered = [("1.png".to_string(), Some(1)), ("2.png".to_string(), Some(2)), ("10.png".to_string(), Some(3))];
+    assert_eq!(frames_by_name(&c, text_ordered), renumbered);
+    assert_eq!(frames_by_name(&c, by_hand), [("2.png".to_string(), Some(1)), ("1.png".to_string(), Some(2))]);
+    drop(c);
+
+    // Only once: a roll put back in text order afterwards stays that way.
+    let db = rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap();
+    db.execute("UPDATE images SET frame = CASE frame WHEN 2 THEN 3 WHEN 3 THEN 2 ELSE frame END WHERE roll_id = ?1", [text_ordered]).unwrap();
+    drop(db);
+    let c = catalog(&scratch);
+    assert_eq!(frames_by_name(&c, text_ordered)[1].0, "10.png");
+}
+
+fn sql(scratch: &Scratch, statement: &str) {
+    rusqlite::Connection::open(scratch.path("data/catalog.sqlite")).unwrap().execute_batch(statement).unwrap();
+}
+
+#[test]
+fn a_roll_is_renumbered_by_the_names_its_files_were_imported_under() {
+    let scratch = Scratch::new();
+    let roll = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        c.import_roll(library.id, "Copied", &paths, false).unwrap().0.unwrap().id
+    };
+    // Stored under other names since, as a copy into a taken folder would be.
+    sql(&scratch, "UPDATE images SET path = REPLACE(path, '10.png', 'z (2).png'); UPDATE meta SET value = '5' WHERE key = 'schema';");
+    let c = catalog(&scratch);
+    let frames: Vec<_> = frames_by_name(&c, roll).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(frames, ["1.png", "2.png", "z (2).png"]);
+}
+
+#[test]
+fn a_renumbering_that_fails_leaves_the_catalog_open_and_is_tried_again() {
+    let scratch = Scratch::new();
+    let roll = {
+        let c = catalog(&scratch);
+        let library = c.create_library("Personal").unwrap();
+        let paths: Vec<_> = ["1.png", "10.png", "2.png"].iter().enumerate().map(|(i, n)| scratch.image(&format!("a/{n}"), i as u8)).collect();
+        c.import_roll(library.id, "Old", &paths, false).unwrap().0.unwrap().id
+    };
+    sql(
+        &scratch,
+        "UPDATE meta SET value = '5' WHERE key = 'schema';
+         CREATE TRIGGER no_frames BEFORE UPDATE OF frame ON images BEGIN SELECT RAISE(ABORT, 'read only'); END;",
+    );
+    {
+        let c = catalog(&scratch);
+        assert_eq!(frames_by_name(&c, roll)[1].0, "10.png");
+    }
+    sql(&scratch, "DROP TRIGGER no_frames;");
+    let c = catalog(&scratch);
+    assert_eq!(frames_by_name(&c, roll)[1].0, "2.png");
 }
