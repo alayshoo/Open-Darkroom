@@ -130,7 +130,7 @@
                             <div class="face glass absolute"></div>
                             <span class="glyph roll-glyph flex"><FilmCanister colour={stock?.colour} colour2={stock?.colour2} colour3={stock?.colour3} /></span>
                             <span class="name flex-1">{roll.name}</span>
-                            <span class="count">{library.framesOf(roll.id).length}</span>
+                            <span class="count">{library.frameCount(roll.id)}</span>
                         </button>
                     {/if}
                 {/each}

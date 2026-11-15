@@ -14,7 +14,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 
 use crate::catalog::{
-    find_moved, fingerprints, folder_images, only_missing, prepare_import, search_roots, Catalog, FilmStock, Gear, GearFields,
+    find_moved, fingerprints, folder_images, only_missing, prepare_import, search_roots, sort_by_file_name, Catalog, FilmStock, Gear, GearFields,
     ImageRecord, Place, Roll, RollGear, Skipped, Snapshot, StockFields, Target,
 };
 use crate::crop::CropPayload;
@@ -90,6 +90,11 @@ pub(crate) fn catalog_update_roll(
 }
 
 #[tauri::command]
+pub(crate) fn catalog_set_sort(state: tauri::State<'_, CatalogState>, place: Place, sort: String) -> Result<(), String> {
+    with_catalog(&state, |c| c.set_sort(place, &sort))
+}
+
+#[tauri::command]
 pub(crate) fn catalog_create_gear(state: tauri::State<'_, CatalogState>, gear: GearFields) -> Result<Gear, String> {
     with_catalog(&state, |c| c.create_gear(&gear))
 }
@@ -148,7 +153,9 @@ fn image_picker(app: &tauri::AppHandle) -> FileDialogBuilder<tauri::Wry> {
 
 fn pick_images(app: &tauri::AppHandle) -> Option<Vec<PathBuf>> {
     let picked = image_picker(app).blocking_pick_files()?;
-    Some(picked.into_iter().filter_map(|p| p.into_path().ok()).collect())
+    let mut paths: Vec<PathBuf> = picked.into_iter().filter_map(|p| p.into_path().ok()).collect();
+    sort_by_file_name(&mut paths);
+    Some(paths)
 }
 
 /// Imports `paths`, leaving the catalog free while the files are read and copied.

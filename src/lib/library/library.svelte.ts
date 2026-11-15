@@ -18,6 +18,7 @@ import { type Gear, type GearFields, type GearKind, type GearSlot, type RollGear
 import { type EditHistory, parseEditHistory, serializeEditHistory } from "$lib/types/editHistory";
 import { history } from "$lib/history/history.svelte";
 import * as api from "./catalogApi";
+import { type ImageOrder, LIBRARY_DEFAULT, ROLL_DEFAULT, naturalCompare, parseOrder, serializeOrder, sortImages } from "./imageOrder";
 import type { ImageRecord, LibraryRecord, Place, RollRecord } from "./catalogApi";
 import { createLogger } from "$lib/utils/log";
 
@@ -129,16 +130,25 @@ class Library {
         const id = this.view?.kind === "library" ? this.view.id : this.currentRoll?.libraryId;
         return this.libraries.find((l) => l.id === id) ?? null;
     });
-    /** A roll's frames, or a library's loose images; ungrouped, every roll's frames come first. */
+    /**
+     * A roll's frames, or a library's loose images. Ungrouped, every roll's frames
+     * come first, a roll at a time in the library's order, each in its own.
+     */
     shownImages = $derived.by(() => {
         const view = this.view;
         if (!view) return [];
         if (view.kind === "roll") return this.framesOf(view.id);
-        const loose = this.images.filter((i) => i.libraryId === view.id && i.rollId === null);
+        const loose = sortImages(this.images.filter((i) => i.libraryId === view.id && i.rollId === null), this.libraryOrder(view.id));
         if (settings.groupRolls) return loose;
-        return [...this.rollsOf(view.id).flatMap((r) => this.framesOf(r.id)), ...loose];
+        return [...this.orderedRollsOf(view.id).flatMap((r) => this.framesOf(r.id)), ...loose];
     });
-    shownRolls = $derived(this.view?.kind === "library" && settings.groupRolls ? this.rollsOf(this.view.id) : []);
+    shownRolls = $derived(this.view?.kind === "library" && settings.groupRolls ? this.orderedRollsOf(this.view.id) : []);
+    /** The order of what is being looked at, and whether it is a roll's. */
+    shownOrder = $derived<{ order: ImageOrder; forRoll: boolean } | null>(
+        this.view === null
+            ? null
+            : { order: this.view.kind === "roll" ? this.rollOrder(this.view.id) : this.libraryOrder(this.view.id), forRoll: this.view.kind === "roll" },
+    );
     selectedImages = $derived(
         this.selection.map((id) => this.images.find((i) => i.id === id)).filter((i): i is ImageRecord => !!i),
     );
@@ -155,9 +165,52 @@ class Library {
         return this.rolls.filter((r) => r.libraryId === libraryId);
     }
 
-    framesOf(rollId: number) {
-        return this.images.filter((i) => i.rollId === rollId).sort((a, b) => (a.frame ?? 0) - (b.frame ?? 0));
+    /** A library's rolls in its order: by name, or by when each was made. */
+    orderedRollsOf(libraryId: number) {
+        const order = this.libraryOrder(libraryId);
+        const sign = order.descending ? -1 : 1;
+        return this.rollsOf(libraryId).sort(
+            (a, b) => sign * (order.key === "date" ? a.created - b.created : naturalCompare(a.name, b.name)) || a.id - b.id,
+        );
     }
+
+    frameCount(rollId: number) {
+        return this.images.filter((i) => i.rollId === rollId).length;
+    }
+
+    framesOf(rollId: number) {
+        return sortImages(this.images.filter((i) => i.rollId === rollId), this.rollOrder(rollId));
+    }
+
+    rollOrder(rollId: number): ImageOrder {
+        return parseOrder(this.rolls.find((r) => r.id === rollId)?.sort, ROLL_DEFAULT, true);
+    }
+
+    libraryOrder(libraryId: number): ImageOrder {
+        return parseOrder(this.libraries.find((l) => l.id === libraryId)?.sort, LIBRARY_DEFAULT, false);
+    }
+
+    /** Orders what is being looked at, and keeps that order on its roll or library. */
+    setOrder = async (order: ImageOrder) => {
+        const place = this.place;
+        if (!place) return;
+        const put = (sort: string) => {
+            if (place.rollId !== null) this.rolls = this.rolls.map((r) => (r.id === place.rollId ? { ...r, sort } : r));
+            else this.libraries = this.libraries.map((l) => (l.id === place.libraryId ? { ...l, sort } : l));
+        };
+        const stored = () =>
+            (place.rollId !== null ? this.rolls.find((r) => r.id === place.rollId) : this.libraries.find((l) => l.id === place.libraryId))?.sort ?? "";
+        const before = stored();
+        const sort = serializeOrder(order);
+        put(sort);
+        try {
+            await api.setSort(place, sort);
+        } catch (e) {
+            // Back to the saved order, unless another has been picked meanwhile.
+            if (stored() === sort) put(before);
+            this.#fail("The order could not be saved", e);
+        }
+    };
 
     countIn(libraryId: number) {
         return this.images.filter((i) => i.libraryId === libraryId).length;
