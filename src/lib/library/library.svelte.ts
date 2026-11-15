@@ -33,6 +33,8 @@ const SAVE_DELAY_MS = 400;
 const THUMBNAIL_DELAY_MS = 1200;
 // How long the editor's plate takes to fade and blur in or out; matches Editor.svelte.
 const PLATE_FADE_MS = 350;
+// How long the editor's thumbnail stand-in takes to fade once the image is in; matches Editor.svelte.
+const PLACEHOLDER_FADE_MS = 450;
 // The least time between two looks for moved files on coming back to the window.
 const FOCUS_SEARCH_GAP_MS = 30_000;
 
@@ -112,8 +114,8 @@ class Library {
     showing = $state<"library" | "editor">("library");
     /** The editor's image is held back until it has been drawn. */
     canvasHidden = $state(false);
-    /** The thumbnail shown in the editor until the image has been drawn, with the size of its crop when known. */
-    placeholder = $state.raw<{ id: number; src: string; width: number | null; height: number | null } | null>(null);
+    /** The thumbnail shown in the editor until the image has been drawn, with what is known of its size. */
+    placeholder = $state.raw<{ id: number; src: string; size: { width: number; height: number } | null; unedited: boolean } | null>(null);
     /** The editor can be left only while no tool holds the image. */
     canLeave = $derived(!editor.isCropping && !editor.isRetouching);
     #moving = false;
@@ -862,9 +864,11 @@ class Library {
                 return [null, null];
             });
         void stored.then(([edit]) => {
-            if (edit && this.placeholder?.id === image.id) {
+            if (this.placeholder?.id !== image.id) return;
+            if (!edit) this.placeholder = { ...this.placeholder, unedited: true };
+            else {
                 const { width, height } = cropView(edit.crop, edit.source.width, edit.source.height);
-                this.placeholder = { ...this.placeholder, width, height };
+                this.placeholder = { ...this.placeholder, size: { width, height } };
             }
         });
         return editor.openLibraryImage(image, stored);
@@ -885,10 +889,11 @@ class Library {
         try {
             const same = editor.libraryImageId === id && !!editor.imagePayload;
             const thumb = this.thumbs.get(id);
-            this.placeholder = !same && thumb ? { id, src: thumb, width: null, height: null } : null;
+            this.placeholder = !same && thumb ? { id, src: thumb, size: null, unedited: false } : null;
             this.canvasHidden = !same;
             this.showing = "editor";
-            if (same) return;
+            // Nothing is opened, so nothing takes the image decoded ahead.
+            if (same) return this.#prefetch(null);
 
             if (!(await this.#openInEditor(image))) {
                 this.showing = "library";
@@ -901,6 +906,12 @@ class Library {
         } finally {
             this.canvasHidden = false;
             this.#moving = false;
+            const shown = this.placeholder;
+            if (shown) {
+                setTimeout(() => {
+                    if (this.placeholder === shown) this.placeholder = null;
+                }, PLACEHOLDER_FADE_MS);
+            }
         }
     };
 

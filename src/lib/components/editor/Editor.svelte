@@ -26,6 +26,10 @@
     import EditorToolbar from "./EditorToolbar.svelte";
     import EditorSideBar from "./EditorSideBar.svelte";
     import { library } from "$lib/library/library.svelte";
+    import { cropView } from "$lib/types/crop";
+
+    // Longest edge of a library thumbnail. Must match THUMBNAIL_EDGE in thumbnails.rs.
+    const THUMBNAIL_EDGE = 768;
 
     let {
         active = true,
@@ -45,11 +49,32 @@
 
     // The library thumbnail, blurred where the image will be, until the image has been drawn.
     let placeholder = $derived(library.placeholder);
-    // A fitted image is never shown past 1:1, so neither is its stand-in.
-    let placeholderSize = $derived.by(() => {
-        if (!placeholder?.width || !placeholder.height) return "";
-        const dpr = window.devicePixelRatio || 1;
-        return `max-width: ${placeholder.width / dpr}px; max-height: ${placeholder.height / dpr}px;`;
+    let slotWidth = $state(0);
+    let slotHeight = $state(0);
+    let thumbSize = $state.raw<{ src: string; width: number; height: number } | null>(null);
+
+    // What the thumbnail stands in for, in image pixels, once that is known.
+    let standsFor = $derived.by(() => {
+        if (!placeholder) return null;
+        const payload = editor.imagePayload;
+        if (payload && editor.libraryImageId === placeholder.id) {
+            const { width, height } = cropView(editor.edit.crop, payload.fullWidth, payload.fullHeight);
+            return { width, height };
+        }
+        if (placeholder.size) return placeholder.size;
+        // An unedited thumbnail under the thumbnail edge was never shrunk, so it is the image's own size.
+        const thumb = thumbSize?.src === placeholder.src ? thumbSize : null;
+        if (placeholder.unedited && thumb && Math.max(thumb.width, thumb.height) < THUMBNAIL_EDGE) return thumb;
+        return null;
+    });
+
+    // Fitted to the slot as the image is, and like it never past 1:1 once its size is known.
+    let placeholderStyle = $derived.by(() => {
+        const shape = standsFor ?? (thumbSize?.src === placeholder?.src ? thumbSize : null);
+        if (!shape || !slotWidth || !slotHeight) return "";
+        const oneToOne = standsFor ? 1 / (window.devicePixelRatio || 1) : Infinity;
+        const scale = Math.min(slotWidth / shape.width, slotHeight / shape.height, oneToOne);
+        return `width: ${shape.width * scale}px; height: ${shape.height * scale}px;`;
     });
 
     // The presets and the info panel take turns in one column. The last one
@@ -208,9 +233,24 @@
         </div>
     {/if}
     <div class="canvas-slot relative flex-1">
-        <div class="canvas-center absolute flex items-center justify-center" class:placeholding={!!placeholder}>
+        <div
+            class="canvas-center absolute flex items-center justify-center"
+            class:placeholding={!!placeholder}
+            bind:clientWidth={slotWidth}
+            bind:clientHeight={slotHeight}
+        >
             {#if placeholder}
-                <img class="placeholder" src={placeholder.src} alt="" draggable="false" style={placeholderSize} />
+                <img
+                    class="placeholder"
+                    src={placeholder.src}
+                    alt=""
+                    draggable="false"
+                    style={placeholderStyle}
+                    onload={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        thumbSize = { src: img.src, width: img.naturalWidth, height: img.naturalHeight };
+                    }}
+                />
             {/if}
             <PreviewImageCanvas
                 sliders={editor.shownSliders}
@@ -327,12 +367,12 @@
         filter: blur(16px);
         pointer-events: none;
         opacity: 0;
-        transition: opacity 0.2s ease 0.25s;
+        transition: opacity 0.2s ease 0.25s, width 0.25s ease, height 0.25s ease;
     }
 
     .app-shell.canvas-hidden .placeholder {
         opacity: 1;
-        transition: none;
+        transition: width 0.25s ease, height 0.25s ease;
     }
 
     .app-shell.away .canvas-center :global(canvas),

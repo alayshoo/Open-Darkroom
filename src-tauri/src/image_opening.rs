@@ -752,17 +752,28 @@ pub struct DecodedImage {
     pub prepared: PreparedImage,
 }
 
-pub fn decode_and_prepare(path: &std::path::Path) -> Result<DecodedImage, String> {
+/// Decodes the file and prepares it, unless `wanted` says between the two that it is no longer needed.
+pub fn decode_and_prepare_while(
+    path: &std::path::Path,
+    wanted: impl Fn() -> bool,
+) -> Result<Option<DecodedImage>, String> {
     let start = Instant::now();
     let (samples, channels, width, height, space) = decode_path(path)?;
     let decoded_ms = start.elapsed().as_millis();
+    if !wanted() {
+        return Ok(None);
+    }
     let prepared = prepare_image(&samples, width, height, channels, &space)?;
     log::debug!(
         "Decoded {} in {decoded_ms} ms, prepared in {} ms",
         path.display(),
         start.elapsed().as_millis() - decoded_ms
     );
-    Ok(DecodedImage { samples, channels, width, height, space, prepared })
+    Ok(Some(DecodedImage { samples, channels, width, height, space, prepared }))
+}
+
+pub fn decode_and_prepare(path: &std::path::Path) -> Result<DecodedImage, String> {
+    decode_and_prepare_while(path, || true)?.ok_or_else(|| "Decoding stopped".to_string())
 }
 
 /// Opens a library image, with the shooting info the catalog read when it was imported.
@@ -796,7 +807,7 @@ fn open_path(
     // is kept, since its thumbnail may still be rendering.
     let previous = state.lock().unwrap().take();
     if let Some(previous) = previous {
-        crate::thumbnails::keep_source(previous.thumbnail);
+        crate::thumbnails::keep_previous_open(previous.thumbnail);
     }
 
     let DecodedImage { samples, channels, width: full_width, height: full_height, space, mut prepared } =
@@ -859,6 +870,8 @@ fn open_path(
     Ok(Response::new(payload))
 }
 
+/// The open image's per-channel histograms, binned over only what a crop
+/// keeps, with any heal and clone strokes laid over it.
 #[tauri::command]
 pub(crate) async fn crop_histograms(
     state: tauri::State<'_, ImageState>,
